@@ -17,11 +17,10 @@ import { StorageService } from '../../core/services/storage.service';
         <header class="modal-header">
           <div>
             <span class="modal-eyebrow">Protobuf v3 Canonical JSON • biblememory.v1.UserDataBundle</span>
-            <h2 id="proto-sync-title" class="modal-title">ProtoJSON Local Store &amp; Cloud Sync Payload</h2>
+            <h2 id="proto-sync-title" class="modal-title">Active Memory Data File &amp; ProtoJSON Sync</h2>
             <p class="modal-subtitle">
-              All passages, parsed verses, Anki SM-2/FSRS schedules, and review logs are serialized using
-              canonical Protobuf v3 JSON (<code>proto/bible_memory.proto</code>) for local-first persistence
-              and zero-migration cloud account sync.
+              Connect a local <code>.proto.json</code> file so every passage, stitch count, and Anki
+              review auto-saves to disk in the background (<code>proto/bible_memory.proto</code>).
             </p>
           </div>
           <button
@@ -36,6 +35,69 @@ import { StorageService } from '../../core/services/storage.service';
         </header>
 
         <div class="modal-body">
+          <!-- Active Memory Data File Auto-Save Section -->
+          <section class="active-file-panel" data-testid="modal-active-data-file-panel">
+            <div class="active-file-header">
+              <div>
+                <span class="active-file-label">Background Auto-Save Target</span>
+                @if (storageService.activeFileName()) {
+                  <h3 class="active-file-title" data-testid="modal-active-file-name">
+                    🟢 {{ storageService.activeFileName() }}
+                  </h3>
+                  <p class="active-file-meta">
+                    @if (storageService.activeFileStatus() === 'needs-permission') {
+                      Permission needed to resume auto-saving to this file.
+                    } @else if (storageService.activeFileStatus() === 'saving') {
+                      Writing changes to disk...
+                    } @else {
+                      Auto-saving every change in the background
+                      @if (storageService.lastFileSavedAt()) {
+                        • Last saved {{ storageService.lastFileSavedAt() }}
+                      }
+                    }
+                  </p>
+                } @else {
+                  <h3 class="active-file-title disconnected-text">
+                    💾 No Active Memory Data File Selected
+                  </h3>
+                  <p class="active-file-meta">
+                    Choose an existing file or create a new <code>.proto.json</code> file to enable
+                    automatic background saving as you work.
+                  </p>
+                }
+              </div>
+
+              <div class="active-file-actions">
+                <button
+                  type="button"
+                  class="toolbar-btn"
+                  (click)="onSelectExistingFile()"
+                  data-testid="btn-modal-open-data-file"
+                >
+                  📂 Open Existing File...
+                </button>
+                <button
+                  type="button"
+                  class="toolbar-btn primary"
+                  (click)="onCreateNewFile()"
+                  data-testid="btn-modal-create-data-file"
+                >
+                  ✨ Create New Auto-Save File...
+                </button>
+                @if (storageService.activeFileName()) {
+                  <button
+                    type="button"
+                    class="toolbar-btn subtle"
+                    (click)="onDisconnectFile()"
+                    data-testid="btn-modal-disconnect-data-file"
+                  >
+                    Disconnect
+                  </button>
+                }
+              </div>
+            </div>
+          </section>
+
           <div class="schema-summary-bar">
             <div class="schema-pill">
               <span class="pill-label">Message</span>
@@ -107,7 +169,7 @@ import { StorageService } from '../../core/services/storage.service';
             </label>
             <textarea
               id="protojson-box"
-              rows="14"
+              rows="12"
               class="proto-textarea"
               spellcheck="false"
               [ngModel]="protoJsonText()"
@@ -222,6 +284,53 @@ import { StorageService } from '../../core/services/storage.service';
         display: flex;
         flex-direction: column;
         gap: 1rem;
+      }
+
+      .active-file-panel {
+        background: #faf7f0;
+        border: 1px solid #dfd7c6;
+        border-radius: 0.75rem;
+        padding: 0.95rem 1.1rem;
+      }
+
+      .active-file-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+
+      .active-file-label {
+        font-size: 0.71rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #0f766e;
+      }
+
+      .active-file-title {
+        margin: 0.15rem 0 0;
+        font-size: 0.98rem;
+        font-weight: 700;
+        color: #1c1917;
+      }
+
+      .disconnected-text {
+        color: #92400e;
+      }
+
+      .active-file-meta {
+        margin: 0.2rem 0 0;
+        font-size: 0.79rem;
+        color: #57534e;
+      }
+
+      .active-file-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
       }
 
       .schema-summary-bar {
@@ -411,6 +520,34 @@ export class ProtoSyncModalComponent implements OnInit {
 
   refreshFromStore(): void {
     this.protoJsonText.set(this.storageService.exportProtoJson(true));
+  }
+
+  async onSelectExistingFile(): Promise<void> {
+    const ok = await this.storageService.selectExistingDataFile();
+    if (ok) {
+      this.refreshFromStore();
+      this.statusType.set('success');
+      this.statusMessage.set(
+        `Connected active memory data file: ${this.storageService.activeFileName()}`
+      );
+    }
+  }
+
+  async onCreateNewFile(): Promise<void> {
+    const ok = await this.storageService.createNewDataFile();
+    if (ok) {
+      this.refreshFromStore();
+      this.statusType.set('success');
+      this.statusMessage.set(
+        `Created and connected active memory data file: ${this.storageService.activeFileName()}`
+      );
+    }
+  }
+
+  onDisconnectFile(): void {
+    this.storageService.disconnectDataFile();
+    this.statusType.set('success');
+    this.statusMessage.set('Disconnected active memory data file.');
   }
 
   async copyProtoJson(): Promise<void> {

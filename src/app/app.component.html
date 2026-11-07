@@ -1,6 +1,6 @@
 <div class="app-shell">
   <header class="app-topbar" data-testid="app-topbar">
-    <div class="brand-group" (click)="returnToDashboard()" role="button" tabindex="0">
+    <div class="brand-group" (click)="openDashboardTab('queue')" role="button" tabindex="0">
       <div class="brand-logo" aria-hidden="true">✦</div>
       <div>
         <h1 class="brand-title">Selah Memory</h1>
@@ -12,20 +12,29 @@
       <button
         type="button"
         class="topbar-btn"
-        [class.active]="activeView() === 'dashboard'"
-        (click)="returnToDashboard()"
-        data-testid="nav-dashboard"
+        [class.active]="activeView() === 'dashboard' && dashboardTab() === 'queue'"
+        (click)="openDashboardTab('queue')"
+        data-testid="nav-queue"
       >
-        Deck ({{ storageService.stats().total }})
+        Memorizing ({{ storageService.stats().learningCount }})
       </button>
       <button
         type="button"
         class="topbar-btn"
-        [class.active]="activeView() === 'study'"
-        (click)="startDueSession()"
-        data-testid="nav-study"
+        [class.active]="activeView() === 'dashboard' && dashboardTab() === 'due'"
+        (click)="openDashboardTab('due')"
+        data-testid="nav-due"
       >
-        Study Due ({{ storageService.stats().due }})
+        Due ({{ storageService.dueDeckItems().length }})
+      </button>
+      <button
+        type="button"
+        class="topbar-btn"
+        [class.active]="activeView() === 'dashboard' && dashboardTab() === 'active'"
+        (click)="openDashboardTab('active')"
+        data-testid="nav-active"
+      >
+        Memorized ({{ storageService.stats().reviewCount }})
       </button>
       <button
         type="button"
@@ -49,10 +58,20 @@
   <main class="app-main">
     @if (activeView() === 'dashboard') {
       <app-deck-dashboard
+        [activeTab]="dashboardTab()"
+        (activeTabChange)="dashboardTab.set($event)"
         (startDueSession)="startDueSession()"
         (practiceSingleItem)="practiceSingleItem($event)"
+        (startMemorizeFlow)="onStartMemorizeFlow($event)"
         (openAddPassage)="showAddPassageModal.set(true)"
         (openProtoSync)="showProtoSyncModal.set(true)"
+      />
+    } @else if (activeView() === 'first-letter-page') {
+      <app-first-letter-study-page
+        [item]="currentStudyItem()"
+        [stitchedVerseCount]="currentStitchedVerseCount()"
+        (backToCard)="activeView.set('study')"
+        (backToDeck)="returnToDashboard()"
       />
     } @else {
       @if (currentStudyItem(); as item) {
@@ -60,8 +79,11 @@
           [item]="item"
           [queuePosition]="currentQueueIndex() + 1"
           [queueTotal]="studyQueueIds().length"
+          [stitchedVerseCount]="currentStitchedVerseCount()"
+          (stitchedVerseCountChange)="onStitchedVerseCountChange($event)"
           (rated)="onCardRated($event)"
           (backToDeck)="returnToDashboard()"
+          (openStudyPage)="openFirstLetterStudyPage($event)"
         />
       } @else {
         <div class="empty-study-state" data-testid="empty-study-state">

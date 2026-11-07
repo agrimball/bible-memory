@@ -2,22 +2,71 @@
 /**
  * Automated Playwright Screenshot & E2E Verification Runner for Bible Memory App
  *
- * Verifies all 8 core user journeys against the running Angular 19 app and saves
+ * Verifies all core user journeys against the running Angular 19 app and saves
  * high-resolution PNG screenshots to `screenshot-tests/output/` and `screenshot-tests/`.
  */
 
 import { chromium } from 'playwright-core';
 import fs from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const APP_URL = process.env.APP_URL || 'http://127.0.0.1:4200';
+const DEFAULT_URL = process.env.APP_URL || 'http://127.0.0.1:4200';
+const DIST_DIR = path.resolve(__dirname, '..', 'dist', 'bible-memory', 'browser');
 const OUTPUT_DIR = path.join(__dirname, 'output');
 const REPORT_PATH = path.join(__dirname, 'test-report.json');
+
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+};
+
+async function startStaticDistServer(preferredPort = 0) {
+  const server = http.createServer(async (req, res) => {
+    try {
+      const reqUrl = new URL(req.url || '/', 'http://127.0.0.1');
+      let relPath = decodeURIComponent(reqUrl.pathname);
+      if (relPath === '/' || relPath === '') {
+        relPath = '/index.html';
+      }
+      let filePath = path.join(DIST_DIR, relPath);
+      let data;
+      try {
+        data = await fs.readFile(filePath);
+      } catch {
+        filePath = path.join(DIST_DIR, 'index.html');
+        data = await fs.readFile(filePath);
+      }
+      const ext = path.extname(filePath).toLowerCase();
+      res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] || 'application/octet-stream' });
+      res.end(data);
+    } catch (err) {
+      res.writeHead(500);
+      res.end(String(err));
+    }
+  });
+
+  return new Promise((resolve, reject) => {
+    server.on('error', reject);
+    server.listen(preferredPort, '127.0.0.1', () => {
+      const addr = server.address();
+      resolve({
+        server,
+        url: `http://127.0.0.1:${addr.port}`,
+      });
+    });
+  });
+}
 
 function assertCondition(condition, message) {
   if (!condition) {
@@ -58,11 +107,39 @@ async function runScreenshotSuite() {
   const consoleErrors = [];
   const startedAt = new Date().toISOString();
 
-  console.log(`Launching headless Chromium against ${APP_URL} ...`);
-  const chromePath = process.env.CHROME_PATH || (existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : undefined);
+  const candidatePaths = [
+    process.env.CHROME_PATH,
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+  ].filter(Boolean);
+
+  let executablePath;
+  for (const p of candidatePaths) {
+    try {
+      await fs.access(p);
+      executablePath = p;
+      break;
+    } catch {
+      // try next
+    }
+  }
+
+  let staticServerInfo = null;
+  let APP_URL = DEFAULT_URL;
+
+  if (!process.env.APP_URL) {
+    staticServerInfo = await startStaticDistServer(0);
+    APP_URL = staticServerInfo.url;
+  }
+
+  console.log(
+    `Launching headless Chromium (${executablePath || 'default'}) against ${APP_URL} ...`
+  );
   const browser = await chromium.launch({
     headless: true,
-    executablePath: chromePath,
+    ...(executablePath ? { executablePath } : {}),
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -85,56 +162,86 @@ async function runScreenshotSuite() {
     });
 
     // =========================================================================
-    // 1. 01-deck-dashboard.png
+    // 1a. 01-deck-dashboard.png (Home Page: Active Memory Data File Bar,
+    //     "Currently Memorizing", and "Saved to Memorize Next")
     // =========================================================================
-    console.log('Step 1: Navigating to Deck Dashboard...');
+    console.log('Step 1a: Navigating to Home Page (Currently Memorizing & Saved to Memorize Next)...');
     await page.goto(APP_URL, { waitUntil: 'networkidle' });
+    await page.locator('[data-testid="active-data-file-bar"]').waitFor({ state: 'visible', timeout: 15000 });
+    await page.locator('[data-testid="btn-open-data-file"]').waitFor({ state: 'visible', timeout: 15000 });
+    await page.locator('[data-testid="btn-create-data-file"]').waitFor({ state: 'visible', timeout: 15000 });
     await page.locator('[data-testid="deck-stats-grid"]').waitFor({ state: 'visible', timeout: 15000 });
-    await page.locator('[data-testid="passage-deck-list"]').waitFor({ state: 'visible', timeout: 15000 });
+    await page.locator('[data-testid="tab-queue"]').waitFor({ state: 'visible', timeout: 15000 });
+    await page.locator('[data-testid="currently-memorizing-section"]').waitFor({ state: 'visible', timeout: 15000 });
+    await page.locator('[data-testid="saved-backlog-section"]').waitFor({ state: 'visible', timeout: 15000 });
 
-    const deckListText = await page.locator('[data-testid="passage-deck-list"]').innerText();
+    const memorizingText = await page.locator('[data-testid="currently-memorizing-section"]').innerText();
     assertCondition(
-      deckListText.includes('Romans 8:1-4') || deckListText.includes('Romans 8'),
-      'Expected starter passage Romans 8:1-4 on Deck Dashboard'
+      memorizingText.includes('Philippians 4:6-7'),
+      'Expected Philippians 4:6-7 in Currently Memorizing section on Home Page'
     );
+
+    const savedBacklogText = await page.locator('[data-testid="saved-backlog-section"]').innerText();
     assertCondition(
-      deckListText.includes('Psalm 23:1-6') || deckListText.includes('Psalm 23'),
-      'Expected starter passage Psalm 23:1-6 on Deck Dashboard'
+      savedBacklogText.includes('Romans 8:1-4') && savedBacklogText.includes('Psalm 23:1-6'),
+      'Expected Romans 8:1-4 and Psalm 23:1-6 in Saved to Memorize Next section on Home Page'
     );
 
     await captureStepScreenshot(page, '01-deck-dashboard.png', stepResults, {
-      step: 1,
-      name: 'Deck Dashboard & Starter Passages',
+      step: '1a',
+      name: 'Home Dashboard: Active Memory Data File Bar, Currently Memorizing & Saved to Memorize Next',
       assertions: [
-        '[data-testid="deck-stats-grid"] is visible',
-        '[data-testid="passage-deck-list"] is visible',
-        'Starter passages (Romans 8:1-4, Psalm 23:1-6) and Anki due counts are displayed',
+        '[data-testid="active-data-file-bar"] with [data-testid="btn-open-data-file"] and [data-testid="btn-create-data-file"] is visible',
+        '[data-testid="currently-memorizing-section"] displays active learning passages (Philippians 4:6-7)',
+        '[data-testid="saved-backlog-section"] displays saved backlog passages (Romans 8:1-4, Psalm 23:1-6)',
       ],
     });
 
     // =========================================================================
-    // 2. 02-smart-copy-paste-modal.png & 02-copy-paste-highlight-verse-numbers.png
+    // 1b. 01b-due-page.png (Remember-Me Style Due Page)
     // =========================================================================
-    console.log('Step 2: Testing Smart Copy-Paste Modal (Highlight & Remove Verse Numbers)...');
+    console.log('Step 1b: Switching to Due for Review Page...');
+    await page.locator('[data-testid="tab-due"]').click();
+    await page.locator('[data-testid="due-page-section"]').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('[data-testid="btn-study-due"]').waitFor({ state: 'visible', timeout: 10000 });
+
+    const dueListText = await page.locator('[data-testid="due-page-section"]').innerText();
+    assertCondition(
+      dueListText.includes('Philippians 4:6-7') || dueListText.includes('John 1:1-5'),
+      'Expected active due passages (Philippians 4:6-7, John 1:1-5) on Due Page'
+    );
+
+    await captureStepScreenshot(page, '01b-due-page.png', stepResults, {
+      step: '1b',
+      name: 'Remember-Me Style Due for Review Page',
+      assertions: [
+        '[data-testid="tab-due"] opens [data-testid="due-page-section"]',
+        '[data-testid="btn-study-due"] is visible',
+        'Active due cards (Philippians 4:6-7, John 1:1-5) are listed separately from the Saved backlog',
+      ],
+    });
+
+    // Switch back to Home (tab-queue)
+    await page.locator('[data-testid="tab-queue"]').click();
+    await page.locator('[data-testid="queue-page-section"]').waitFor({ state: 'visible', timeout: 10000 });
+
+    // =========================================================================
+    // 2. 02-copy-paste-highlight-verse-numbers.png & 02-smart-copy-paste-modal.png
+    // =========================================================================
+    console.log('Step 2: Testing Copy-Paste Modal (Missing Verse Numbers Warning, Highlight & Strip Verse Numbers + Remembered Boundaries)...');
     await page.locator('[data-testid="btn-open-add-passage"]').click();
-    await page.locator('[data-testid="textarea-passage-raw"]').waitFor({ state: 'visible', timeout: 10000 });
+    const rawTextarea = page.locator('[data-testid="textarea-passage-raw"]');
+    await rawTextarea.waitFor({ state: 'visible', timeout: 10000 });
 
-    const pasteExampleBtn = page.locator('[data-testid="btn-paste-example"]');
-    if ((await pasteExampleBtn.count()) > 0 && (await pasteExampleBtn.first().isVisible())) {
-      await pasteExampleBtn.first().click();
-    } else {
-      const refInput = page.locator('[data-testid="input-passage-reference"]');
-      if ((await refInput.count()) > 0) {
-        await refInput.fill('Philippians 4:6-7');
-      }
-      await page
-        .locator('[data-testid="textarea-passage-raw"]')
-        .fill(
-          '6 do not be anxious about anything, but in everything by prayer and supplication with thanksgiving let your requests be made known to God. 7 And the peace of God, which surpasses all understanding, will guard your hearts and your minds in Christ Jesus.'
-        );
-    }
+    // Verify warning-no-verse-numbers appears when plain text without verse numbers is entered
+    await rawTextarea.fill('For by grace you have been saved through faith. And this is not your own doing; it is the gift of God.');
+    await page.locator('[data-testid="warning-no-verse-numbers"]').waitFor({ state: 'visible', timeout: 10000 });
 
-    // Click btn-highlight-verse-numbers and verify verse-number-highlight-preview is visible
+    // Now click Paste Example (Isaiah 40:28-31 with [28]..[31])
+    await page.locator('[data-testid="btn-paste-example"]').click();
+    await page.locator('[data-testid="warning-no-verse-numbers"]').waitFor({ state: 'hidden', timeout: 5000 });
+
+    // Click Highlight Verse Numbers and verify highlight preview box
     const highlightBtn = page.locator('[data-testid="btn-highlight-verse-numbers"]');
     await highlightBtn.waitFor({ state: 'visible', timeout: 10000 });
     await highlightBtn.click();
@@ -144,129 +251,157 @@ async function runScreenshotSuite() {
 
     const previewLocator = page.locator('[data-testid="parsed-verses-preview"]');
     await previewLocator.waitFor({ state: 'visible', timeout: 10000 });
-    const previewText = await previewLocator.innerText();
-    assertCondition(previewText.trim().length > 20, 'Expected parsed verses preview to show split individual verses');
+    const highlightedMarksCount = await page.locator('[data-testid="highlighted-verse-num"]').count();
+    assertCondition(
+      highlightedMarksCount >= 4,
+      `Expected at least 4 highlighted verse numbers in Isaiah 40:28-31 example, found ${highlightedMarksCount}`
+    );
 
     await captureStepScreenshot(page, '02-copy-paste-highlight-verse-numbers.png', stepResults, {
-      step: 2,
-      name: 'Smart Copy-Paste Modal - Highlighted Verse Numbers Preview',
+      step: '2a',
+      name: 'Copy-Paste Modal - Highlighted Verse Numbers Confirmation Preview',
       assertions: [
-        '[data-testid="btn-open-add-passage"] opens modal',
-        '[data-testid="btn-highlight-verse-numbers"] triggers verse number highlighting',
-        '[data-testid="verse-number-highlight-preview"] is visible showing highlighted verse numbers',
-        '[data-testid="parsed-verses-preview"] splits multi-verse passage into individual verses',
+        '[data-testid="warning-no-verse-numbers"] warns when verse numbers are absent',
+        '[data-testid="btn-paste-example"] populates multi-verse scripture passage',
+        '[data-testid="btn-highlight-verse-numbers"] reveals [data-testid="verse-number-highlight-preview"]',
+        'Highlighted verse numbers are marked for deletion while preserving verse boundaries',
       ],
     });
 
-    await captureStepScreenshot(page, '02-smart-copy-paste-modal.png', stepResults, {
-      step: 2,
-      name: 'Smart Copy-Paste Modal with Live Verse Splitting Preview',
-      assertions: [
-        '[data-testid="btn-open-add-passage"] opens modal',
-        '[data-testid="verse-number-highlight-preview"] and [data-testid="parsed-verses-preview"] are visible',
-      ],
-    });
-
-    // Confirm removing the highlighted verse numbers before saving the passage
+    // Confirm removing the highlighted verse numbers and verify remembered-boundaries-badge
     const removeVerseNumbersBtn = page.locator('[data-testid="btn-remove-verse-numbers"]');
     await removeVerseNumbersBtn.waitFor({ state: 'visible', timeout: 10000 });
     await removeVerseNumbersBtn.click();
 
+    const rememberedBadge = page.locator('[data-testid="remembered-boundaries-badge"]');
+    await rememberedBadge.waitFor({ state: 'visible', timeout: 10000 });
+    assertCondition(
+      (await page.locator('[data-testid="warning-no-verse-numbers"]').count()) === 0,
+      'Expected warning-no-verse-numbers NOT to appear after stripping verse numbers because boundaries are remembered'
+    );
+    const parsedVerseItemsCount = await page.locator('[data-testid^="preview-verse-"]').count();
+    assertCondition(
+      parsedVerseItemsCount === 4,
+      `Expected 4 remembered verse boundaries after stripping verse numbers, found ${parsedVerseItemsCount}`
+    );
+
+    await captureStepScreenshot(page, '02-smart-copy-paste-modal.png', stepResults, {
+      step: '2b',
+      name: 'Copy-Paste Modal - Stripped Verse Numbers with Remembered Verse Boundaries',
+      assertions: [
+        '[data-testid="btn-remove-verse-numbers"] strips verse numbers from raw textarea',
+        '[data-testid="remembered-boundaries-badge"] confirms exact verse boundaries are remembered',
+        '[data-testid="parsed-verses-preview"] preserves all 4 individual verses for +1v study',
+      ],
+    });
+
     await page.locator('[data-testid="btn-save-passage"]').click();
-    await page.locator('[data-testid="passage-deck-list"]').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('[data-testid="queue-page-section"]').waitFor({ state: 'visible', timeout: 10000 });
 
     // =========================================================================
-    // 3. 03-card-front-initial.png
+    // 3. 03-card-front-initial.png (Flashcard Front with Compact "Aa Study"
+    //    Header Button & 2-Step Daily Stitching Toggle)
     // =========================================================================
-    console.log('Step 3: Opening First Flashcard Front...');
-    const studyCard0 = page.locator('[data-testid="btn-study-card-0"]');
-    if ((await studyCard0.count()) > 0 && (await studyCard0.first().isVisible())) {
-      await studyCard0.first().click();
-    } else {
-      await page.locator('[data-testid="btn-study-due"]').first().click();
-    }
+    console.log('Step 3: Clicking Passage on Home Page -> Flashcard Front with 2-Step Stitching & Compact "Aa Study"...');
+    await page.locator('[data-testid="btn-study-card-0"]').first().click();
 
+    await page.locator('[data-testid="card-front-view"]').waitFor({ state: 'visible', timeout: 10000 });
     await page.locator('[data-testid="card-reference"]').waitFor({ state: 'visible', timeout: 10000 });
     await page.locator('[data-testid="btn-enter-study"]').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('[data-testid="stitch-mode-toggle"]').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('[data-testid="btn-mode-new-verse"]').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('[data-testid="btn-mode-stitch-block"]').waitFor({ state: 'visible', timeout: 10000 });
     await page.locator('[data-testid="btn-record-voice"]').waitFor({ state: 'visible', timeout: 10000 });
     await page.locator('[data-testid="btn-flip-card"]').waitFor({ state: 'visible', timeout: 10000 });
 
-    const cardRefText = await page.locator('[data-testid="card-reference"]').innerText();
-    assertCondition(cardRefText.trim().length > 0, 'Expected card reference title to be non-empty');
+    // Ensure the first-letter study panel is NOT rendered inline on the card front
+    const inlineStudyCount = await page.locator('[data-testid="first-letter-study-panel"]').count();
+    assertCondition(
+      inlineStudyCount === 0,
+      'Expected first-letter study panel to live on its own separate page, not inline on the card front'
+    );
 
     await captureStepScreenshot(page, '03-card-front-initial.png', stepResults, {
       step: 3,
-      name: 'Flashcard Front Initial View',
+      name: 'Flashcard Front View with Compact "Aa Study" Button & 2-Step Daily Stitching Toggle',
       assertions: [
-        '[data-testid="card-reference"] is visible',
-        '[data-testid="btn-enter-study"] is visible',
-        '[data-testid="btn-record-voice"] is visible',
-        '[data-testid="btn-flip-card"] is visible',
+        '[data-testid="card-front-view"] and [data-testid="card-reference"] are visible',
+        'Compact [data-testid="btn-enter-study"] ("Aa Study") is in the card header',
+        '[data-testid="stitch-mode-toggle"] with [data-testid="btn-mode-new-verse"] and [data-testid="btn-mode-stitch-block"] is visible',
+        '[data-testid="btn-record-voice"] and [data-testid="btn-flip-card"] are visible',
       ],
     });
 
     // =========================================================================
-    // 4. 04-study-mode-first-letters-verse1.png
+    // 4 & 5. Separate First-Letter Study Page
+    //    - 04-study-mode-first-letters-verse1.png
+    //    - 05-study-mode-plus-1w-and-plus-1v.png
     // =========================================================================
-    console.log('Step 4: Entering First-Letter Study Mode (Verse 1 Only)...');
+    console.log('Step 4: Opening Separate First-Letter Study Page via "Aa Study" Button...');
+    // Ensure all verses are included for multi-verse +1v study progression
+    const stitchAllBtn = page.locator('[data-testid="btn-stitch-all-verses"]');
+    if ((await stitchAllBtn.count()) > 0 && (await stitchAllBtn.isVisible())) {
+      await stitchAllBtn.click();
+    }
     await page.locator('[data-testid="btn-enter-study"]').click();
+
+    const studyPage = page.locator('[data-testid="first-letter-study-page"]');
+    await studyPage.waitFor({ state: 'visible', timeout: 10000 });
     const studyPanel = page.locator('[data-testid="first-letter-study-panel"]');
     await studyPanel.waitFor({ state: 'visible', timeout: 10000 });
     await page.locator('[data-testid="btn-reveal-1w"]').waitFor({ state: 'visible', timeout: 10000 });
     await page.locator('[data-testid="btn-reveal-1v"]').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('[data-testid="btn-back-to-card"]').waitFor({ state: 'visible', timeout: 10000 });
 
-    // Verify Verse 1 is visible and Verse 2 is not yet shown if verse testids are present
-    const verse2Row = page.locator('[data-testid="study-verse-row-1"], [data-testid="study-verse-2"]');
-    if ((await verse2Row.count()) > 0) {
-      assertCondition(
-        !(await verse2Row.first().isVisible()),
-        'Expected Verse 2 not to be visible before Verse 1 is completed'
-      );
-    }
+    const visibleVerseBlocksInitial = await page.locator('.study-verse-block').count();
+    assertCondition(
+      visibleVerseBlocksInitial === 1,
+      `Expected only Verse 1 to be visible initially on Study Page, found ${visibleVerseBlocksInitial}`
+    );
 
     await captureStepScreenshot(page, '04-study-mode-first-letters-verse1.png', stepResults, {
       step: 4,
-      name: 'First-Letter Study Mode - Verse 1 Only with +1w and +1v Controls',
+      name: 'Separate First-Letter Study Page - Verse 1 Only with +1w, +1v, and Exit to Flashcard',
       assertions: [
-        '[data-testid="first-letter-study-panel"] is visible with Verse 1 first letters only',
-        '[data-testid="btn-reveal-1w"] (+1w) is visible',
-        '[data-testid="btn-reveal-1v"] (+1v) is visible',
+        'Clicking [data-testid="btn-enter-study"] opens separate [data-testid="first-letter-study-page"]',
+        '[data-testid="first-letter-study-panel"] shows first letters for Verse 1 only',
+        '[data-testid="btn-reveal-1w"] (+1w), [data-testid="btn-reveal-1v"] (+1v), and [data-testid="btn-back-to-card"] ("✕ Exit to Flashcard") are visible',
       ],
     });
 
-    // =========================================================================
-    // 5. 05-study-mode-plus-1w-and-plus-1v.png
-    // =========================================================================
-    console.log('Step 5: Exercising +1w (x3), +1v (completing Verse 1 -> showing Verse 2), and +1w (x2 on Verse 2)...');
+    console.log('Step 5: Testing +1w (x3), +1v (completing Verse 1 -> revealing Verse 2 first letters), and +1w (x2 on Verse 2)...');
     const btn1w = page.locator('[data-testid="btn-reveal-1w"]');
     const btn1v = page.locator('[data-testid="btn-reveal-1v"]');
 
     const beforeRevealText = await studyPanel.innerText();
-    // Click +1w 3 times on Verse 1
     await btn1w.click();
     await btn1w.click();
     await btn1w.click();
+    await page.waitForTimeout(250);
     const after3WordsText = await studyPanel.innerText();
     assertCondition(
       after3WordsText !== beforeRevealText,
       'Expected clicking +1w 3 times to reveal the first 3 words of Verse 1'
     );
 
-    // Click +1v to reveal the rest of Verse 1 and automatically surface Verse 2 in first-letter mode
+    // Click +1v to complete Verse 1 and automatically display Verse 2 in first-letter mode
     await btn1v.click();
-    const after1vText = await studyPanel.innerText();
+    await page.waitForTimeout(200);
+    const visibleVerseBlocksAfter1v = await page.locator('.study-verse-block').count();
     assertCondition(
-      after1vText.length > after3WordsText.length,
-      'Expected clicking +1v to complete Verse 1 and reveal Verse 2 in first-letter mode'
+      visibleVerseBlocksAfter1v === 2,
+      `Expected Verse 2 to appear in first-letter mode after clicking +1v on Verse 1, found ${visibleVerseBlocksAfter1v} verse blocks`
     );
 
+    const after1vText = await studyPanel.innerText();
     // Click +1w twice on Verse 2
     await btn1w.click();
     await btn1w.click();
+    await page.waitForTimeout(200);
     const afterVerse2TwoWordsText = await studyPanel.innerText();
     assertCondition(
       afterVerse2TwoWordsText !== after1vText,
-      'Expected clicking +1w twice on Verse 2 to reveal 2 words of Verse 2'
+      'Expected clicking +1w twice on Verse 2 to reveal the first 2 words of Verse 2'
     );
 
     await captureStepScreenshot(page, '05-study-mode-plus-1w-and-plus-1v.png', stepResults, {
@@ -274,15 +409,19 @@ async function runScreenshotSuite() {
       name: 'Progressive Reveal (+1w and +1v) Completing Verse 1 and Advancing to Verse 2 First Letters',
       assertions: [
         'Clicking +1w 3 times reveals first 3 words of Verse 1',
-        'Clicking +1v reveals remainder of Verse 1 and displays Verse 2 in first-letter mode below Verse 1',
-        'Clicking +1w twice on Verse 2 reveals first 2 words of Verse 2 while remaining words stay as first letters',
+        'Clicking +1v completes Verse 1 and displays Verse 2 in first-letter mode right below Verse 1',
+        'Clicking +1w twice on Verse 2 reveals 2 words of Verse 2 while remaining words stay as first letters',
       ],
     });
+
+    // Exit the Study Page back to the Flashcard Front
+    await page.locator('[data-testid="btn-back-to-card"]').click();
+    await page.locator('[data-testid="card-front-view"]').waitFor({ state: 'visible', timeout: 10000 });
 
     // =========================================================================
     // 6. 06-voice-recording-active.png
     // =========================================================================
-    console.log('Step 6: Starting Voice Recording on Card Front...');
+    console.log('Step 6: Starting Voice Recording on Flashcard Front...');
     await page.locator('[data-testid="btn-record-voice"]').click();
     await page
       .locator('[data-testid="recording-active-indicator"]')
@@ -293,7 +432,8 @@ async function runScreenshotSuite() {
       step: 6,
       name: 'Active Voice Recording on Flashcard Front',
       assertions: [
-        '[data-testid="btn-record-voice"] starts voice recording',
+        '[data-testid="btn-back-to-card"] exits Study Page back to [data-testid="card-front-view"]',
+        '[data-testid="btn-record-voice"] starts voice recording on the card front',
         '[data-testid="recording-active-indicator"] is active after ~1.2s of recording',
       ],
     });
@@ -331,7 +471,7 @@ async function runScreenshotSuite() {
         name: 'Card Back View with Auto Voice Playback, Full Passage Read-Along, and Anki Grading Bar',
         assertions: [
           '[data-testid="card-back-view"] is visible',
-          '[data-testid="voice-playback-bar"] is visible and playing recorded audio',
+          '[data-testid="voice-playback-bar"] is visible and auto-playing recorded recitation',
           '[data-testid="card-back-full-text"] displays full passage text',
           '[data-testid="anki-grading-bar"] displays Again / Hard / Good / Easy buttons',
         ],
@@ -344,21 +484,9 @@ async function runScreenshotSuite() {
     console.log('Step 8: Grading Card (Good) and Inspecting biblememory.v1 ProtoJSON Wire Format Modal...');
     await page.locator('[data-testid="btn-grade-good"]').click();
 
-    // Return to dashboard if grading advanced to the next due card in the session
-    const protoSyncBtn = page.locator('[data-testid="btn-open-proto-sync"]');
-    if (!(await protoSyncBtn.isVisible())) {
-      const backBtn = page.locator(
-        '[data-testid="btn-back-to-deck"], [data-testid="btn-exit-study"], [data-testid="btn-close-study"]'
-      );
-      if ((await backBtn.count()) > 0 && (await backBtn.first().isVisible())) {
-        await backBtn.first().click();
-      } else {
-        await page.goto(APP_URL, { waitUntil: 'networkidle' });
-      }
-    }
-
-    await protoSyncBtn.waitFor({ state: 'visible', timeout: 10000 });
-    await protoSyncBtn.click();
+    const protoSyncBtn = page.locator('[data-testid="btn-open-proto-sync"], [data-testid="nav-proto-sync"]');
+    await protoSyncBtn.first().waitFor({ state: 'visible', timeout: 10000 });
+    await protoSyncBtn.first().click();
 
     const protoTextarea = page.locator('[data-testid="protojson-textarea"]');
     await protoTextarea.waitFor({ state: 'visible', timeout: 10000 });
@@ -405,6 +533,9 @@ async function runScreenshotSuite() {
     console.log(`\nAll ${stepResults.length} screenshot tests PASSED! Report written to ${REPORT_PATH}`);
   } finally {
     await browser.close();
+    if (staticServerInfo?.server) {
+      staticServerInfo.server.close();
+    }
   }
 }
 
@@ -412,7 +543,7 @@ runScreenshotSuite().catch(async (err) => {
   console.error('\n[FAIL] Screenshot test suite failed:', err);
   const failureReport = {
     suite: 'bible-memory-playwright-screenshot-tests',
-    appUrl: APP_URL,
+    appUrl: DEFAULT_URL,
     finishedAt: new Date().toISOString(),
     status: 'FAILED',
     error: err?.stack || String(err),

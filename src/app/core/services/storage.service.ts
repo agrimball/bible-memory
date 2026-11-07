@@ -13,6 +13,19 @@ import { PassageParserService } from './passage-parser.service';
 import { SrsService } from './srs.service';
 
 export const STORAGE_KEY = 'bible_memory_protojson_v1';
+export const VIRTUAL_FILE_META_KEY = 'bible_memory_active_virtual_file_v1';
+export const VIRTUAL_FILE_CONTENT_KEY = 'bible_memory_active_virtual_file_content_v1';
+const FILE_HANDLE_DB_NAME = 'bible_memory_file_handle_db';
+const FILE_HANDLE_STORE_NAME = 'handles';
+const FILE_HANDLE_KEY = 'active_memory_file_handle';
+
+export type ActiveFileStatus =
+  | 'none'
+  | 'connected'
+  | 'saving'
+  | 'saved'
+  | 'needs-permission'
+  | 'error';
 
 export interface DeckItem {
   passage: Passage;
@@ -23,9 +36,28 @@ export interface DeckItem {
 export interface DeckStats {
   total: number;
   due: number;
+  queuedCount: number;
   newCount: number;
   learningCount: number;
   reviewCount: number;
+  activeCount: number;
+}
+
+interface FileSystemHandlePermissionDescriptor {
+  mode?: 'read' | 'readwrite';
+}
+
+interface BrowserFileSystemWritableFileStream {
+  write(data: string | Blob | BufferSource): Promise<void>;
+  close(): Promise<void>;
+}
+
+interface BrowserFileSystemFileHandle {
+  readonly name: string;
+  getFile(): Promise<File>;
+  createWritable(): Promise<BrowserFileSystemWritableFileStream>;
+  queryPermission?(descriptor?: FileSystemHandlePermissionDescriptor): Promise<PermissionState>;
+  requestPermission?(descriptor?: FileSystemHandlePermissionDescriptor): Promise<PermissionState>;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -36,6 +68,17 @@ export class StorageService {
   readonly passages = signal<Passage[]>([]);
   readonly flashcards = signal<Flashcard[]>([]);
   readonly reviewLogs = signal<ReviewLog[]>([]);
+
+  // Active Memory Data File signals
+  readonly activeFileName = signal<string | null>(null);
+  readonly activeFileStatus = signal<ActiveFileStatus>('none');
+  readonly lastFileSavedAt = signal<string | null>(null);
+  readonly fileSyncError = signal<string | null>(null);
+
+  private fileHandle: BrowserFileSystemFileHandle | null = null;
+  private isSimulatedFile = false;
+  private isWritingFile = false;
+  private pendingWriteRequested = false;
 
   readonly deckItems = computed<DeckItem[]>(() => {
     const passageList = this.passages();
@@ -52,10 +95,11 @@ export class StorageService {
     for (const passage of passageList) {
       const card = cardByPassageId.get(passage.id);
       if (card) {
+        const isActive = card.state !== CardState.CARD_STATE_NEW;
         items.push({
           passage,
           card,
-          isDue: this.srs.isDue(card, now),
+          isDue: isActive && this.srs.isDue(card, now),
         });
       }
     }
@@ -63,8 +107,25 @@ export class StorageService {
     return items;
   });
 
+  /**
+   * Passages in the user's Memorization Queue (not yet started: state === CARD_STATE_NEW).
+   */
+  readonly queuedDeckItems = computed<DeckItem[]>(() => {
+    return this.deckItems().filter((item) => item.card.state === CardState.CARD_STATE_NEW);
+  });
+
+  /**
+   * Passages the user is actively working on memorizing (state !== CARD_STATE_NEW).
+   */
+  readonly activeDeckItems = computed<DeckItem[]>(() => {
+    return this.deckItems().filter((item) => item.card.state !== CardState.CARD_STATE_NEW);
+  });
+
+  /**
+   * Active memorization passages that are currently due for review.
+   */
   readonly dueDeckItems = computed<DeckItem[]>(() => {
-    return this.deckItems()
+    return this.activeDeckItems()
       .filter((item) => item.isDue)
       .sort((a, b) => {
         const dueA = new Date(a.card.dueAt).getTime() || 0;
@@ -76,41 +137,307 @@ export class StorageService {
   readonly stats = computed<DeckStats>(() => {
     const items = this.deckItems();
     let due = 0;
-    let newCount = 0;
+    let queuedCount = 0;
     let learningCount = 0;
     let reviewCount = 0;
 
     for (const item of items) {
-      if (item.isDue) {
-        due += 1;
-      }
       if (item.card.state === CardState.CARD_STATE_NEW) {
-        newCount += 1;
-      } else if (
-        item.card.state === CardState.CARD_STATE_LEARNING ||
-        item.card.state === CardState.CARD_STATE_RELEARNING
-      ) {
-        learningCount += 1;
-      } else if (item.card.state === CardState.CARD_STATE_REVIEW) {
-        reviewCount += 1;
+        queuedCount += 1;
+      } else {
+        if (item.isDue) {
+          due += 1;
+        }
+        if (
+          item.card.state === CardState.CARD_STATE_LEARNING ||
+          item.card.state === CardState.CARD_STATE_RELEARNING
+        ) {
+          learningCount += 1;
+        } else if (item.card.state === CardState.CARD_STATE_REVIEW) {
+          reviewCount += 1;
+        }
       }
     }
+
+    const activeCount = learningCount + reviewCount;
 
     return {
       total: items.length,
       due,
-      newCount,
+      queuedCount,
+      newCount: queuedCount,
       learningCount,
       reviewCount,
+      activeCount,
     };
   });
 
   constructor() {
     this.loadFromStorage();
+    void this.restoreActiveFileConnection();
   }
 
   /**
-   * Adds a structured multi-verse passage and creates its corresponding SRS flashcard.
+   * Returns true if the browser natively supports the File System Access API pickers.
+   */
+  supportsNativeFileSystem(): boolean {
+    return (
+      typeof window !== 'undefined' &&
+      typeof (window as unknown as Record<string, unknown>)['showOpenFilePicker'] === 'function' &&
+      typeof (window as unknown as Record<string, unknown>)['showSaveFilePicker'] === 'function'
+    );
+  }
+
+  /**
+   * Opens a file picker to select an existing `.proto.json` / `.json` data file,
+   * loads its contents into the app, and sets it as the Active Memory Data File for background auto-saving.
+   */
+  async selectExistingDataFile(): Promise<boolean> {
+    this.fileSyncError.set(null);
+
+    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, unknown>) : null;
+    if (win && typeof win['showOpenFilePicker'] === 'function') {
+      try {
+        const showOpenFilePicker = win['showOpenFilePicker'] as (
+          options?: unknown
+        ) => Promise<BrowserFileSystemFileHandle[]>;
+        const handles = await showOpenFilePicker({
+          multiple: false,
+          types: [
+            {
+              description: 'Bible Memory ProtoJSON File',
+              accept: {
+                'application/json': ['.json', '.proto.json'],
+              },
+            },
+          ],
+        });
+
+        if (!handles || handles.length === 0) {
+          return false;
+        }
+
+        const handle = handles[0];
+        const file = await handle.getFile();
+        const text = await file.text();
+
+        this.fileHandle = handle;
+        this.isSimulatedFile = false;
+        this.clearSimulatedFileMeta();
+        this.activeFileName.set(handle.name);
+        this.activeFileStatus.set('connected');
+        await this.saveHandleToIndexedDb(handle);
+
+        if (text.trim().length > 0) {
+          this.importProtoJson(text, false);
+        } else {
+          await this.writeToActiveFileHandle();
+        }
+
+        const nowIso = new Date().toISOString();
+        this.activeFileStatus.set('saved');
+        this.lastFileSavedAt.set(nowIso);
+        return true;
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return false;
+        }
+        this.fileSyncError.set(
+          err instanceof Error ? err.message : 'Could not open the selected data file.'
+        );
+        this.activeFileStatus.set('error');
+        return false;
+      }
+    }
+
+    // Fallback for browsers without window.showOpenFilePicker: use a hidden <input type="file">
+    return this.selectFileViaInputElement();
+  }
+
+  /**
+   * Prompts the user to create/choose a file location to save the Active Memory Data File,
+   * immediately writes the current ProtoJSON bundle to it, and auto-saves on every change thereafter.
+   */
+  async createNewDataFile(suggestedName = 'bible-memory.proto.json'): Promise<boolean> {
+    this.fileSyncError.set(null);
+
+    const win = typeof window !== 'undefined' ? (window as unknown as Record<string, unknown>) : null;
+    if (win && typeof win['showSaveFilePicker'] === 'function') {
+      try {
+        const showSaveFilePicker = win['showSaveFilePicker'] as (
+          options?: unknown
+        ) => Promise<BrowserFileSystemFileHandle>;
+        const handle = await showSaveFilePicker({
+          suggestedName,
+          types: [
+            {
+              description: 'Bible Memory ProtoJSON File',
+              accept: {
+                'application/json': ['.json', '.proto.json'],
+              },
+            },
+          ],
+        });
+
+        if (!handle) {
+          return false;
+        }
+
+        this.fileHandle = handle;
+        this.isSimulatedFile = false;
+        this.clearSimulatedFileMeta();
+        this.activeFileName.set(handle.name);
+        this.activeFileStatus.set('connected');
+        await this.saveHandleToIndexedDb(handle);
+        await this.writeToActiveFileHandle();
+        return true;
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return false;
+        }
+        this.fileSyncError.set(
+          err instanceof Error ? err.message : 'Could not create the data file.'
+        );
+        this.activeFileStatus.set('error');
+        return false;
+      }
+    }
+
+    // Fallback when showSaveFilePicker is unavailable
+    await this.connectSimulatedDataFile(suggestedName);
+    return true;
+  }
+
+  /**
+   * Connects a local/simulated auto-save file target (useful when the browser does not support
+   * native FileSystemFileHandle pickers or for 1-click quick-connect).
+   * Every change in the app automatically writes to this active file target and updates `lastFileSavedAt`.
+   */
+  async connectSimulatedDataFile(fileName = 'bible-memory.proto.json'): Promise<void> {
+    const cleanName = fileName.trim() || 'bible-memory.proto.json';
+    this.fileHandle = null;
+    this.isSimulatedFile = true;
+    await this.clearHandleFromIndexedDb();
+
+    const nowIso = new Date().toISOString();
+    this.activeFileName.set(cleanName);
+    this.activeFileStatus.set('saved');
+    this.lastFileSavedAt.set(nowIso);
+    this.fileSyncError.set(null);
+
+    this.saveSimulatedFileMeta(cleanName, nowIso);
+    await this.writeToActiveFileHandle();
+  }
+
+  /**
+   * Re-requests read/write permission for a previously saved FileSystemFileHandle restored from IndexedDB.
+   */
+  async reconnectSavedFileHandle(): Promise<boolean> {
+    if (!this.fileHandle) {
+      return false;
+    }
+
+    try {
+      this.fileSyncError.set(null);
+      let perm: PermissionState = 'granted';
+      if (typeof this.fileHandle.requestPermission === 'function') {
+        perm = await this.fileHandle.requestPermission({ mode: 'readwrite' });
+      }
+      if (perm !== 'granted') {
+        this.activeFileStatus.set('needs-permission');
+        return false;
+      }
+
+      const file = await this.fileHandle.getFile();
+      const text = await file.text();
+      if (text.trim().length > 0) {
+        this.importProtoJson(text, false);
+      } else {
+        await this.writeToActiveFileHandle();
+      }
+
+      const nowIso = new Date().toISOString();
+      this.activeFileStatus.set('saved');
+      this.lastFileSavedAt.set(nowIso);
+      return true;
+    } catch (err: unknown) {
+      this.fileSyncError.set(
+        err instanceof Error ? err.message : 'Failed to reconnect to active data file.'
+      );
+      this.activeFileStatus.set('error');
+      return false;
+    }
+  }
+
+  /**
+   * Disconnects the active memory data file (stops background file auto-saving, while keeping local state).
+   */
+  disconnectDataFile(): void {
+    this.fileHandle = null;
+    this.isSimulatedFile = false;
+    this.activeFileName.set(null);
+    this.activeFileStatus.set('none');
+    this.lastFileSavedAt.set(null);
+    this.fileSyncError.set(null);
+    this.clearSimulatedFileMeta();
+    void this.clearHandleFromIndexedDb();
+  }
+
+  /**
+   * Forces an immediate write of the current user data bundle to the active file target.
+   */
+  async saveNowToActiveFile(): Promise<boolean> {
+    if (!this.fileHandle && !this.isSimulatedFile) {
+      return false;
+    }
+    await this.writeToActiveFileHandle();
+    return this.activeFileStatus() === 'saved';
+  }
+
+  /**
+   * Transitions a queued passage (CARD_STATE_NEW) into active memorization (CARD_STATE_LEARNING).
+   * Accepts either `card.id` or `passage.id`.
+   */
+  startMemorizingPassage(cardOrPassageId: string): DeckItem | undefined {
+    const cards = this.flashcards();
+    const targetCard = cards.find(
+      (c) => c.id === cardOrPassageId || c.passageId === cardOrPassageId
+    );
+    if (!targetCard) {
+      return undefined;
+    }
+
+    const now = new Date();
+    const isoNow = now.toISOString();
+
+    let updatedCard = targetCard;
+    if (targetCard.state === CardState.CARD_STATE_NEW) {
+      updatedCard = {
+        ...targetCard,
+        state: CardState.CARD_STATE_LEARNING,
+        dueAt: isoNow,
+        updatedAt: isoNow,
+      };
+      this.flashcards.update((prev) =>
+        prev.map((c) => (c.id === targetCard.id ? updatedCard : c))
+      );
+      this.persistToStorage();
+    }
+
+    const passage = this.passages().find((p) => p.id === updatedCard.passageId);
+    if (!passage) {
+      return undefined;
+    }
+
+    return {
+      passage,
+      card: updatedCard,
+      isDue: this.srs.isDue(updatedCard, now),
+    };
+  }
+
+  /**
+   * Adds a structured multi-verse passage to the Memorization Queue (CARD_STATE_NEW).
    */
   addPassage(reference: string, verses: Verse[]): DeckItem {
     const now = new Date();
@@ -140,12 +467,12 @@ export class StorageService {
     return {
       passage,
       card,
-      isDue: true,
+      isDue: false,
     };
   }
 
   /**
-   * Parses raw pasted text (and optional explicit reference) and adds it to the deck.
+   * Parses raw pasted text (and optional explicit reference) and adds it to the Memorization Queue.
    */
   addFromRawText(rawText: string, explicitReference?: string): DeckItem {
     const parsed = this.parser.parseRawInput(rawText, explicitReference);
@@ -167,7 +494,7 @@ export class StorageService {
    */
   recordReview(cardId: string, rating: ReviewRating): DeckItem | undefined {
     const cards = this.flashcards();
-    const targetCard = cards.find((c) => c.id === cardId);
+    const targetCard = cards.find((c) => c.id === cardId || c.passageId === cardId);
     if (!targetCard) {
       return undefined;
     }
@@ -175,7 +502,7 @@ export class StorageService {
     const now = new Date();
     const { updatedCard, reviewLog } = this.srs.gradeCard(targetCard, rating, now);
 
-    this.flashcards.update((prev) => prev.map((c) => (c.id === cardId ? updatedCard : c)));
+    this.flashcards.update((prev) => prev.map((c) => (c.id === targetCard.id ? updatedCard : c)));
     this.reviewLogs.update((prev) => [reviewLog, ...prev]);
     this.persistToStorage();
 
@@ -187,7 +514,7 @@ export class StorageService {
     return {
       passage,
       card: updatedCard,
-      isDue: this.srs.isDue(updatedCard, now),
+      isDue: updatedCard.state !== CardState.CARD_STATE_NEW && this.srs.isDue(updatedCard, now),
     };
   }
 
@@ -286,6 +613,20 @@ export class StorageService {
       }
 
       const flashcards = this.ensureFlashcardsForPassages(bundle.passages, bundle.flashcards);
+
+      // Migrate untouched v1 seed state where all 4 starter cards were NEW and no reviews existed yet
+      const isUntouchedLegacySeed =
+        (bundle.reviewLogs?.length ?? 0) === 0 &&
+        flashcards.length === 4 &&
+        flashcards.every(
+          (c) => c.id.startsWith('card_seed_') && c.state === CardState.CARD_STATE_NEW
+        );
+
+      if (isUntouchedLegacySeed) {
+        this.seedDefaults();
+        return;
+      }
+
       this.passages.set(bundle.passages);
       this.flashcards.set(flashcards);
       this.reviewLogs.set(bundle.reviewLogs ?? []);
@@ -295,16 +636,282 @@ export class StorageService {
   }
 
   private persistToStorage(): void {
-    if (typeof localStorage === 'undefined') {
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const serialized = this.exportProtoJson(false);
+        localStorage.setItem(STORAGE_KEY, serialized);
+      } catch {
+        // Ignore quota/storage errors in restricted environments
+      }
+    }
+
+    // Automatically trigger background write to Active Memory Data File if connected
+    if (this.fileHandle || this.isSimulatedFile) {
+      void this.writeToActiveFileHandle();
+    }
+  }
+
+  private async writeToActiveFileHandle(): Promise<void> {
+    if (!this.fileHandle && !this.isSimulatedFile) {
       return;
     }
 
-    try {
-      const serialized = this.exportProtoJson(false);
-      localStorage.setItem(STORAGE_KEY, serialized);
-    } catch {
-      // Ignore quota/storage errors in restricted environments
+    if (this.isWritingFile) {
+      this.pendingWriteRequested = true;
+      return;
     }
+
+    this.isWritingFile = true;
+    this.fileSyncError.set(null);
+    this.activeFileStatus.set('saving');
+
+    try {
+      do {
+        this.pendingWriteRequested = false;
+        const prettyPayload = this.exportProtoJson(true);
+
+        if (this.isSimulatedFile) {
+          const nowIso = new Date().toISOString();
+          const currentName = this.activeFileName() ?? 'bible-memory.proto.json';
+          this.saveSimulatedFileMeta(currentName, nowIso, prettyPayload);
+          this.lastFileSavedAt.set(nowIso);
+          this.activeFileStatus.set('saved');
+        } else if (this.fileHandle) {
+          if (typeof this.fileHandle.queryPermission === 'function') {
+            const perm = await this.fileHandle.queryPermission({ mode: 'readwrite' });
+            if (perm !== 'granted') {
+              this.activeFileStatus.set('needs-permission');
+              return;
+            }
+          }
+
+          const writable = await this.fileHandle.createWritable();
+          await writable.write(prettyPayload);
+          await writable.close();
+
+          const nowIso = new Date().toISOString();
+          this.lastFileSavedAt.set(nowIso);
+          this.activeFileStatus.set('saved');
+        }
+      } while (this.pendingWriteRequested);
+    } catch (err: unknown) {
+      this.fileSyncError.set(
+        err instanceof Error ? err.message : 'Auto-save to active file failed.'
+      );
+      this.activeFileStatus.set('error');
+    } finally {
+      this.isWritingFile = false;
+    }
+  }
+
+  private async restoreActiveFileConnection(): Promise<void> {
+    // 1. Check if a simulated/virtual active file was persisted in localStorage
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const rawMeta = localStorage.getItem(VIRTUAL_FILE_META_KEY);
+        if (rawMeta) {
+          const parsed = JSON.parse(rawMeta) as { fileName?: string; savedAt?: string };
+          if (parsed && parsed.fileName) {
+            this.isSimulatedFile = true;
+            this.activeFileName.set(parsed.fileName);
+            this.lastFileSavedAt.set(parsed.savedAt ?? new Date().toISOString());
+            this.activeFileStatus.set('saved');
+            return;
+          }
+        }
+      } catch {
+        // Ignore corrupt meta
+      }
+    }
+
+    // 2. Check if a native FileSystemFileHandle was stored in IndexedDB
+    const savedHandle = await this.loadHandleFromIndexedDb();
+    if (!savedHandle) {
+      return;
+    }
+
+    this.fileHandle = savedHandle;
+    this.activeFileName.set(savedHandle.name);
+
+    try {
+      if (typeof savedHandle.queryPermission === 'function') {
+        const perm = await savedHandle.queryPermission({ mode: 'readwrite' });
+        if (perm === 'granted') {
+          this.activeFileStatus.set('saved');
+          await this.writeToActiveFileHandle();
+        } else {
+          this.activeFileStatus.set('needs-permission');
+        }
+      } else {
+        this.activeFileStatus.set('saved');
+      }
+    } catch {
+      this.activeFileStatus.set('needs-permission');
+    }
+  }
+
+  private selectFileViaInputElement(): Promise<boolean> {
+    if (typeof document === 'undefined') {
+      return Promise.resolve(false);
+    }
+
+    return new Promise<boolean>((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json,.proto.json,application/json';
+      input.style.display = 'none';
+
+      input.onchange = async () => {
+        const file = input.files?.[0];
+        input.remove();
+        if (!file) {
+          resolve(false);
+          return;
+        }
+
+        try {
+          const text = await file.text();
+          if (text.trim().length > 0) {
+            this.importProtoJson(text, false);
+          }
+          await this.connectSimulatedDataFile(file.name);
+          resolve(true);
+        } catch (err: unknown) {
+          this.fileSyncError.set(
+            err instanceof Error ? err.message : 'Invalid ProtoJSON file selected.'
+          );
+          this.activeFileStatus.set('error');
+          resolve(false);
+        }
+      };
+
+      input.oncancel = () => {
+        input.remove();
+        resolve(false);
+      };
+
+      document.body.appendChild(input);
+      input.click();
+    });
+  }
+
+  private saveSimulatedFileMeta(fileName: string, savedAt: string, content?: string): void {
+    if (typeof localStorage === 'undefined') {
+      return;
+    }
+    try {
+      localStorage.setItem(VIRTUAL_FILE_META_KEY, JSON.stringify({ fileName, savedAt }));
+      if (content !== undefined) {
+        localStorage.setItem(VIRTUAL_FILE_CONTENT_KEY, content);
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  private clearSimulatedFileMeta(): void {
+    if (typeof localStorage === 'undefined') {
+      return;
+    }
+    try {
+      localStorage.removeItem(VIRTUAL_FILE_META_KEY);
+      localStorage.removeItem(VIRTUAL_FILE_CONTENT_KEY);
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  private openHandleDb(): Promise<IDBDatabase | null> {
+    if (typeof indexedDB === 'undefined') {
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve) => {
+      try {
+        const request = indexedDB.open(FILE_HANDLE_DB_NAME, 1);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains(FILE_HANDLE_STORE_NAME)) {
+            db.createObjectStore(FILE_HANDLE_STORE_NAME);
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
+  private async saveHandleToIndexedDb(handle: BrowserFileSystemFileHandle): Promise<void> {
+    const db = await this.openHandleDb();
+    if (!db) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      try {
+        const tx = db.transaction(FILE_HANDLE_STORE_NAME, 'readwrite');
+        tx.objectStore(FILE_HANDLE_STORE_NAME).put(handle, FILE_HANDLE_KEY);
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = () => {
+          db.close();
+          resolve();
+        };
+      } catch {
+        db.close();
+        resolve();
+      }
+    });
+  }
+
+  private async loadHandleFromIndexedDb(): Promise<BrowserFileSystemFileHandle | null> {
+    const db = await this.openHandleDb();
+    if (!db) {
+      return null;
+    }
+    return new Promise<BrowserFileSystemFileHandle | null>((resolve) => {
+      try {
+        const tx = db.transaction(FILE_HANDLE_STORE_NAME, 'readonly');
+        const req = tx.objectStore(FILE_HANDLE_STORE_NAME).get(FILE_HANDLE_KEY);
+        req.onsuccess = () => {
+          db.close();
+          resolve((req.result as BrowserFileSystemFileHandle) ?? null);
+        };
+        req.onerror = () => {
+          db.close();
+          resolve(null);
+        };
+      } catch {
+        db.close();
+        resolve(null);
+      }
+    });
+  }
+
+  private async clearHandleFromIndexedDb(): Promise<void> {
+    const db = await this.openHandleDb();
+    if (!db) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      try {
+        const tx = db.transaction(FILE_HANDLE_STORE_NAME, 'readwrite');
+        tx.objectStore(FILE_HANDLE_STORE_NAME).delete(FILE_HANDLE_KEY);
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = () => {
+          db.close();
+          resolve();
+        };
+      } catch {
+        db.close();
+        resolve();
+      }
+    });
   }
 
   private ensureFlashcardsForPassages(passages: Passage[], existingCards: Flashcard[]): Flashcard[] {
@@ -331,8 +938,18 @@ export class StorageService {
   private seedDefaults(): void {
     const now = new Date();
     const isoNow = now.toISOString();
+    const oneHourAgoIso = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
+    const twoHoursAgoIso = new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString();
+    const oneDayAgoIso = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const threeDaysAgoIso = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString();
 
-    const starterData: Array<{ id: string; cardId: string; reference: string; verses: Verse[] }> = [
+    const starterData: Array<{
+      id: string;
+      cardId: string;
+      reference: string;
+      verses: Verse[];
+      cardOverrides?: Partial<Flashcard>;
+    }> = [
       {
         id: 'psg_seed_romans_8_1_4',
         cardId: 'card_seed_romans_8_1_4',
@@ -401,6 +1018,14 @@ export class StorageService {
             text: 'And the peace of God, which surpasses all understanding, will guard your hearts and your minds in Christ Jesus.',
           },
         ],
+        cardOverrides: {
+          state: CardState.CARD_STATE_LEARNING,
+          intervalDays: 1,
+          repetitions: 1,
+          learningStep: 1,
+          lastReviewedAt: oneDayAgoIso,
+          dueAt: oneHourAgoIso,
+        },
       },
       {
         id: 'psg_seed_john_1_1_5',
@@ -428,6 +1053,14 @@ export class StorageService {
             text: 'The light shines in the darkness, and the darkness has not overcome it.',
           },
         ],
+        cardOverrides: {
+          state: CardState.CARD_STATE_REVIEW,
+          intervalDays: 3,
+          repetitions: 2,
+          learningStep: 2,
+          lastReviewedAt: threeDaysAgoIso,
+          dueAt: twoHoursAgoIso,
+        },
       },
     ];
 
@@ -442,6 +1075,7 @@ export class StorageService {
     const flashcards: Flashcard[] = starterData.map((s) => ({
       ...this.srs.createInitialFlashcard(s.id, now),
       id: s.cardId,
+      ...(s.cardOverrides ?? {}),
     }));
 
     this.passages.set(passages);

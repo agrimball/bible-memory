@@ -12,6 +12,15 @@
     </button>
 
     <div class="session-progress" data-testid="study-queue-progress">
+      <button
+        *ngIf="item.card.state === CardState.CARD_STATE_NEW"
+        type="button"
+        class="btn-mark-memorizing"
+        data-testid="btn-mark-memorizing"
+        (click)="markAsMemorizing()"
+      >
+        + Add to Memorizing
+      </button>
       <span class="queue-pill">Card {{ queuePosition }} of {{ queueTotal }}</span>
       <span class="ease-pill" title="Anki Ease Factor & Interval">
         Ease {{ (item.card.easeFactor * 100) | number:'1.0-0' }}% ·
@@ -24,9 +33,8 @@
   <article
     class="flashcard-shell"
     [class.is-flipped]="isFlipped()"
-    [class.study-active]="studyService.isStudyModeActive() && !isFlipped()"
   >
-    <!-- Shared Card Header -->
+    <!-- Shared Card Header with Compact Study Pill -->
     <header class="card-header">
       <div class="header-left">
         <span class="scripture-eyebrow">Scripture Memory Flashcard</span>
@@ -36,6 +44,17 @@
       </div>
 
       <div class="header-badges">
+        <button
+          type="button"
+          class="btn-study-compact"
+          data-testid="btn-enter-study"
+          title="Open separate First-Letter Study page"
+          (click)="navigateToStudyPage()"
+        >
+          <span class="study-compact-aa" aria-hidden="true">Aa</span>
+          <span>Study</span>
+        </button>
+
         <span class="verse-count-badge" data-testid="card-verse-count">
           {{ item.passage.verses.length }}
           {{ item.passage.verses.length === 1 ? 'verse' : 'verses' }}
@@ -49,6 +68,86 @@
       </div>
     </header>
 
+    <!-- Two-Step Daily Stitching Workflow Bar (for multi-verse passages) -->
+    <div
+      *ngIf="item.passage.verses.length > 1"
+      class="verse-stitching-bar"
+      data-testid="verse-stitching-bar"
+    >
+      <div class="stitch-mode-toggle" data-testid="stitch-mode-toggle" role="group" aria-label="Stitching practice step">
+        <button
+          type="button"
+          class="stitch-mode-btn"
+          [class.active]="stitchPhase() === 'new-verse-only'"
+          data-testid="btn-mode-new-verse"
+          (click)="setStitchPhase('new-verse-only')"
+        >
+          <span class="step-num">1</span>
+          <span>New Verse Only (v. {{ currentNewVerse()?.verseNumber }})</span>
+        </button>
+
+        <span class="stitch-arrow" aria-hidden="true">→</span>
+
+        <button
+          type="button"
+          class="stitch-mode-btn"
+          [class.active]="stitchPhase() === 'stitch-block'"
+          data-testid="btn-mode-stitch-block"
+          (click)="setStitchPhase('stitch-block')"
+        >
+          <span class="step-num">2</span>
+          <span>Stitch Block (v. {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }})</span>
+        </button>
+
+        <button
+          type="button"
+          class="stitch-mode-btn subtle"
+          [class.active]="stitchPhase() === 'full-passage'"
+          data-testid="btn-stitch-all-verses"
+          (click)="setStitchPhase('full-passage')"
+        >
+          <span>All ({{ item.passage.verses.length }}v)</span>
+        </button>
+      </div>
+
+      <div class="stitching-controls">
+        <span class="target-verse-label" data-testid="stitching-range-label">
+          Target: v. {{ currentNewVerse()?.verseNumber }} ({{ activeStitchedCount() }}/{{ item.passage.verses.length }})
+        </span>
+
+        <button
+          type="button"
+          class="btn-stitch-step"
+          data-testid="btn-stitch-prev-verse"
+          [disabled]="activeStitchedCount() <= 1"
+          (click)="unstitchOneVerse()"
+          title="Move target verse back by 1"
+        >
+          −1v
+        </button>
+
+        <button
+          type="button"
+          class="btn-stitch-step btn-stitch-plus"
+          data-testid="btn-stitch-next-verse"
+          [disabled]="activeStitchedCount() >= item.passage.verses.length"
+          (click)="stitchNextVerse()"
+          title="Advance target verse by 1"
+        >
+          +1v Target
+        </button>
+      </div>
+    </div>
+
+    <!-- Step Transition Toast (When New Verse is graded Good -> Now practice Stitched Block!) -->
+    <div
+      *ngIf="stitchToastMessage() as toast"
+      class="stitch-step-toast"
+      data-testid="stitch-step-toast"
+    >
+      <span>{{ toast }}</span>
+    </div>
+
     <!-- ================================================================== -->
     <!-- FRONT OF CARD (`isFlipped() === false`)                            -->
     <!-- ================================================================== -->
@@ -57,133 +156,56 @@
       class="card-face card-front"
       data-testid="card-front-view"
     >
-      <!-- Default Front State (before hitting Study) -->
       <div
-        *ngIf="!studyService.isStudyModeActive()"
         class="front-prompt-hero"
         data-testid="front-default-prompt"
       >
-        <div class="prompt-ornament" aria-hidden="true">✦</div>
-        <p class="prompt-instruction">
-          Recite aloud from memory, or enter First-Letter Study Mode for scaffolding.
-        </p>
-        <p class="prompt-subtext">
-          Record your voice while reciting, then flip the card to read the passage while listening to your playback.
-        </p>
+        <!-- Step 1: Practicing Only Today's New Verse -->
+        <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only'">
+          <span class="active-step-pill step-1-pill">
+            Step 1 of 2 · New Verse for Today (Verse {{ currentNewVerse()?.verseNumber }})
+          </span>
 
-        <button
-          type="button"
-          class="btn-enter-study"
-          data-testid="btn-enter-study"
-          (click)="enterStudyMode()"
-        >
-          <span class="study-icon" aria-hidden="true">Aa</span>
-          <span>Study (First Letters)</span>
-        </button>
-      </div>
-
-      <!-- First-Letter Study Mode (`studyService.isStudyModeActive() === true`) -->
-      <div
-        *ngIf="studyService.isStudyModeActive()"
-        class="first-letter-study-panel"
-        data-testid="first-letter-study-panel"
-      >
-        <div class="study-panel-header">
-          <div class="study-mode-title">
-            <span class="study-dot" aria-hidden="true"></span>
-            <span>First-Letter Study Mode</span>
-          </div>
-
-          <div class="study-progress-meta" data-testid="study-progress-indicator">
-            <span class="progress-badge">
-              Verse {{ studyService.activeVerseIndex() + 1 }} of {{ studyService.totalVersesCount() }}
-            </span>
-            <span class="progress-words" *ngIf="activeVerseView() as activeVerse">
-              {{ activeVerse.revealedWordCount }} / {{ activeVerse.totalWordCount }} words revealed
-            </span>
-            <span class="completed-pill" *ngIf="studyService.allVersesCompleted()">
-              All verses revealed
-            </span>
-          </div>
-        </div>
-
-        <!-- Visible Verses Scaffold (Completed Verses + Current Active Verse) -->
-        <div class="study-verses-list" data-testid="study-visible-verses">
           <div
-            *ngFor="let verse of studyService.visibleVerses(); trackBy: trackByVerseNumber"
-            class="study-verse-block"
-            [class.verse-completed]="verse.status === 'completed'"
-            [class.verse-active]="verse.status === 'active'"
-            [attr.data-testid]="'study-verse-' + verse.verseNumber"
+            *ngIf="previousContextVerse() as prevVerse"
+            class="context-lead-in-box"
+            data-testid="new-verse-context-cue"
           >
-            <span class="verse-number-badge">[{{ verse.verseNumber }}]</span>
-
-            <!-- Completed Verse: Full Revealed Text in subtle sage/emerald tint -->
-            <div *ngIf="verse.status === 'completed'" class="verse-tokens-flow completed-flow">
-              <span
-                *ngFor="let word of verse.words; trackBy: trackByWordIndex"
-                class="word-token revealed"
-              >{{ word.fullText }}</span>
-              <span class="verse-check-badge" title="Verse completed" aria-hidden="true">✓</span>
-            </div>
-
-            <!-- Active Verse: Word-by-word revealed tokens + First-letter hint tokens -->
-            <div *ngIf="verse.status === 'active'" class="verse-tokens-flow active-flow">
-              <span
-                *ngFor="let word of verse.words; trackBy: trackByWordIndex"
-                class="word-token"
-                [class.revealed]="word.isRevealed"
-                [class.first-letter]="!word.isRevealed"
-              >{{ word.isRevealed ? word.fullText : word.firstLetterText }}</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Study Reveal Controls Bar (+1w, +1v, Reset) -->
-        <div class="study-controls-bar" data-testid="study-controls-bar">
-          <div class="reveal-buttons-group">
-            <button
-              type="button"
-              class="btn-study-reveal btn-reveal-word"
-              data-testid="btn-reveal-1w"
-              [disabled]="studyService.allVersesCompleted()"
-              (click)="revealOneWord()"
-            >
-              <span class="btn-key">+1w</span>
-              <span class="btn-desc">+1w (Reveal Word)</span>
-            </button>
-
-            <button
-              type="button"
-              class="btn-study-reveal btn-reveal-verse"
-              data-testid="btn-reveal-1v"
-              [disabled]="studyService.allVersesCompleted()"
-              (click)="revealOneVerse()"
-            >
-              <span class="btn-key">+1v</span>
-              <span class="btn-desc">+1v (Reveal Verse)</span>
-            </button>
+            <span class="context-label">Lead-in from Verse {{ prevVerse.verseNumber }}:</span>
+            <p class="context-text">“{{ prevVerse.text }}”</p>
           </div>
 
-          <div class="study-secondary-actions">
-            <button
-              type="button"
-              class="btn-reset-study"
-              data-testid="btn-reset-study"
-              (click)="resetStudyMode()"
-            >
-              Reset Study
-            </button>
-            <button
-              type="button"
-              class="btn-exit-study"
-              data-testid="btn-exit-study"
-              (click)="exitStudyMode()"
-            >
-              Hide Hints
-            </button>
-          </div>
-        </div>
+          <p class="prompt-instruction">
+            Recite <strong>Verse {{ currentNewVerse()?.verseNumber }}</strong> aloud from memory.
+          </p>
+          <p class="prompt-subtext">
+            Once Verse {{ currentNewVerse()?.verseNumber }} is solid (graded Good/Easy), you'll immediately practice the whole stitched block (Verses {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }}) to complete the stitch.
+          </p>
+        </ng-container>
+
+        <!-- Step 2: Practicing the Stitched Block -->
+        <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'stitch-block'">
+          <span class="active-step-pill step-2-pill">
+            Step 2 of 2 · Stitch Whole Block (Verses {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }})
+          </span>
+
+          <p class="prompt-instruction">
+            Recite the whole block (<strong>Verses {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }}</strong>) together from memory.
+          </p>
+          <p class="prompt-subtext">
+            Grading this block Good or Easy completes the stitching for Verse {{ currentNewVerse()?.verseNumber }}!
+          </p>
+        </ng-container>
+
+        <!-- Single-Verse or Full Passage Mode -->
+        <ng-container *ngIf="item.passage.verses.length <= 1 || stitchPhase() === 'full-passage'">
+          <p class="prompt-instruction">
+            Recite this passage aloud from memory.
+          </p>
+          <p class="prompt-subtext">
+            Record your voice while reciting, then flip the card to read along while your recording plays back.
+          </p>
+        </ng-container>
       </div>
 
       <!-- Voice Recording Bar on Front of Card -->
@@ -199,7 +221,7 @@
             <span class="mic-status-dot idle" aria-hidden="true"></span>
             <div class="voice-status-text">
               <strong>Voice Recitation</strong>
-              <span>Tap Record Voice, speak the passage aloud, then Flip Card to listen back.</span>
+              <span>Tap Record Voice, speak aloud, then Flip Card to listen back.</span>
             </div>
           </ng-container>
 
@@ -264,7 +286,7 @@
         >
           <span>Flip Card</span>
           <span class="flip-sublabel">
-            {{ voiceService.isRecording() || voiceService.hasRecording() ? 'Reveal Text & Auto-Play Voice' : 'Reveal Full Passage & Grade' }}
+            {{ voiceService.isRecording() || voiceService.hasRecording() ? 'Reveal Text & Auto-Play Voice' : 'Reveal Text & Grade' }}
           </span>
         </button>
       </div>
@@ -279,15 +301,27 @@
       data-testid="card-back-view"
     >
       <div class="back-subheader">
-        <span class="back-verify-badge">Back · Verify &amp; Listen</span>
-        <button
-          type="button"
-          class="btn-flip-back-front"
-          data-testid="btn-flip-to-front"
-          (click)="flipToFront()"
-        >
-          ↩ Return to Front
-        </button>
+        <span class="back-verify-badge">
+          <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only'">
+            Back · Verify New Verse (v. {{ currentNewVerse()?.verseNumber }})
+          </ng-container>
+          <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'stitch-block'">
+            Back · Verify Stitched Block (v. {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }})
+          </ng-container>
+          <ng-container *ngIf="item.passage.verses.length <= 1 || stitchPhase() === 'full-passage'">
+            Back · Verify &amp; Listen
+          </ng-container>
+        </span>
+        <div class="back-subheader-actions">
+          <button
+            type="button"
+            class="btn-flip-back-front"
+            data-testid="btn-flip-to-front"
+            (click)="flipToFront()"
+          >
+            ↩ Return to Front
+          </button>
+        </div>
       </div>
 
       <!-- Voice Playback Bar -->
@@ -352,11 +386,21 @@
         </ng-template>
       </div>
 
-      <!-- Full Passage Text (`data-testid="card-back-full-text"`) -->
+      <!-- Full Passage / Target Verse Text (`data-testid="card-back-full-text"`) -->
       <div class="card-back-full-text" data-testid="card-back-full-text">
+        <!-- When in 'new-verse-only' mode, show prior verse context muted above the target verse -->
         <div
-          *ngFor="let verse of item.passage.verses"
+          *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only' && previousContextVerse() as prevVerse"
+          class="back-verse-row prior-context-row"
+        >
+          <span class="verse-number-badge">[{{ prevVerse.verseNumber }}]</span>
+          <p class="back-verse-text">{{ prevVerse.text }}</p>
+        </div>
+
+        <div
+          *ngFor="let verse of activeBackVerses()"
           class="back-verse-row"
+          [class.target-new-verse-highlight]="item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only'"
           [attr.data-testid]="'back-verse-' + verse.verseNumber"
         >
           <span class="verse-number-badge">[{{ verse.verseNumber }}]</span>
@@ -366,8 +410,16 @@
 
       <!-- Anki Spaced Repetition Grading Bar (`data-testid="anki-grading-bar"`) -->
       <div class="anki-grading-section">
-        <div class="grading-prompt-label">
-          How well did you recite this passage?
+        <div class="grading-prompt-label" data-testid="grading-step-hint">
+          <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only'">
+            Step 1: Grade New Verse (v. {{ currentNewVerse()?.verseNumber }}) — Good or Easy advances to Step 2 (Stitch Block v. {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }})!
+          </ng-container>
+          <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'stitch-block'">
+            Step 2: Grade Stitched Block (v. {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }}) — Good or Easy completes the stitching!
+          </ng-container>
+          <ng-container *ngIf="item.passage.verses.length <= 1 || stitchPhase() === 'full-passage'">
+            How well did you recite this passage?
+          </ng-container>
         </div>
 
         <div class="anki-grading-bar" data-testid="anki-grading-bar">
@@ -404,7 +456,9 @@
             <span class="grade-interval" data-testid="interval-good">
               {{ intervalPreviews()[ReviewRating.REVIEW_RATING_GOOD] }}
             </span>
-            <span class="grade-label">Good</span>
+            <span class="grade-label">
+              {{ item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only' ? 'Good → Stitch Block' : 'Good' }}
+            </span>
           </button>
 
           <button
@@ -416,7 +470,9 @@
             <span class="grade-interval" data-testid="interval-easy">
               {{ intervalPreviews()[ReviewRating.REVIEW_RATING_EASY] }}
             </span>
-            <span class="grade-label">Easy</span>
+            <span class="grade-label">
+              {{ item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only' ? 'Easy → Stitch Block' : 'Easy' }}
+            </span>
           </button>
         </div>
       </div>

@@ -11,9 +11,23 @@ const ISAIAH_40_EXAMPLE_RAW = `[28] Have you not known? Have you not heard? The 
 [30] Even youths shall faint and be weary, and young men shall fall exhausted;
 [31] but they who wait for the LORD shall renew their strength; they shall mount up with wings like eagles; they shall run and not be weary; they shall walk and not faint.`;
 
+const SUPERSCRIPT_DIGIT_MAP: Record<string, string> = {
+  '⁰': '0',
+  '¹': '1',
+  '²': '2',
+  '³': '3',
+  '⁴': '4',
+  '⁵': '5',
+  '⁶': '6',
+  '⁷': '7',
+  '⁸': '8',
+  '⁹': '9',
+};
+
 export interface HighlightSegment {
   type: 'text' | 'verse-num';
   value: string;
+  verseNumber?: number;
 }
 
 const VERSE_NUMBER_TOKEN_REGEX =
@@ -36,8 +50,8 @@ const VERSE_NUMBER_TOKEN_REGEX =
             <h2 id="add-passage-title" class="modal-title">Add Passage</h2>
             <p class="modal-subtitle">
               Paste your passage into the plain text box below and edit it freely. Use
-              <strong>Highlight Verse Numbers</strong> to preview and confirm before stripping verse
-              numbers.
+              <strong>Highlight Verse Numbers</strong> to preview and strip verse numbers while
+              automatically remembering where each verse begins and ends.
             </p>
           </div>
           <button
@@ -84,7 +98,13 @@ const VERSE_NUMBER_TOKEN_REGEX =
             <div class="textarea-toolbar">
               <label for="passage-raw-textarea" class="field-label">
                 Passage Text
-                <span class="field-hint">(plain editable text box — one verse per line or paragraph)</span>
+                <span class="field-hint">
+                  @if (hasRememberedBoundaries()) {
+                    (Verse boundaries remembered — verses separated by blank lines)
+                  } @else {
+                    (Plain editable text box — verse boundaries detected from verse numbers)
+                  }
+                </span>
               </label>
 
               <div class="verse-num-helper-actions">
@@ -131,6 +151,23 @@ const VERSE_NUMBER_TOKEN_REGEX =
             ></textarea>
           </div>
 
+          @if (showMissingVerseNumbersWarning()) {
+            <div
+              class="missing-verse-nums-warning"
+              role="alert"
+              data-testid="warning-no-verse-numbers"
+            >
+              <strong class="warning-title">⚠️ No verse numbers detected</strong>
+              <p class="warning-body">
+                This text doesn't contain verse numbers (e.g. <code>[1]</code>, <code>2 </code>, or
+                <code>¹²³</code>), so verse boundaries aren't marked for <code>+1v</code> study and
+                accumulative stitching. Tip: Paste text with verse numbers included, then click
+                <strong>Highlight Verse Numbers → Remove</strong> so we can remember the exact
+                verse boundaries for you (or separate verses with blank lines).
+              </p>
+            </div>
+          }
+
           @if (isHighlightingVerseNumbers()) {
             <section
               class="highlight-preview-box"
@@ -145,8 +182,9 @@ const VERSE_NUMBER_TOKEN_REGEX =
                   @if (highlightedVerseNumberCount() > 0) {
                     <strong>{{ highlightedVerseNumberCount() }}</strong>
                     {{ highlightedVerseNumberCount() === 1 ? 'verse number' : 'verse numbers' }}
-                    highlighted in red/amber below will be deleted when you click
-                    <strong>Remove Highlighted Verse Numbers</strong>.
+                    highlighted below will be removed, and their
+                    <strong>exact verse boundaries</strong> will be remembered for
+                    <code>+1v</code> study.
                   } @else {
                     No verse numbers were detected in the current text.
                   }
@@ -158,7 +196,7 @@ const VERSE_NUMBER_TOKEN_REGEX =
                   @if (seg.type === 'verse-num') {
                     <mark
                       class="highlighted-verse-num"
-                      title="Will be removed"
+                      title="Will be removed (verse boundary remembered)"
                       data-testid="highlighted-verse-num"
                     >{{ seg.value }}</mark>
                   } @else {
@@ -172,12 +210,24 @@ const VERSE_NUMBER_TOKEN_REGEX =
           <section class="preview-panel" data-testid="parsed-verses-preview">
             <div class="preview-header">
               <div class="preview-title-group">
-                <span class="preview-badge">Card Lines / Verses ({{ parsedResult().verses.length }})</span>
+                <span class="preview-badge">
+                  Verses ({{ parsedResult().verses.length }})
+                </span>
                 <span class="preview-ref">{{ parsedResult().reference }}</span>
+                @if (hasRememberedBoundaries()) {
+                  <span
+                    class="remembered-boundary-pill"
+                    data-testid="remembered-boundaries-badge"
+                  >
+                    ✓ {{ parsedResult().verses.length }} verse
+                    {{ parsedResult().verses.length === 1 ? 'boundary' : 'boundaries' }} remembered
+                    from stripped verse numbers
+                  </span>
+                }
               </div>
               <span class="preview-count">
                 {{ parsedResult().verses.length }}
-                {{ parsedResult().verses.length === 1 ? 'step' : 'steps' }} for <code>+1v</code> study
+                {{ parsedResult().verses.length === 1 ? 'verse' : 'verses' }} for <code>+1v</code> study
               </span>
             </div>
 
@@ -185,7 +235,7 @@ const VERSE_NUMBER_TOKEN_REGEX =
               <ul class="parsed-verse-list">
                 @for (verse of parsedResult().verses; track $index) {
                   <li class="parsed-verse-item" [attr.data-testid]="'preview-verse-' + $index">
-                    <span class="verse-num-pill">#{{ $index + 1 }}</span>
+                    <span class="verse-num-pill">[v. {{ verse.verseNumber }}]</span>
                     <span class="verse-text-body">{{ verse.text }}</span>
                   </li>
                 }
@@ -439,6 +489,36 @@ const VERSE_NUMBER_TOKEN_REGEX =
         background: #fef3c7;
       }
 
+      .missing-verse-nums-warning {
+        background: #fffbeb;
+        border: 1px solid #f59e0b;
+        border-left: 4px solid #d97706;
+        border-radius: 0.65rem;
+        padding: 0.75rem 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+
+      .warning-title {
+        font-size: 0.84rem;
+        color: #92400e;
+      }
+
+      .warning-body {
+        margin: 0;
+        font-size: 0.8rem;
+        color: #78350f;
+        line-height: 1.45;
+      }
+
+      .warning-body code {
+        background: rgba(217, 119, 6, 0.12);
+        padding: 0.08rem 0.3rem;
+        border-radius: 0.25rem;
+        font-weight: 600;
+      }
+
       .highlight-preview-box {
         border: 2px solid #f59e0b;
         border-radius: 0.75rem;
@@ -537,6 +617,16 @@ const VERSE_NUMBER_TOKEN_REGEX =
         color: #115e59;
       }
 
+      .remembered-boundary-pill {
+        font-size: 0.73rem;
+        font-weight: 600;
+        padding: 0.18rem 0.6rem;
+        border-radius: 999px;
+        background: #dcfce7;
+        color: #166534;
+        border: 1px solid #86efac;
+      }
+
       .preview-ref {
         font-size: 0.95rem;
         font-weight: 700;
@@ -582,6 +672,7 @@ const VERSE_NUMBER_TOKEN_REGEX =
 
       .verse-text-body {
         color: #292524;
+        white-space: pre-line;
       }
 
       .preview-empty {
@@ -650,6 +741,16 @@ export class AddPassageModalComponent {
   readonly rawText = signal<string>('');
   readonly isHighlightingVerseNumbers = signal<boolean>(false);
 
+  /**
+   * When the user strips verse numbers, we remember the exact verse numbers and
+   * separate verse boundaries by blank lines (`\n\n`) so multi-line poetic verses
+   * are NOT mistakenly split into separate verses on single line breaks.
+   */
+  readonly rememberedVerseNumbers = signal<number[]>([]);
+  readonly hasRememberedBoundaries = computed<boolean>(
+    () => this.rememberedVerseNumbers().length > 0
+  );
+
   readonly highlightSegments = computed<HighlightSegment[]>(() => {
     const raw = this.rawText();
     if (!raw) {
@@ -658,6 +759,7 @@ export class AddPassageModalComponent {
 
     const segments: HighlightSegment[] = [];
     let lastIndex = 0;
+    let fallbackNum = this.inferStartVerseNumber();
 
     for (const match of raw.matchAll(VERSE_NUMBER_TOKEN_REGEX)) {
       const matchIndex = match.index ?? 0;
@@ -670,10 +772,13 @@ export class AddPassageModalComponent {
         });
       }
 
+      const parsedNum = this.parseVerseNumberToken(matchText, fallbackNum);
       segments.push({
         type: 'verse-num',
         value: matchText,
+        verseNumber: parsedNum,
       });
+      fallbackNum = parsedNum + 1;
 
       lastIndex = matchIndex + matchText.length;
     }
@@ -692,12 +797,20 @@ export class AddPassageModalComponent {
     return this.highlightSegments().filter((seg) => seg.type === 'verse-num').length;
   });
 
+  readonly showMissingVerseNumbersWarning = computed<boolean>(() => {
+    const trimmed = this.rawText().trim();
+    return (
+      trimmed.length > 0 &&
+      this.highlightedVerseNumberCount() === 0 &&
+      this.rememberedVerseNumbers().length === 0
+    );
+  });
+
   readonly parsedResult = computed<{ reference: string; verses: Verse[] }>(() => {
     const raw = this.rawText();
     const ref = this.reference().trim();
-
-    // Split by non-empty lines if the user has already stripped verse numbers, or use parser
     const trimmed = raw.replace(/\r\n/g, '\n').trim();
+
     if (!trimmed) {
       return {
         reference: ref || 'Untitled Passage',
@@ -705,18 +818,66 @@ export class AddPassageModalComponent {
       };
     }
 
-    const lines = trimmed
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0);
+    // Case 1: Text currently contains explicit verse numbers -> split ONLY at verse numbers
+    // so multi-line poetry inside a verse stays together and inline verses split accurately.
+    const segments = this.highlightSegments();
+    const verseNumCount = segments.filter((s) => s.type === 'verse-num').length;
+    if (verseNumCount > 0) {
+      const versesFromMarkers = this.extractVersesFromSegments(segments);
+      if (versesFromMarkers.length > 0) {
+        return {
+          reference: ref || this.formatDefaultReference(versesFromMarkers),
+          verses: versesFromMarkers,
+        };
+      }
+    }
 
-    if (lines.length > 1 && this.highlightedVerseNumberCount() === 0) {
+    // Case 2: Verse numbers were stripped via "Remove Highlighted Verse Numbers" ->
+    // use the remembered verse boundaries (separated by blank lines `\n\n` in the editor)
+    // and pair each block with its remembered verse number!
+    const rememberedNums = this.rememberedVerseNumbers();
+    if (rememberedNums.length > 0) {
+      const blocksByBlankLine = trimmed
+        .split(/\n\s*\n/)
+        .map((b) => b.trim())
+        .filter((b) => b.length > 0);
+
+      const blocks =
+        blocksByBlankLine.length > 1
+          ? blocksByBlankLine
+          : trimmed
+              .split('\n')
+              .map((b) => b.trim())
+              .filter((b) => b.length > 0);
+
+      const startVerse = rememberedNums[0] ?? this.inferStartVerseNumber();
+      const verses: Verse[] = blocks.map((blockText, idx) => ({
+        verseNumber: rememberedNums[idx] ?? startVerse + idx,
+        text: blockText.replace(/[ \t]+/g, ' ').trim(),
+      }));
+
       return {
-        reference: ref || 'Custom Passage',
-        verses: lines.map((line, idx) => ({
-          verseNumber: idx + 1,
-          text: line,
-        })),
+        reference: ref || this.formatDefaultReference(verses),
+        verses,
+      };
+    }
+
+    // Case 3: Plain text without verse numbers -> split by paragraph breaks (\n\n) if present,
+    // otherwise delegate to PassageParserService
+    const paragraphBlocks = trimmed
+      .split(/\n\s*\n/)
+      .map((b) => b.trim())
+      .filter((b) => b.length > 0);
+
+    if (paragraphBlocks.length > 1) {
+      const startVerse = this.inferStartVerseNumber();
+      const verses: Verse[] = paragraphBlocks.map((blockText, idx) => ({
+        verseNumber: startVerse + idx,
+        text: blockText.replace(/[ \t]+/g, ' ').trim(),
+      }));
+      return {
+        reference: ref || this.formatDefaultReference(verses),
+        verses,
       };
     }
 
@@ -729,6 +890,9 @@ export class AddPassageModalComponent {
 
   onRawTextChange(value: string): void {
     this.rawText.set(value);
+    if (!value.trim()) {
+      this.rememberedVerseNumbers.set([]);
+    }
   }
 
   startHighlightVerseNumbers(): void {
@@ -740,22 +904,25 @@ export class AddPassageModalComponent {
   }
 
   removeHighlightedVerseNumbers(): void {
-    const cleaned = this.highlightSegments()
-      .filter((seg) => seg.type === 'text')
-      .map((seg) => seg.value)
-      .join('')
-      .split('\n')
-      .map((line) => line.replace(/\s+/g, ' ').trim())
-      .filter((line) => line.length > 0)
-      .join('\n');
+    const verses = this.extractVersesFromSegments(this.highlightSegments());
+    if (verses.length === 0) {
+      this.isHighlightingVerseNumbers.set(false);
+      return;
+    }
 
-    this.rawText.set(cleaned);
+    // Remember the exact verse numbers and boundaries, and format the plain text box
+    // with blank lines (\n\n) between verses so multi-line verses stay grouped together.
+    this.rememberedVerseNumbers.set(verses.map((v) => v.verseNumber));
+    const cleanedTextWithBoundaries = verses.map((v) => v.text).join('\n\n');
+
+    this.rawText.set(cleanedTextWithBoundaries);
     this.isHighlightingVerseNumbers.set(false);
   }
 
   pasteExample(): void {
     this.reference.set(ISAIAH_40_EXAMPLE_REF);
     this.rawText.set(ISAIAH_40_EXAMPLE_RAW);
+    this.rememberedVerseNumbers.set([]);
     this.isHighlightingVerseNumbers.set(false);
   }
 
@@ -773,5 +940,89 @@ export class AddPassageModalComponent {
     if (event.target === event.currentTarget) {
       this.closed.emit();
     }
+  }
+
+  private extractVersesFromSegments(segments: HighlightSegment[]): Verse[] {
+    const verses: Verse[] = [];
+    const startVerse = this.inferStartVerseNumber();
+
+    let currentVerseNumber: number | null = null;
+    let currentChunks: string[] = [];
+
+    for (const seg of segments) {
+      if (seg.type === 'verse-num') {
+        if (currentVerseNumber !== null) {
+          const text = this.cleanVerseChunk(currentChunks.join(''));
+          if (text) {
+            verses.push({ verseNumber: currentVerseNumber, text });
+          }
+        } else if (currentChunks.length > 0) {
+          const leadingText = this.cleanVerseChunk(currentChunks.join(''));
+          if (leadingText) {
+            const firstMarkerNum = seg.verseNumber ?? startVerse;
+            const inferredLeadingNum = firstMarkerNum > 1 ? firstMarkerNum - 1 : startVerse;
+            verses.push({ verseNumber: inferredLeadingNum, text: leadingText });
+          }
+        }
+
+        currentVerseNumber = seg.verseNumber ?? startVerse + verses.length;
+        currentChunks = [];
+      } else {
+        currentChunks.push(seg.value);
+      }
+    }
+
+    if (currentVerseNumber !== null && currentChunks.length > 0) {
+      const text = this.cleanVerseChunk(currentChunks.join(''));
+      if (text) {
+        verses.push({ verseNumber: currentVerseNumber, text });
+      }
+    }
+
+    return verses;
+  }
+
+  private cleanVerseChunk(rawChunk: string): string {
+    return rawChunk
+      .replace(/\r\n/g, '\n')
+      .split('\n')
+      .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+      .filter((line) => line.length > 0)
+      .join('\n')
+      .trim();
+  }
+
+  private parseVerseNumberToken(token: string, fallback: number): number {
+    const normalized = token
+      .split('')
+      .map((ch) => SUPERSCRIPT_DIGIT_MAP[ch] ?? ch)
+      .join('');
+    const match = normalized.match(/\d{1,3}/);
+    if (!match) {
+      return fallback;
+    }
+    const num = parseInt(match[0], 10);
+    return !isNaN(num) && num > 0 ? num : fallback;
+  }
+
+  private inferStartVerseNumber(): number {
+    const ref = this.reference().trim();
+    const colonMatch = ref.match(/:\s*(\d+)/);
+    if (colonMatch) {
+      const num = parseInt(colonMatch[1], 10);
+      if (!isNaN(num) && num > 0) {
+        return num;
+      }
+    }
+    return 1;
+  }
+
+  private formatDefaultReference(verses: Verse[]): string {
+    if (verses.length === 0) {
+      return 'Custom Passage';
+    }
+    const first = verses[0].verseNumber;
+    const last = verses[verses.length - 1].verseNumber;
+    return first === last ? `Passage (v. ${first})` : `Passage (vv. ${first}–${last})`;
   }
 }

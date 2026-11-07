@@ -10,7 +10,7 @@
 .study-workspace {
   display: flex;
   flex-direction: column;
-  gap: 1.15rem;
+  gap: 1.1rem;
   padding: 0.5rem 0 2.5rem;
 }
 
@@ -71,6 +71,21 @@
   border: 1px solid #e2ddd2;
 }
 
+.btn-mark-memorizing {
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid #0f766e;
+  background: #0f766e;
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-mark-memorizing:hover {
+  background: #115e59;
+}
+
 /* Main Flashcard Shell (Warm Parchment + Slate Accent) */
 .flashcard-shell {
   background: linear-gradient(180deg, #fffdf9 0%, #faf6ee 100%);
@@ -95,7 +110,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  padding: 1.5rem 1.75rem 1.25rem;
+  padding: 1.4rem 1.75rem 1.15rem;
   border-bottom: 1px solid #ece5d8;
   background: rgba(255, 252, 245, 0.75);
 }
@@ -129,6 +144,41 @@
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+
+/* Compact, unobtrusive Study pill button in card header */
+.btn-study-compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.72rem;
+  border-radius: 999px;
+  border: 1px solid #c8b89a;
+  background: #fffaf0;
+  color: #5c4018;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.btn-study-compact:hover {
+  background: #f3e8d2;
+  border-color: #a3895c;
+}
+
+.study-compact-aa {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: #855d23;
+  color: #fffdf9;
+  font-family: 'Georgia', serif;
+  font-size: 0.68rem;
+  font-weight: 700;
 }
 
 .verse-count-badge {
@@ -168,37 +218,222 @@
   border: 1px solid #a7f3d0;
 }
 
-/* Card Faces */
-.card-face {
-  padding: 1.65rem 1.75rem 1.85rem;
+/* Two-Step Daily Stitching Workflow Bar */
+.verse-stitching-bar {
   display: flex;
-  flex-direction: column;
-  gap: 1.35rem;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.75rem 1.75rem;
+  background: #f5f0e5;
+  border-bottom: 1px solid #e6dfd1;
 }
 
-/* Default Front Prompt Hero */
+.stitch-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.stitch-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.36rem 0.72rem;
+  border-radius: 8px;
+  border: 1px solid #d4cbb8;
+  background: #ffffff;
+  color: #44403c;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.stitch-mode-btn:hover {
+  background: #faf6ee;
+  border-color: #b48a4e;
+}
+
+.stitch-mode-btn.active {
+  background: #292524;
+  border-color: #292524;
+  color: #fafaf9;
+}
+
+.stitch-mode-btn.subtle {
+  color: #64748b;
+}
+
+.stitch-mode-btn.subtle.active {
+  background: #334155;
+  border-color: #334155;
+  color: #ffffff;
+}
+
+.step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: rgba(146, 64, 14, 0.14);
+  color: #92400e;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.stitch-mode-btn.active .step-num {
+  background: #f59e0b;
+  color: #1c1917;
+}
+
+.stitch-arrow {
+  font-size: 0.8rem;
+  color: #78716c;
+  font-weight: 700;
+}
+
+.stitching-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.target-verse-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #57534e;
+  margin-right: 0.2rem;
+}
+
+.btn-stitch-step {
+  padding: 0.32rem 0.65rem;
+  border-radius: 7px;
+  border: 1px solid #d4cbb8;
+  background: #ffffff;
+  color: #334155;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.btn-stitch-step:hover:not(:disabled) {
+  background: #faf6ee;
+  border-color: #b48a4e;
+}
+
+.btn-stitch-step:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-stitch-plus {
+  background: #fffbeb;
+  border-color: #f59e0b;
+  color: #92400e;
+}
+
+.btn-stitch-plus:hover:not(:disabled) {
+  background: #fef3c7;
+}
+
+/* Step Transition Toast Banner */
+.stitch-step-toast {
+  margin: 0.85rem 1.75rem 0;
+  padding: 0.8rem 1.1rem;
+  border-radius: 12px;
+  background: #ecfdf5;
+  border: 1px solid #6ee7b7;
+  color: #065f46;
+  font-size: 0.88rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Card Faces */
+.card-face {
+  padding: 1.5rem 1.75rem 1.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* Front Prompt Area */
 .front-prompt-hero {
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
-  padding: 2.2rem 1.5rem;
+  padding: 1.65rem 1.35rem;
   border-radius: 16px;
-  background: rgba(245, 240, 230, 0.65);
+  background: rgba(245, 240, 230, 0.6);
   border: 1px dashed #d6cbb9;
-  gap: 0.75rem;
+  gap: 0.65rem;
 }
 
-.prompt-ornament {
-  font-size: 1.35rem;
-  color: #9a7b4f;
-  line-height: 1;
+.active-step-pill {
+  padding: 0.26rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.step-1-pill {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.step-2-pill {
+  background: #d1fae5;
+  color: #065f46;
+  border: 1px solid #6ee7b7;
+}
+
+.context-lead-in-box {
+  width: 100%;
+  max-width: 580px;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  background: #fffdf9;
+  border: 1px solid #e4decb;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.context-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #78716c;
+}
+
+.context-text {
+  margin: 0;
+  font-family: 'Georgia', 'Cambria', serif;
+  font-size: 0.96rem;
+  color: #44403c;
+  font-style: italic;
+  line-height: 1.45;
 }
 
 .prompt-instruction {
   margin: 0;
   font-family: 'Georgia', 'Cambria', serif;
-  font-size: 1.2rem;
+  font-size: 1.18rem;
   font-weight: 600;
   color: #1e293b;
   max-width: 540px;
@@ -207,309 +442,10 @@
 
 .prompt-subtext {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 0.86rem;
   color: #64748b;
-  max-width: 500px;
+  max-width: 510px;
   line-height: 1.45;
-}
-
-.btn-enter-study {
-  margin-top: 0.65rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.65rem;
-  padding: 0.78rem 1.45rem;
-  border-radius: 12px;
-  border: 1px solid #b48a4e;
-  background: linear-gradient(180deg, #fffaf0 0%, #f5ebd6 100%);
-  color: #5c4018;
-  font-size: 0.96rem;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 2px 6px rgba(146, 104, 41, 0.12);
-  transition: all 0.15s ease;
-}
-
-.btn-enter-study:hover {
-  background: linear-gradient(180deg, #f9f0df 0%, #ede0c4 100%);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 10px rgba(146, 104, 41, 0.18);
-}
-
-.study-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-  background: #855d23;
-  color: #fffdf9;
-  font-family: 'Georgia', serif;
-  font-size: 0.85rem;
-  font-weight: 700;
-}
-
-/* First-Letter Study Mode Panel */
-.first-letter-study-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 1.1rem;
-  padding: 1.35rem;
-  border-radius: 16px;
-  background: #f8f5ee;
-  border: 1px solid #ded6c6;
-}
-
-.study-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-  padding-bottom: 0.75rem;
-  border-bottom: 1px solid #e6dfd1;
-}
-
-.study-mode-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.85rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #5c4522;
-}
-
-.study-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #d97706;
-}
-
-.study-progress-meta {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.progress-badge {
-  padding: 0.25rem 0.65rem;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  background: #292524;
-  color: #fafaf9;
-}
-
-.progress-words {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #57534e;
-}
-
-.completed-pill {
-  padding: 0.25rem 0.65rem;
-  border-radius: 999px;
-  font-size: 0.76rem;
-  font-weight: 700;
-  background: #d1fae5;
-  color: #065f46;
-}
-
-/* Visible Verses List inside First-Letter Study Panel */
-.study-verses-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-}
-
-.study-verse-block {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  padding: 1rem 1.15rem;
-  border-radius: 12px;
-  transition: all 0.2s ease;
-}
-
-.study-verse-block.verse-completed {
-  background: #ecfdf5;
-  border: 1px solid #a7f3d0;
-}
-
-.study-verse-block.verse-active {
-  background: #ffffff;
-  border: 2px solid #d97706;
-  box-shadow: 0 4px 12px rgba(217, 119, 6, 0.08);
-}
-
-.verse-number-badge {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 2.1rem;
-  padding: 0.2rem 0.45rem;
-  border-radius: 6px;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 0.8rem;
-  font-weight: 700;
-  background: #e7e2d8;
-  color: #44403c;
-  margin-top: 0.12rem;
-}
-
-.verse-completed .verse-number-badge {
-  background: #a7f3d0;
-  color: #065f46;
-}
-
-.verse-active .verse-number-badge {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.verse-tokens-flow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.42rem 0.48rem;
-  line-height: 1.75;
-  flex: 1;
-}
-
-.word-token {
-  display: inline-block;
-  transition: all 0.14s ease;
-}
-
-.word-token.revealed {
-  font-family: 'Georgia', 'Cambria', serif;
-  font-size: 1.14rem;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.verse-completed .word-token.revealed {
-  color: #064e3b;
-  font-weight: 600;
-}
-
-.word-token.first-letter {
-  padding: 0.12rem 0.46rem;
-  border-radius: 6px;
-  background: #f1ece1;
-  border: 1px solid #d6cebe;
-  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
-  font-size: 0.96rem;
-  font-weight: 700;
-  color: #78350f;
-  letter-spacing: 0.04em;
-}
-
-.verse-check-badge {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: #10b981;
-  color: #ffffff;
-  font-size: 0.75rem;
-  font-weight: 700;
-}
-
-/* Study Reveal Controls Bar (+1w, +1v, Reset) */
-.study-controls-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  padding-top: 0.65rem;
-  border-top: 1px solid #e6dfd1;
-}
-
-.reveal-buttons-group {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  flex-wrap: wrap;
-}
-
-.btn-study-reveal {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.65rem 1.1rem;
-  border-radius: 10px;
-  font-size: 0.9rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.14s ease;
-}
-
-.btn-study-reveal:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-reveal-word {
-  background: #1e293b;
-  color: #ffffff;
-  border: 1px solid #0f172a;
-}
-
-.btn-reveal-word:hover:not(:disabled) {
-  background: #334155;
-}
-
-.btn-reveal-verse {
-  background: #d97706;
-  color: #ffffff;
-  border: 1px solid #b45309;
-}
-
-.btn-reveal-verse:hover:not(:disabled) {
-  background: #b45309;
-}
-
-.btn-key {
-  padding: 0.15rem 0.45rem;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.2);
-  font-family: monospace;
-  font-size: 0.82rem;
-}
-
-.study-secondary-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.btn-reset-study,
-.btn-exit-study {
-  padding: 0.55rem 0.9rem;
-  border-radius: 8px;
-  border: 1px solid #d4cbb8;
-  background: #ffffff;
-  color: #475569;
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.btn-reset-study:hover,
-.btn-exit-study:hover {
-  background: #f1ede4;
-  color: #0f172a;
 }
 
 /* Voice Recording Bar on Front of Card */
@@ -718,6 +654,12 @@
   gap: 0.75rem;
 }
 
+.back-subheader-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .back-verify-badge {
   display: inline-flex;
   align-items: center;
@@ -870,6 +812,35 @@
   gap: 0.75rem;
 }
 
+.prior-context-row {
+  opacity: 0.55;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px dashed #e2dacb;
+}
+
+.target-new-verse-highlight {
+  padding: 0.65rem 0.8rem;
+  border-radius: 10px;
+  background: #fefce8;
+  border: 1px solid #fde047;
+}
+
+.verse-number-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.1rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.8rem;
+  font-weight: 700;
+  background: #e7e2d8;
+  color: #44403c;
+  margin-top: 0.12rem;
+}
+
 .back-verse-text {
   margin: 0;
   font-family: 'Georgia', 'Cambria', 'Times New Roman', serif;
@@ -890,7 +861,7 @@
   text-align: center;
   font-size: 0.84rem;
   font-weight: 600;
-  color: #64748b;
+  color: #475569;
 }
 
 .anki-grading-bar {
@@ -924,7 +895,7 @@
 }
 
 .grade-label {
-  font-size: 1rem;
+  font-size: 0.94rem;
   font-weight: 800;
 }
 
