@@ -81,6 +81,7 @@ export class StorageService {
   private isSimulatedFile = false;
   private isWritingFile = false;
   private pendingWriteRequested = false;
+  private gestureListenerRegistered = false;
 
   readonly deckItems = computed<DeckItem[]>(() => {
     const passageList = this.passages();
@@ -264,12 +265,21 @@ export class StorageService {
         return true;
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === 'AbortError') {
+          if (!this.fileHandle && !this.isSimulatedFile) {
+            this.activeFileName.set(null);
+            this.activeFileStatus.set('none');
+          }
           return false;
         }
         this.fileSyncError.set(
           err instanceof Error ? err.message : 'Could not open the selected data file.'
         );
-        this.activeFileStatus.set('error');
+        if (!this.fileHandle && !this.isSimulatedFile) {
+          this.activeFileName.set(null);
+          this.activeFileStatus.set('none');
+        } else {
+          this.activeFileStatus.set('error');
+        }
         return false;
       }
     }
@@ -317,17 +327,27 @@ export class StorageService {
         return true;
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === 'AbortError') {
+          if (!this.fileHandle && !this.isSimulatedFile) {
+            this.activeFileName.set(null);
+            this.activeFileStatus.set('none');
+          }
           return false;
         }
         this.fileSyncError.set(
           err instanceof Error ? err.message : 'Could not create the data file.'
         );
-        this.activeFileStatus.set('error');
+        if (!this.fileHandle && !this.isSimulatedFile) {
+          this.activeFileName.set(null);
+          this.activeFileStatus.set('none');
+        } else {
+          this.activeFileStatus.set('error');
+        }
         return false;
       }
     }
 
-    // Fallback when showSaveFilePicker is unavailable
+    // Fallback when showSaveFilePicker is unavailable (e.g. Firefox): trigger a real browser file download
+    this.triggerBrowserFileDownload(suggestedName, this.exportProtoJson(true));
     await this.connectSimulatedDataFile(suggestedName);
     return true;
   }
@@ -354,7 +374,8 @@ export class StorageService {
   }
 
   /**
-   * Re-requests read/write permission for a previously saved FileSystemFileHandle restored from IndexedDB.
+   * Re-requests read/write permission for a previously saved FileSystemFileHandle restored from IndexedDB,
+   * and immediately flushes the current state to the file.
    */
   async reconnectSavedFileHandle(): Promise<boolean> {
     if (!this.fileHandle) {
@@ -364,27 +385,29 @@ export class StorageService {
     try {
       this.fileSyncError.set(null);
       let perm: PermissionState = 'granted';
-      if (typeof this.fileHandle.requestPermission === 'function') {
+      if (typeof this.fileHandle.queryPermission === 'function') {
+        perm = await this.fileHandle.queryPermission({ mode: 'readwrite' });
+      }
+      if (perm !== 'granted' && typeof this.fileHandle.requestPermission === 'function') {
         perm = await this.fileHandle.requestPermission({ mode: 'readwrite' });
       }
       if (perm !== 'granted') {
-        this.activeFileStatus.set('needs-permission');
+        this.activeFileStatus.set(perm === 'denied' ? 'needs-permission' : 'connected');
+        if (perm === 'prompt') {
+          this.registerFirstGesturePermissionListener();
+        }
         return false;
       }
 
-      const file = await this.fileHandle.getFile();
-      const text = await file.text();
-      if (text.trim().length > 0) {
-        this.importProtoJson(text, false);
-      } else {
-        await this.writeToActiveFileHandle();
-      }
-
-      const nowIso = new Date().toISOString();
-      this.activeFileStatus.set('saved');
-      this.lastFileSavedAt.set(nowIso);
-      return true;
+      await this.writeToActiveFileHandle();
+      return this.activeFileStatus() === 'saved';
     } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'SecurityError') {
+        // No user gesture active yet; wait for first click/keydown
+        this.activeFileStatus.set('connected');
+        this.registerFirstGesturePermissionListener();
+        return false;
+      }
       this.fileSyncError.set(
         err instanceof Error ? err.message : 'Failed to reconnect to active data file.'
       );
@@ -864,9 +887,23 @@ export class StorageService {
           this.activeFileStatus.set('saved');
         } else if (this.fileHandle) {
           if (typeof this.fileHandle.queryPermission === 'function') {
-            const perm = await this.fileHandle.queryPermission({ mode: 'readwrite' });
+            let perm = await this.fileHandle.queryPermission({ mode: 'readwrite' });
+            if (perm !== 'granted' && typeof this.fileHandle.requestPermission === 'function') {
+              try {
+                // Attempt to request permission right inside the current user gesture (e.g. grading a card, adding a passage)
+                perm = await this.fileHandle.requestPermission({ mode: 'readwrite' });
+              } catch {
+                // No active user gesture yet; stay in 'connected' and wait for first click/keydown
+                this.activeFileStatus.set('connected');
+                this.registerFirstGesturePermissionListener();
+                return;
+              }
+            }
             if (perm !== 'granted') {
-              this.activeFileStatus.set('needs-permission');
+              this.activeFileStatus.set(perm === 'denied' ? 'needs-permission' : 'connected');
+              if (perm === 'prompt') {
+                this.registerFirstGesturePermissionListener();
+              }
               return;
             }
           }
@@ -881,6 +918,11 @@ export class StorageService {
         }
       } while (this.pendingWriteRequested);
     } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'SecurityError') {
+        this.activeFileStatus.set('connected');
+        this.registerFirstGesturePermissionListener();
+        return;
+      }
       this.fileSyncError.set(
         err instanceof Error ? err.message : 'Auto-save to active file failed.'
       );
@@ -891,28 +933,16 @@ export class StorageService {
   }
 
   private async restoreActiveFileConnection(): Promise<void> {
-    // 1. Check if a simulated/virtual active file was persisted in localStorage
-    if (typeof localStorage !== 'undefined') {
-      try {
-        const rawMeta = localStorage.getItem(VIRTUAL_FILE_META_KEY);
-        if (rawMeta) {
-          const parsed = JSON.parse(rawMeta) as { fileName?: string; savedAt?: string };
-          if (parsed && parsed.fileName) {
-            this.isSimulatedFile = true;
-            this.activeFileName.set(parsed.fileName);
-            this.lastFileSavedAt.set(parsed.savedAt ?? new Date().toISOString());
-            this.activeFileStatus.set('saved');
-            return;
-          }
-        }
-      } catch {
-        // Ignore corrupt meta
-      }
-    }
+    // Always clean up any legacy simulated/virtual file keys in localStorage so a phantom file never appears on startup
+    this.clearSimulatedFileMeta();
 
-    // 2. Check if a native FileSystemFileHandle was stored in IndexedDB
+    // Check if a genuine native FileSystemFileHandle was stored in IndexedDB
     const savedHandle = await this.loadHandleFromIndexedDb();
-    if (!savedHandle) {
+    if (
+      !savedHandle ||
+      typeof savedHandle.getFile !== 'function' ||
+      typeof savedHandle.createWritable !== 'function'
+    ) {
       return;
     }
 
@@ -925,6 +955,10 @@ export class StorageService {
         if (perm === 'granted') {
           this.activeFileStatus.set('saved');
           await this.writeToActiveFileHandle();
+        } else if (perm === 'prompt') {
+          // Show as connected and seamlessly request write permission on the user's very first interaction
+          this.activeFileStatus.set('connected');
+          this.registerFirstGesturePermissionListener();
         } else {
           this.activeFileStatus.set('needs-permission');
         }
@@ -932,7 +966,68 @@ export class StorageService {
         this.activeFileStatus.set('saved');
       }
     } catch {
-      this.activeFileStatus.set('needs-permission');
+      this.activeFileStatus.set('connected');
+      this.registerFirstGesturePermissionListener();
+    }
+  }
+
+  private registerFirstGesturePermissionListener(): void {
+    if (this.gestureListenerRegistered || typeof window === 'undefined') {
+      return;
+    }
+    this.gestureListenerRegistered = true;
+
+    const onFirstGesture = () => {
+      window.removeEventListener('pointerdown', onFirstGesture, true);
+      window.removeEventListener('keydown', onFirstGesture, true);
+      this.gestureListenerRegistered = false;
+      void this.ensurePermissionOnFirstGesture();
+    };
+
+    window.addEventListener('pointerdown', onFirstGesture, { capture: true, passive: true });
+    window.addEventListener('keydown', onFirstGesture, { capture: true, passive: true });
+  }
+
+  private async ensurePermissionOnFirstGesture(): Promise<void> {
+    if (!this.fileHandle) {
+      return;
+    }
+    try {
+      if (typeof this.fileHandle.queryPermission === 'function') {
+        let perm = await this.fileHandle.queryPermission({ mode: 'readwrite' });
+        if (perm !== 'granted' && typeof this.fileHandle.requestPermission === 'function') {
+          perm = await this.fileHandle.requestPermission({ mode: 'readwrite' });
+        }
+        if (perm === 'granted') {
+          await this.writeToActiveFileHandle();
+        } else if (perm === 'denied') {
+          this.activeFileStatus.set('needs-permission');
+        }
+      } else {
+        await this.writeToActiveFileHandle();
+      }
+    } catch {
+      // Keep status as connected so next user action can retry
+    }
+  }
+
+  private triggerBrowserFileDownload(fileName: string, content: string): void {
+    if (typeof document === 'undefined' || typeof Blob === 'undefined') {
+      return;
+    }
+    try {
+      const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = fileName;
+      anchor.style.display = 'none';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      // Ignore download errors in headless environments
     }
   }
 
@@ -966,7 +1061,12 @@ export class StorageService {
           this.fileSyncError.set(
             err instanceof Error ? err.message : 'Invalid ProtoJSON file selected.'
           );
-          this.activeFileStatus.set('error');
+          if (!this.fileHandle && !this.isSimulatedFile) {
+            this.activeFileName.set(null);
+            this.activeFileStatus.set('none');
+          } else {
+            this.activeFileStatus.set('error');
+          }
           resolve(false);
         }
       };
@@ -981,12 +1081,14 @@ export class StorageService {
     });
   }
 
-  private saveSimulatedFileMeta(fileName: string, savedAt: string, content?: string): void {
+  private saveSimulatedFileMeta(_fileName: string, _savedAt: string, content?: string): void {
     if (typeof localStorage === 'undefined') {
       return;
     }
     try {
-      localStorage.setItem(VIRTUAL_FILE_META_KEY, JSON.stringify({ fileName, savedAt }));
+      // Never persist VIRTUAL_FILE_META_KEY across reloads so phantom active files cannot appear on startup
+      localStorage.removeItem(VIRTUAL_FILE_META_KEY);
+      localStorage.removeItem('bible_memory_virtual_file_meta_v1');
       if (content !== undefined) {
         localStorage.setItem(VIRTUAL_FILE_CONTENT_KEY, content);
       }
@@ -1002,6 +1104,7 @@ export class StorageService {
     try {
       localStorage.removeItem(VIRTUAL_FILE_META_KEY);
       localStorage.removeItem(VIRTUAL_FILE_CONTENT_KEY);
+      localStorage.removeItem('bible_memory_virtual_file_meta_v1');
     } catch {
       // Ignore storage errors
     }

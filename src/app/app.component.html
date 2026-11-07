@@ -1,4 +1,4 @@
-<div class="app-shell" [class.dark-theme]="isDarkMode()">
+<div class="app-shell" [class.dark-theme]="isDarkMode()" [class.light-theme]="!isDarkMode()">
   <header class="app-topbar" data-testid="app-topbar">
     <div class="brand-group" (click)="openDashboardTab('queue')" role="button" tabindex="0">
       <div class="brand-logo" aria-hidden="true">✦</div>
@@ -9,6 +9,21 @@
     </div>
 
     <nav class="topbar-actions">
+      <button
+        type="button"
+        class="topbar-btn memory-file-pill"
+        [class.file-disconnected]="!storageService.activeFileName()"
+        [class.file-connected]="!!storageService.activeFileName()"
+        (click)="showProtoSyncModal.set(true)"
+        data-testid="topbar-memory-file-status"
+        title="Click to select, create, or manage your active Memory Data File (.proto.json)"
+      >
+        @if (!storageService.activeFileName()) {
+          <span>💾 Select Memory File...</span>
+        } @else {
+          <span>🟢 {{ storageService.activeFileName() }} (Auto-save)</span>
+        }
+      </button>
       <button
         type="button"
         class="topbar-btn"

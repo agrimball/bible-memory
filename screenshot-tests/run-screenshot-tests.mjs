@@ -29,6 +29,7 @@ const MIME_TYPES = {
   '.ico': 'image/x-icon',
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
 };
 
 async function startStaticDistServer(preferredPort = 0) {
@@ -132,6 +133,15 @@ async function runScreenshotSuite() {
   if (!process.env.APP_URL) {
     staticServerInfo = await startStaticDistServer(0);
     APP_URL = staticServerInfo.url;
+  } else {
+    try {
+      const probe = await fetch(process.env.APP_URL);
+      await probe.arrayBuffer();
+    } catch {
+      const parsedPort = Number(new URL(process.env.APP_URL).port) || 0;
+      staticServerInfo = await startStaticDistServer(parsedPort);
+      APP_URL = staticServerInfo.url;
+    }
   }
 
   console.log(
@@ -168,7 +178,9 @@ async function runScreenshotSuite() {
     console.log('Step 1a: Navigating to Home Page (Dark Mode, Currently Memorizing & Saved to Memorize Next)...');
     await page.goto(APP_URL, { waitUntil: 'networkidle' });
     await page.locator('[data-testid="btn-toggle-theme"]').waitFor({ state: 'visible', timeout: 15000 });
+    await page.locator('[data-testid="topbar-memory-file-status"]').waitFor({ state: 'visible', timeout: 15000 });
     await page.locator('[data-testid="active-data-file-bar"]').waitFor({ state: 'visible', timeout: 15000 });
+    await page.locator('[data-testid="active-data-file-empty"]').waitFor({ state: 'visible', timeout: 15000 });
     await page.locator('[data-testid="btn-open-data-file"]').waitFor({ state: 'visible', timeout: 15000 });
     await page.locator('[data-testid="btn-create-data-file"]').waitFor({ state: 'visible', timeout: 15000 });
     await page.locator('[data-testid="deck-stats-grid"]').waitFor({ state: 'visible', timeout: 15000 });
@@ -190,13 +202,42 @@ async function runScreenshotSuite() {
 
     await captureStepScreenshot(page, '01-deck-dashboard.png', stepResults, {
       step: '1a',
-      name: 'Home Dashboard: Active Memory Data File Bar, Currently Memorizing & Saved to Memorize Next',
+      name: 'Home Dashboard (Dark Mode): Active Memory Data File Bar, Currently Memorizing & Saved to Memorize Next',
       assertions: [
+        '[data-testid="topbar-memory-file-status"] and [data-testid="active-data-file-empty"] are visible (no phantom file selected)',
         '[data-testid="active-data-file-bar"] with [data-testid="btn-open-data-file"] and [data-testid="btn-create-data-file"] is visible',
         '[data-testid="currently-memorizing-section"] displays active learning passages (Philippians 4:6-7)',
         '[data-testid="saved-backlog-section"] displays saved backlog passages (Romans 8:1-4, Psalm 23:1-6)',
       ],
     });
+
+    // =========================================================================
+    // 1c. 01c-deck-dashboard-light-mode.png (Light Mode Home Page Verification)
+    // =========================================================================
+    console.log('Step 1c: Toggling to Light Mode on Home Page & Verifying Light Theme...');
+    await page.locator('[data-testid="btn-toggle-theme"]').click();
+    await page.waitForTimeout(200);
+    const isLightModeActive = await page.evaluate(() => {
+      return (
+        document.documentElement.classList.contains('light-theme') ||
+        document.body.classList.contains('light-theme') ||
+        document.documentElement.getAttribute('data-theme') === 'light'
+      );
+    });
+    assertCondition(isLightModeActive, 'Expected clicking btn-toggle-theme to activate Light Mode (.light-theme)');
+
+    await captureStepScreenshot(page, '01c-deck-dashboard-light-mode.png', stepResults, {
+      step: '1c',
+      name: 'Home Dashboard (Light Mode): Warm Ivory/Parchment Theme Verification',
+      assertions: [
+        'Clicking [data-testid="btn-toggle-theme"] switches Home Page from Dark Mode to Light Mode (.light-theme)',
+        'All Home Page cards, tabs, KPIs, and Active Memory Data File bar render in warm parchment Light Mode',
+      ],
+    });
+
+    // Switch back to Dark Mode for the rest of the test suite
+    await page.locator('[data-testid="btn-toggle-theme"]').click();
+    await page.waitForTimeout(150);
 
     // =========================================================================
     // 1b. 01b-due-page.png (Remember-Me Style Due Page)

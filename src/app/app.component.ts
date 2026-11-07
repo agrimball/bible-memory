@@ -80,6 +80,9 @@ export class AppComponent implements OnInit {
     this.isDarkMode.set(isDark);
     if (typeof document !== 'undefined') {
       document.documentElement.classList.toggle('dark-theme', isDark);
+      document.documentElement.classList.toggle('light-theme', !isDark);
+      document.body?.classList.toggle('dark-theme', isDark);
+      document.body?.classList.toggle('light-theme', !isDark);
     }
     if (typeof localStorage !== 'undefined') {
       try {

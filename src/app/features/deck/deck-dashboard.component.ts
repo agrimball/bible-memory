@@ -802,18 +802,139 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         --text-primary: #f8fafc;
         --text-secondary: #cbd5e1;
         --text-muted: #94a3b8;
+        --card-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
+        --card-hover-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
+
+        --hero-bg: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        --due-hero-bg: linear-gradient(135deg, #134e4a 0%, #0f172a 100%);
+        --active-hero-bg: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        --hero-border: #334155;
+        --hero-eyebrow: #5eead4;
+        --hero-title: #ffffff;
+        --hero-desc: #cbd5e1;
+        --hero-code-bg: rgba(255, 255, 255, 0.14);
+        --hero-code-text: #fde68a;
+        --proto-btn-bg: rgba(255, 255, 255, 0.08);
+        --proto-btn-text: #f8fafc;
+        --proto-btn-border: rgba(255, 255, 255, 0.2);
+        --proto-btn-hover: rgba(255, 255, 255, 0.16);
+
+        --tab-hover-bg: rgba(255, 255, 255, 0.05);
+        --tab-active-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+        --badge-queue-bg: rgba(59, 130, 246, 0.22);
+        --badge-queue-text: #93c5fd;
+        --badge-due-bg: rgba(20, 184, 166, 0.22);
+        --badge-due-text: #5eead4;
+        --badge-active-bg: rgba(34, 197, 94, 0.22);
+        --badge-active-text: #86efac;
+        --badge-learning-bg: rgba(245, 158, 11, 0.2);
+        --badge-learning-text: #fcd34d;
+
+        --kpi-queue-color: #60a5fa;
+        --kpi-due-color: #2dd4bf;
+        --kpi-learning-color: #fbbf24;
+        --kpi-review-color: #4ade80;
+        --verse-num-color: #2dd4bf;
+
+        --repair-card-bg: linear-gradient(90deg, rgba(244, 63, 94, 0.08) 0%, #1e293b 35%);
+        --repair-badge-bg: rgba(244, 63, 94, 0.22);
+        --repair-badge-text: #fda4af;
+        --repair-badge-border: rgba(244, 63, 94, 0.45);
+        --heal-pill-bg: rgba(16, 185, 129, 0.18);
+        --heal-pill-text: #6ee7b7;
+        --heal-pill-border: rgba(16, 185, 129, 0.4);
+        --stitch-pill-bg: rgba(245, 158, 11, 0.18);
+        --stitch-pill-text: #fcd34d;
+        --stitch-pill-border: rgba(245, 158, 11, 0.4);
+
+        --start-btn-bg: rgba(245, 158, 11, 0.16);
+        --start-btn-text: #fde68a;
+        --start-btn-border: rgba(245, 158, 11, 0.5);
+        --start-btn-hover: rgba(245, 158, 11, 0.28);
+        --mark-mem-bg: rgba(34, 197, 94, 0.18);
+        --mark-mem-text: #86efac;
+        --mark-mem-border: rgba(34, 197, 94, 0.45);
+        --mark-mem-hover: rgba(34, 197, 94, 0.28);
+
+        --data-empty-bg: rgba(120, 53, 15, 0.28);
+        --data-empty-border: rgba(245, 158, 11, 0.45);
+        --data-conn-bg: rgba(6, 78, 59, 0.32);
+        --data-conn-border: rgba(52, 211, 153, 0.45);
+        --code-inline-bg: rgba(148, 163, 184, 0.18);
+        --code-inline-text: #5eead4;
         display: block;
       }
 
-      :host-context(.light-theme) {
-        --bg-surface: #fffdf9;
+      :host-context(.light-theme),
+      :host-context(html:not(.dark-theme)) {
+        --bg-surface: #ffffff;
         --bg-surface-elevated: #faf6ee;
-        --bg-subtle: #efe9dc;
-        --border-color: #e7e0d3;
+        --bg-subtle: #f1ece1;
+        --border-color: #e2dacb;
         --border-hover: #b8afa0;
         --text-primary: #1c1917;
         --text-secondary: #44403c;
         --text-muted: #78716c;
+        --card-shadow: 0 2px 8px rgba(28, 25, 23, 0.05);
+        --card-hover-shadow: 0 8px 20px rgba(28, 25, 23, 0.09);
+
+        --hero-bg: linear-gradient(135deg, #f5efe4 0%, #ebe2d2 100%);
+        --due-hero-bg: linear-gradient(135deg, #e6f7f4 0%, #d5f0ec 100%);
+        --active-hero-bg: linear-gradient(135deg, #eef6ee 0%, #e1efe2 100%);
+        --hero-border: #d8cebe;
+        --hero-eyebrow: #0f766e;
+        --hero-title: #1c1917;
+        --hero-desc: #44403c;
+        --hero-code-bg: rgba(15, 118, 110, 0.1);
+        --hero-code-text: #0f766e;
+        --proto-btn-bg: #ffffff;
+        --proto-btn-text: #292524;
+        --proto-btn-border: #cfc6b6;
+        --proto-btn-hover: #f7f3eb;
+
+        --tab-hover-bg: rgba(255, 255, 255, 0.65);
+        --tab-active-shadow: 0 2px 8px rgba(28, 25, 23, 0.08);
+        --badge-queue-bg: #dbeafe;
+        --badge-queue-text: #1e40af;
+        --badge-due-bg: #ccfbf1;
+        --badge-due-text: #0f766e;
+        --badge-active-bg: #dcfce7;
+        --badge-active-text: #166534;
+        --badge-learning-bg: #fef3c7;
+        --badge-learning-text: #92400e;
+
+        --kpi-queue-color: #1d4ed8;
+        --kpi-due-color: #0f766e;
+        --kpi-learning-color: #b45309;
+        --kpi-review-color: #15803d;
+        --verse-num-color: #0f766e;
+
+        --repair-card-bg: linear-gradient(90deg, #fff1f2 0%, #ffffff 35%);
+        --repair-badge-bg: #ffe4e6;
+        --repair-badge-text: #be123c;
+        --repair-badge-border: #fda4af;
+        --heal-pill-bg: #d1fae5;
+        --heal-pill-text: #065f46;
+        --heal-pill-border: #6ee7b7;
+        --stitch-pill-bg: #fffbeb;
+        --stitch-pill-text: #92400e;
+        --stitch-pill-border: #fde68a;
+
+        --start-btn-bg: #fffbeb;
+        --start-btn-text: #92400e;
+        --start-btn-border: #d97706;
+        --start-btn-hover: #fef3c7;
+        --mark-mem-bg: #dcfce7;
+        --mark-mem-text: #166534;
+        --mark-mem-border: #86efac;
+        --mark-mem-hover: #bbf7d0;
+
+        --data-empty-bg: #fffbeb;
+        --data-empty-border: #f59e0b;
+        --data-conn-bg: #f0fdf4;
+        --data-conn-border: #86efac;
+        --code-inline-bg: rgba(15, 118, 110, 0.09);
+        --code-inline-text: #0f766e;
       }
 
       .dashboard-container {
@@ -828,8 +949,8 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .data-file-empty-row {
-        background: rgba(120, 53, 15, 0.28);
-        border: 1px solid rgba(245, 158, 11, 0.45);
+        background: var(--data-empty-bg);
+        border: 1px solid var(--data-empty-border);
         border-radius: 0.85rem;
         padding: 0.8rem 1.15rem;
         display: flex;
@@ -839,14 +960,9 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         flex-wrap: wrap;
       }
 
-      :host-context(.light-theme) .data-file-empty-row {
-        background: #fffbeb;
-        border-color: #f59e0b;
-      }
-
       .data-file-connected-row {
-        background: rgba(6, 78, 59, 0.32);
-        border: 1px solid rgba(52, 211, 153, 0.45);
+        background: var(--data-conn-bg);
+        border: 1px solid var(--data-conn-border);
         border-radius: 0.85rem;
         padding: 0.75rem 1.15rem;
         display: flex;
@@ -854,11 +970,6 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         justify-content: space-between;
         gap: 1rem;
         flex-wrap: wrap;
-      }
-
-      :host-context(.light-theme) .data-file-connected-row {
-        background: #f0fdf4;
-        border-color: #86efac;
       }
 
       .data-file-info {
@@ -905,15 +1016,11 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .file-headline code {
-        background: rgba(148, 163, 184, 0.18);
+        background: var(--code-inline-bg);
         padding: 0.08rem 0.38rem;
         border-radius: 0.3rem;
         font-size: 0.82rem;
-        color: #5eead4;
-      }
-
-      :host-context(.light-theme) .file-headline code {
-        color: #0f766e;
+        color: var(--code-inline-text);
       }
 
       .file-subtext {
@@ -965,9 +1072,9 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .disconnect-file-btn:hover {
-        background: rgba(239, 68, 68, 0.15);
+        background: rgba(239, 68, 68, 0.12);
         border-color: #f87171;
-        color: #fca5a5;
+        color: #dc2626;
       }
 
       .dashboard-tabs-bar {
@@ -1000,13 +1107,13 @@ export type DashboardTab = 'queue' | 'due' | 'active';
 
       .tab-pill:hover {
         color: var(--text-primary);
-        background: rgba(255, 255, 255, 0.05);
+        background: var(--tab-hover-bg);
       }
 
       .tab-pill.active {
         background: var(--bg-surface);
         color: var(--text-primary);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+        box-shadow: var(--tab-active-shadow);
       }
 
       .tab-badge {
@@ -1017,18 +1124,18 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .queue-badge {
-        background: rgba(59, 130, 246, 0.22);
-        color: #93c5fd;
+        background: var(--badge-queue-bg);
+        color: var(--badge-queue-text);
       }
 
       .due-badge {
-        background: rgba(20, 184, 166, 0.22);
-        color: #5eead4;
+        background: var(--badge-due-bg);
+        color: var(--badge-due-text);
       }
 
       .active-badge {
-        background: rgba(34, 197, 94, 0.22);
-        color: #86efac;
+        background: var(--badge-active-bg);
+        color: var(--badge-active-text);
       }
 
       .tab-view-section {
@@ -1044,9 +1151,9 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .hero-card {
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        border: 1px solid var(--border-color);
-        color: #f8fafc;
+        background: var(--hero-bg);
+        border: 1px solid var(--hero-border);
+        color: var(--hero-title);
         border-radius: 1.1rem;
         padding: 1.55rem 1.8rem;
         display: flex;
@@ -1054,15 +1161,15 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         justify-content: space-between;
         gap: 1.4rem;
         flex-wrap: wrap;
-        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
+        box-shadow: var(--card-shadow);
       }
 
       .due-hero {
-        background: linear-gradient(135deg, #134e4a 0%, #0f172a 100%);
+        background: var(--due-hero-bg);
       }
 
       .active-hero {
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        background: var(--active-hero-bg);
       }
 
       .hero-copy {
@@ -1075,7 +1182,7 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        color: #5eead4;
+        color: var(--hero-eyebrow);
         margin-bottom: 0.35rem;
       }
 
@@ -1084,21 +1191,22 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         font-size: 1.48rem;
         font-weight: 800;
         letter-spacing: -0.02em;
-        color: #ffffff;
+        color: var(--hero-title);
       }
 
       .hero-description {
         margin: 0.45rem 0 0;
         font-size: 0.87rem;
         line-height: 1.5;
-        color: #cbd5e1;
+        color: var(--hero-desc);
       }
 
       .hero-description code {
-        background: rgba(255, 255, 255, 0.14);
+        background: var(--hero-code-bg);
         padding: 0.1rem 0.35rem;
         border-radius: 0.3rem;
-        color: #fde68a;
+        color: var(--hero-code-text);
+        font-weight: 600;
       }
 
       .primary-action-bar {
@@ -1127,7 +1235,7 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       .study-due-btn {
         background: #0d9488;
         color: #ffffff;
-        box-shadow: 0 4px 12px rgba(13, 148, 136, 0.28);
+        box-shadow: 0 4px 12px rgba(13, 148, 136, 0.22);
       }
 
       .study-due-btn:hover:not(:disabled) {
@@ -1136,7 +1244,7 @@ export type DashboardTab = 'queue' | 'due' | 'active';
 
       .add-passage-btn {
         background: #f59e0b;
-        color: #0f172a;
+        color: #1c1917;
       }
 
       .add-passage-btn:hover {
@@ -1144,13 +1252,13 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .proto-sync-btn {
-        background: rgba(255, 255, 255, 0.08);
-        color: #f8fafc;
-        border-color: rgba(255, 255, 255, 0.2);
+        background: var(--proto-btn-bg);
+        color: var(--proto-btn-text);
+        border-color: var(--proto-btn-border);
       }
 
       .proto-sync-btn:hover {
-        background: rgba(255, 255, 255, 0.16);
+        background: var(--proto-btn-hover);
       }
 
       .stats-grid {
@@ -1167,6 +1275,7 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         display: flex;
         flex-direction: column;
         gap: 0.18rem;
+        box-shadow: var(--card-shadow);
       }
 
       .clickable-kpi {
@@ -1180,8 +1289,8 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .selected-kpi {
-        border-color: #14b8a6;
-        box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.2);
+        border-color: #0d9488;
+        box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.18);
       }
 
       .kpi-label {
@@ -1200,19 +1309,19 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .queue-kpi .kpi-value {
-        color: #60a5fa;
+        color: var(--kpi-queue-color);
       }
 
       .due-kpi .kpi-value {
-        color: #2dd4bf;
+        color: var(--kpi-due-color);
       }
 
       .learning-kpi .kpi-value {
-        color: #fbbf24;
+        color: var(--kpi-learning-color);
       }
 
       .review-kpi .kpi-value {
-        color: #4ade80;
+        color: var(--kpi-review-color);
       }
 
       .kpi-sub {
@@ -1256,6 +1365,7 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         align-items: center;
         justify-content: space-between;
         gap: 1.25rem;
+        box-shadow: var(--card-shadow);
         transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
       }
 
@@ -1264,8 +1374,8 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .clickable-card:hover {
-        border-color: #14b8a6;
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+        border-color: #0d9488;
+        box-shadow: var(--card-hover-shadow);
       }
 
       .memorizing-card {
@@ -1274,7 +1384,7 @@ export type DashboardTab = 'queue' | 'due' | 'active';
 
       .repair-card {
         border-left: 4px solid #f43f5e !important;
-        background: linear-gradient(90deg, rgba(244, 63, 94, 0.08) 0%, var(--bg-surface) 35%);
+        background: var(--repair-card-bg);
       }
 
       .queue-card {
@@ -1282,7 +1392,7 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .deck-item-card.is-due {
-        border-left: 4px solid #14b8a6;
+        border-left: 4px solid #0d9488;
       }
 
       .deck-item-main {
@@ -1322,15 +1432,9 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         font-weight: 700;
         padding: 0.15rem 0.58rem;
         border-radius: 999px;
-        background: rgba(245, 158, 11, 0.18);
-        color: #fcd34d;
-        border: 1px solid rgba(245, 158, 11, 0.4);
-      }
-
-      :host-context(.light-theme) .stitch-progress-pill {
-        background: #fffbeb;
-        color: #92400e;
-        border-color: #fde68a;
+        background: var(--stitch-pill-bg);
+        color: var(--stitch-pill-text);
+        border: 1px solid var(--stitch-pill-border);
       }
 
       .repair-card-badge {
@@ -1338,15 +1442,9 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         font-weight: 800;
         padding: 0.18rem 0.6rem;
         border-radius: 999px;
-        background: rgba(244, 63, 94, 0.22);
-        color: #fda4af;
-        border: 1px solid rgba(244, 63, 94, 0.45);
-      }
-
-      :host-context(.light-theme) .repair-card-badge {
-        background: #ffe4e6;
-        color: #be123c;
-        border-color: #fda4af;
+        background: var(--repair-badge-bg);
+        color: var(--repair-badge-text);
+        border: 1px solid var(--repair-badge-border);
       }
 
       .repair-heal-pill {
@@ -1354,15 +1452,9 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         font-weight: 700;
         padding: 0.16rem 0.55rem;
         border-radius: 999px;
-        background: rgba(16, 185, 129, 0.18);
-        color: #6ee7b7;
-        border: 1px solid rgba(16, 185, 129, 0.4);
-      }
-
-      :host-context(.light-theme) .repair-heal-pill {
-        background: #d1fae5;
-        color: #065f46;
-        border-color: #6ee7b7;
+        background: var(--heal-pill-bg);
+        color: var(--heal-pill-text);
+        border: 1px solid var(--heal-pill-border);
       }
 
       .state-badge {
@@ -1376,48 +1468,27 @@ export type DashboardTab = 'queue' | 'due' | 'active';
 
       .badge-queued,
       .badge-new {
-        background: rgba(59, 130, 246, 0.2);
-        color: #93c5fd;
-      }
-
-      :host-context(.light-theme) .badge-queued,
-      :host-context(.light-theme) .badge-new {
-        background: #dbeafe;
-        color: #1e40af;
+        background: var(--badge-queue-bg);
+        color: var(--badge-queue-text);
       }
 
       .badge-learning {
-        background: rgba(245, 158, 11, 0.2);
-        color: #fcd34d;
-      }
-
-      :host-context(.light-theme) .badge-learning {
-        background: #fef3c7;
-        color: #92400e;
+        background: var(--badge-learning-bg);
+        color: var(--badge-learning-text);
       }
 
       .badge-review {
-        background: rgba(34, 197, 94, 0.2);
-        color: #86efac;
-      }
-
-      :host-context(.light-theme) .badge-review {
-        background: #dcfce7;
-        color: #166534;
+        background: var(--badge-active-bg);
+        color: var(--badge-active-text);
       }
 
       .due-indicator {
         font-size: 0.72rem;
         font-weight: 700;
-        color: #5eead4;
-        background: rgba(20, 184, 166, 0.2);
+        color: var(--badge-due-text);
+        background: var(--badge-due-bg);
         padding: 0.14rem 0.5rem;
         border-radius: 999px;
-      }
-
-      :host-context(.light-theme) .due-indicator {
-        color: #0f766e;
-        background: #ccfbf1;
       }
 
       .scheduled-indicator {
@@ -1438,14 +1509,10 @@ export type DashboardTab = 'queue' | 'due' | 'active';
 
       .verse-num {
         font-weight: 700;
-        color: #2dd4bf;
+        color: var(--verse-num-color);
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         font-size: 0.8rem;
         margin-right: 0.25rem;
-      }
-
-      :host-context(.light-theme) .verse-num {
-        color: #0f766e;
       }
 
       .more-verses-hint {
@@ -1483,9 +1550,9 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       .start-memorize-btn {
         padding: 0.56rem 0.95rem;
         border-radius: 0.6rem;
-        border: 1px solid rgba(245, 158, 11, 0.5);
-        background: rgba(245, 158, 11, 0.16);
-        color: #fde68a;
+        border: 1px solid var(--start-btn-border);
+        background: var(--start-btn-bg);
+        color: var(--start-btn-text);
         font-size: 0.81rem;
         font-weight: 700;
         cursor: pointer;
@@ -1493,14 +1560,8 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         white-space: nowrap;
       }
 
-      :host-context(.light-theme) .start-memorize-btn {
-        background: #fffbeb;
-        color: #92400e;
-        border-color: #d97706;
-      }
-
       .start-memorize-btn:hover {
-        background: rgba(245, 158, 11, 0.28);
+        background: var(--start-btn-hover);
       }
 
       .study-card-btn {
@@ -1541,19 +1602,13 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .mark-memorized-btn {
-        background: rgba(34, 197, 94, 0.18);
-        border: 1px solid rgba(34, 197, 94, 0.45);
-        color: #86efac;
-      }
-
-      :host-context(.light-theme) .mark-memorized-btn {
-        background: #dcfce7;
-        border-color: #86efac;
-        color: #166534;
+        background: var(--mark-mem-bg);
+        border: 1px solid var(--mark-mem-border);
+        color: var(--mark-mem-text);
       }
 
       .mark-memorized-btn:hover {
-        background: rgba(34, 197, 94, 0.28);
+        background: var(--mark-mem-hover);
       }
 
       .move-saved-btn {
@@ -1579,9 +1634,9 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .delete-card-btn:hover {
-        background: rgba(239, 68, 68, 0.18);
+        background: rgba(239, 68, 68, 0.14);
         border-color: #f87171;
-        color: #fca5a5;
+        color: #dc2626;
       }
 
       .empty-deck-box {

@@ -153,6 +153,52 @@
   border-color: #475569;
 }
 
+.app-shell.light-theme .topbar-btn.theme-toggle-btn {
+  border-color: #d6cfc2;
+}
+
+.topbar-btn.memory-file-pill.file-disconnected {
+  background: #fffbeb;
+  border-color: #f59e0b;
+  color: #92400e;
+  font-weight: 700;
+}
+
+.topbar-btn.memory-file-pill.file-disconnected:hover {
+  background: #fef3c7;
+}
+
+.app-shell.dark-theme .topbar-btn.memory-file-pill.file-disconnected {
+  background: rgba(120, 53, 15, 0.35);
+  border-color: #f59e0b;
+  color: #fde68a;
+}
+
+.app-shell.dark-theme .topbar-btn.memory-file-pill.file-disconnected:hover {
+  background: rgba(120, 53, 15, 0.55);
+}
+
+.topbar-btn.memory-file-pill.file-connected {
+  background: #ecfdf5;
+  border-color: #10b981;
+  color: #065f46;
+  font-weight: 700;
+}
+
+.topbar-btn.memory-file-pill.file-connected:hover {
+  background: #d1fae5;
+}
+
+.app-shell.dark-theme .topbar-btn.memory-file-pill.file-connected {
+  background: rgba(6, 78, 59, 0.38);
+  border-color: #10b981;
+  color: #a7f3d0;
+}
+
+.app-shell.dark-theme .topbar-btn.memory-file-pill.file-connected:hover {
+  background: rgba(6, 78, 59, 0.58);
+}
+
 .app-main {
   flex: 1;
   width: 100%;
