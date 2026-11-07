@@ -49,7 +49,7 @@ import {
 
         <div class="study-page-progress" data-testid="study-progress-indicator">
           <span class="progress-badge">
-            Verse {{ studyService.activeVerseIndex() + 1 }} of {{ studyService.totalVersesCount() }}
+            v. {{ activeVerseView()?.verseNumber ?? (studyService.activeVerseIndex() + 1) }} ({{ studyService.activeVerseIndex() + 1 }} of {{ studyService.totalVersesCount() }})
           </span>
           <span class="progress-words" *ngIf="activeVerseView() as activeVerse">
             {{ activeVerse.revealedWordCount }} / {{ activeVerse.totalWordCount }} words revealed
@@ -598,18 +598,7 @@ export class FirstLetterStudyPageComponent implements OnInit, OnChanges {
   }
 
   private getEffectivePassage(): Passage | null {
-    if (!this.item?.passage) {
-      return null;
-    }
-    const allVerses = this.item.passage.verses;
-    const limit =
-      this.stitchedVerseCount && this.stitchedVerseCount > 0
-        ? Math.min(Math.max(2, this.stitchedVerseCount), allVerses.length)
-        : allVerses.length;
-    return {
-      ...this.item.passage,
-      verses: allVerses.slice(0, limit),
-    };
+    return this.item?.passage ?? null;
   }
 
   private initStudyMode(): void {

@@ -42,7 +42,7 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   @Output() stitchedVerseCountChange = new EventEmitter<number>();
 
   readonly isFlipped = signal<boolean>(false);
-  readonly localTargetVerseCount = signal<number>(2);
+  readonly localTargetVerseCount = signal<number>(1);
   readonly stitchPhase = signal<StitchPracticePhase>('new-verse-only');
   readonly stitchToastMessage = signal<string | null>(null);
   readonly repairSpawnedMessage = signal<string | null>(null);
@@ -94,6 +94,10 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     return this.currentItemSignal()?.passage.verses.length ?? 0;
   });
 
+  readonly firstVerseNumber = computed<number>(() => {
+    return this.currentItemSignal()?.passage.verses[0]?.verseNumber ?? 1;
+  });
+
   readonly activeStitchedCount = computed<number>(() => {
     const total = this.totalVerses();
     if (total === 0) {
@@ -106,7 +110,7 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     if (local >= 1 && local <= total) {
       return local;
     }
-    return Math.min(2, total);
+    return 1;
   });
 
   /**
@@ -122,6 +126,24 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
       Math.min(this.activeStitchedCount() - 1, current.passage.verses.length - 1)
     );
     return current.passage.verses[targetIdx] ?? null;
+  });
+
+  readonly stitchedVerseRangeLabel = computed<string>(() => {
+    const first = this.firstVerseNumber();
+    const curr = this.currentNewVerse()?.verseNumber ?? first;
+    if (this.activeStitchedCount() <= 1 || first === curr) {
+      return `v. ${first}`;
+    }
+    return `v. ${first}–${curr}`;
+  });
+
+  readonly stitchedVerseRangeVerboseLabel = computed<string>(() => {
+    const first = this.firstVerseNumber();
+    const curr = this.currentNewVerse()?.verseNumber ?? first;
+    if (this.activeStitchedCount() <= 1 || first === curr) {
+      return `Verse ${first}`;
+    }
+    return `Verses ${first}–${curr}`;
   });
 
   /**
@@ -188,18 +210,21 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
       return;
     }
 
-    const initialCount =
-      this.stitchedVerseCount > 0 && this.stitchedVerseCount <= total
-        ? this.stitchedVerseCount
-        : Math.min(2, total);
-    this.localTargetVerseCount.set(initialCount);
-
     if (this.item?.card.state === CardState.CARD_STATE_REVIEW) {
       this.stitchPhase.set('full-passage');
       this.localTargetVerseCount.set(total);
-    } else {
-      this.stitchPhase.set('new-verse-only');
+      return;
     }
+
+    const savedStep = this.item?.card.learningStep;
+    const initialCount =
+      this.stitchedVerseCount >= 1 && this.stitchedVerseCount <= total
+        ? this.stitchedVerseCount
+        : savedStep && savedStep >= 1
+          ? Math.min(savedStep, total)
+          : 1;
+    this.localTargetVerseCount.set(initialCount);
+    this.stitchPhase.set('new-verse-only');
   }
 
   spawnRepairCardForVerse(verseNumber: number): void {
@@ -248,6 +273,12 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     this.stitchToastMessage.set(null);
     if (this.stitchPhase() === 'full-passage' && clamped < total) {
       this.stitchPhase.set('new-verse-only');
+    }
+    if (this.item && !this.item.card.isRepairCard) {
+      const updated = this.storageService.updateStitchedVerseStep(this.item.card.id, clamped);
+      if (updated) {
+        this.currentItemSignal.set(updated);
+      }
     }
     this.stitchedVerseCountChange.emit(clamped);
   }
@@ -318,35 +349,49 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     const isGoodOrEasy =
       rating === ReviewRating.REVIEW_RATING_GOOD ||
       rating === ReviewRating.REVIEW_RATING_EASY;
+    const currentTarget = this.activeStitchedCount();
+    const total = this.totalVerses();
 
     // Two-step daily stitching workflow:
     // Step 1: Practicing ONLY the new verse for the day ('new-verse-only').
-    // When graded Good or Easy -> automatically switch to Step 2 ('stitch-block') to practice the whole block!
     if (isMultiVerse && this.stitchPhase() === 'new-verse-only' && isGoodOrEasy) {
+      // If we are on the very 1st verse of the passage (currentTarget === 1),
+      // there are no prior verses to stitch with yet! Completing the 1st verse
+      // advances the saved step to 2 (the 2nd verse) and finishes the card review.
+      if (currentTarget <= 1) {
+        const nextCount = Math.min(total, 2);
+        this.setTargetVerseCount(nextCount);
+        this.rated.emit({
+          cardId: this.item.card.id,
+          rating,
+        });
+        return;
+      }
+
+      // For currentTarget >= 2: Step 1 is solid -> transition to Step 2 ('stitch-block')
+      // to practice verses[0..currentTarget-1] together!
       const updated = this.storageService.recordReview(this.item.card.id, rating);
       if (updated) {
         this.currentItemSignal.set(updated);
       }
-      const newVerseNum = this.currentNewVerse()?.verseNumber ?? this.activeStitchedCount();
-      const firstVerseNum = this.item.passage.verses[0]?.verseNumber ?? 1;
+      const newVerseNum = this.currentNewVerse()?.verseNumber ?? currentTarget;
+      const rangeLabel = this.stitchedVerseRangeLabel();
 
       this.stitchPhase.set('stitch-block');
       this.isFlipped.set(false);
       this.voiceService.resetForNewCard();
       this.stitchToastMessage.set(
-        `✓ Verse ${newVerseNum} is solid! Step 2: Now recite the stitched block (v. ${firstVerseNum}–${newVerseNum}) to complete the stitching.`
+        `✓ Verse ${newVerseNum} is solid! Step 2: Now recite the stitched block (${rangeLabel}) to complete the stitching.`
       );
       return;
     }
 
     // Step 2: Practicing the stitched block ('stitch-block').
-    // When graded Good or Easy -> completes the stitching for this block!
+    // When graded Good or Easy -> completes the stitching for this block and advances to next verse!
     if (isMultiVerse && this.stitchPhase() === 'stitch-block' && isGoodOrEasy) {
-      const total = this.totalVerses();
-      if (this.activeStitchedCount() < total) {
-        const nextCount = this.activeStitchedCount() + 1;
-        this.localTargetVerseCount.set(nextCount);
-        this.stitchedVerseCountChange.emit(nextCount);
+      if (currentTarget < total) {
+        const nextCount = Math.min(total, currentTarget + 1);
+        this.setTargetVerseCount(nextCount);
       }
     }
 

@@ -1,7 +1,7 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StorageService, DeckItem } from './core/services/storage.service';
-import { ReviewRating } from './core/proto/bible_memory.pb';
+import { CardState, ReviewRating } from './core/proto/bible_memory.pb';
 import { DeckDashboardComponent } from './features/deck/deck-dashboard.component';
 import { StudyCardComponent } from './features/study/study-card.component';
 import { FirstLetterStudyPageComponent } from './features/study/first-letter-study-page.component';
@@ -55,8 +55,20 @@ export class AppComponent implements OnInit {
     if (!item) {
       return 0;
     }
+    const total = item.passage.verses.length;
+    if (item.card.state === CardState.CARD_STATE_REVIEW) {
+      return total;
+    }
     const map = this.stitchedCountByPassageId();
-    return map[item.passage.id] ?? item.passage.verses.length;
+    const fromMap = map[item.passage.id];
+    if (fromMap && fromMap >= 1 && fromMap <= total) {
+      return fromMap;
+    }
+    const savedStep = item.card.learningStep;
+    if (savedStep >= 1 && savedStep <= total) {
+      return savedStep;
+    }
+    return 1;
   });
 
   ngOnInit(): void {
@@ -136,6 +148,10 @@ export class AppComponent implements OnInit {
       ...prev,
       [item.passage.id]: count,
     }));
+    const svc = this.storageService as StorageService & {
+      updateStitchedVerseStep?: (cardId: string, step: number) => void;
+    };
+    svc.updateStitchedVerseStep?.(item.card.id, count);
   }
 
   openFirstLetterStudyPage(item: DeckItem): void {

@@ -134,7 +134,7 @@
           (click)="setStitchPhase('stitch-block')"
         >
           <span class="step-num">2</span>
-          <span>Stitch Block (v. {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }})</span>
+          <span>Stitch Block ({{ stitchedVerseRangeLabel() }})</span>
         </button>
 
         <button
@@ -225,7 +225,12 @@
           <!-- Step 1: Practicing Only Today's New Verse -->
           <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only'">
             <span class="active-step-pill step-1-pill">
-              Step 1 of 2 · New Verse for Today (Verse {{ currentNewVerse()?.verseNumber }})
+              <ng-container *ngIf="activeStitchedCount() <= 1; else multiStepPill">
+                Step 1 · First Verse (Verse {{ currentNewVerse()?.verseNumber }} · 1 of {{ item.passage.verses.length }})
+              </ng-container>
+              <ng-template #multiStepPill>
+                Step 1 of 2 · New Verse for Today (Verse {{ currentNewVerse()?.verseNumber }})
+              </ng-template>
             </span>
 
             <div
@@ -240,19 +245,22 @@
             <p class="prompt-instruction">
               Recite <strong>Verse {{ currentNewVerse()?.verseNumber }}</strong> aloud from memory.
             </p>
-            <p class="prompt-subtext">
-              Once Verse {{ currentNewVerse()?.verseNumber }} is solid (graded Good/Easy), you'll immediately practice the whole stitched block (Verses {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }}) to complete the stitch.
+            <p class="prompt-subtext" *ngIf="activeStitchedCount() <= 1">
+              Start by memorizing the first verse of this passage (Verse {{ currentNewVerse()?.verseNumber }}). Once graded Good or Easy, your target advances to the next verse!
+            </p>
+            <p class="prompt-subtext" *ngIf="activeStitchedCount() > 1">
+              Once Verse {{ currentNewVerse()?.verseNumber }} is solid (graded Good/Easy), you'll immediately practice the whole stitched block ({{ stitchedVerseRangeVerboseLabel() }}) to complete the stitch.
             </p>
           </ng-container>
 
           <!-- Step 2: Practicing the Stitched Block -->
           <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'stitch-block'">
             <span class="active-step-pill step-2-pill">
-              Step 2 of 2 · Stitch Whole Block (Verses {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }})
+              Step 2 of 2 · Stitch Whole Block ({{ stitchedVerseRangeVerboseLabel() }})
             </span>
 
             <p class="prompt-instruction">
-              Recite the whole block (<strong>Verses {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }}</strong>) together from memory.
+              Recite the whole block (<strong>{{ stitchedVerseRangeVerboseLabel() }}</strong>) together from memory.
             </p>
             <p class="prompt-subtext">
               Grading this block Good or Easy completes the stitching for Verse {{ currentNewVerse()?.verseNumber }}!
@@ -373,7 +381,7 @@
               Back · Verify New Verse (v. {{ currentNewVerse()?.verseNumber }})
             </ng-container>
             <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'stitch-block'">
-              Back · Verify Stitched Block (v. {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }})
+              Back · Verify Stitched Block ({{ stitchedVerseRangeLabel() }})
             </ng-container>
             <ng-container *ngIf="item.passage.verses.length <= 1 || stitchPhase() === 'full-passage'">
               Back · Verify &amp; Listen
@@ -534,10 +542,15 @@
           </ng-container>
           <ng-template #normalGradingPrompt>
             <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only'">
-              Step 1: Grade New Verse (v. {{ currentNewVerse()?.verseNumber }}) — Good or Easy advances to Step 2 (Stitch Block v. {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }})!
+              <ng-container *ngIf="activeStitchedCount() <= 1; else step1MultiHint">
+                Grade First Verse (v. {{ currentNewVerse()?.verseNumber }}) — Good or Easy advances target to next verse!
+              </ng-container>
+              <ng-template #step1MultiHint>
+                Step 1: Grade New Verse (v. {{ currentNewVerse()?.verseNumber }}) — Good or Easy advances to Step 2 (Stitch Block {{ stitchedVerseRangeLabel() }})!
+              </ng-template>
             </ng-container>
             <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'stitch-block'">
-              Step 2: Grade Stitched Block (v. {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }}) — Good or Easy completes the stitching!
+              Step 2: Grade Stitched Block ({{ stitchedVerseRangeLabel() }}) — Good or Easy completes the stitching!
             </ng-container>
             <ng-container *ngIf="item.passage.verses.length <= 1 || stitchPhase() === 'full-passage'">
               How well did you recite this passage?
@@ -580,7 +593,7 @@
               {{ isRepairCard() ? '+1 Heal (' + ((item.card.repairStreak || 0) + 1) + '/' + (item.card.repairTargetStreak || 3) + ')' : intervalPreviews()[ReviewRating.REVIEW_RATING_GOOD] }}
             </span>
             <span class="grade-label">
-              {{ !isRepairCard() && item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only' ? 'Good → Stitch Block' : 'Good' }}
+              {{ !isRepairCard() && item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only' && activeStitchedCount() > 1 ? 'Good → Stitch Block' : 'Good' }}
             </span>
           </button>
 
@@ -594,7 +607,7 @@
               {{ isRepairCard() ? '+1 Heal (' + ((item.card.repairStreak || 0) + 1) + '/' + (item.card.repairTargetStreak || 3) + ')' : intervalPreviews()[ReviewRating.REVIEW_RATING_EASY] }}
             </span>
             <span class="grade-label">
-              {{ !isRepairCard() && item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only' ? 'Easy → Stitch Block' : 'Easy' }}
+              {{ !isRepairCard() && item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only' && activeStitchedCount() > 1 ? 'Easy → Stitch Block' : 'Easy' }}
             </span>
           </button>
         </div>

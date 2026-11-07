@@ -508,6 +508,7 @@ export class StorageService {
 
   /**
    * Transitions a queued passage (CARD_STATE_NEW) into active memorization (CARD_STATE_LEARNING).
+   * Ensures `learningStep` starts at `1` (the 1st verse) if it was `0`.
    * Accepts either `card.id` or `passage.id`.
    */
   startMemorizingPassage(cardOrPassageId: string): DeckItem | undefined {
@@ -521,13 +522,18 @@ export class StorageService {
 
     const now = new Date();
     const isoNow = now.toISOString();
+    const initialStep = targetCard.learningStep >= 1 ? targetCard.learningStep : 1;
 
     let updatedCard = targetCard;
-    if (targetCard.state === CardState.CARD_STATE_NEW) {
+    if (targetCard.state === CardState.CARD_STATE_NEW || targetCard.learningStep < 1) {
       updatedCard = {
         ...targetCard,
-        state: CardState.CARD_STATE_LEARNING,
-        dueAt: isoNow,
+        state:
+          targetCard.state === CardState.CARD_STATE_NEW
+            ? CardState.CARD_STATE_LEARNING
+            : targetCard.state,
+        learningStep: initialStep,
+        dueAt: targetCard.state === CardState.CARD_STATE_NEW ? isoNow : targetCard.dueAt,
         updatedAt: isoNow,
       };
       this.flashcards.update((prev) =>
@@ -545,6 +551,49 @@ export class StorageService {
       passage,
       card: updatedCard,
       isDue: this.srs.isDue(updatedCard, now),
+    };
+  }
+
+  /**
+   * Updates the 1-indexed stitched verse progress (`card.learningStep`, clamped to `1 .. passage.verses.length`),
+   * persists to localStorage and the active `.proto.json` file, and returns the updated DeckItem.
+   */
+  updateStitchedVerseStep(cardId: string, step: number): DeckItem | undefined {
+    const cards = this.flashcards();
+    const targetCard =
+      cards.find((c) => c.id === cardId) ??
+      cards.find((c) => c.passageId === cardId && !c.isRepairCard);
+    if (!targetCard) {
+      return undefined;
+    }
+
+    const passage = this.passages().find((p) => p.id === targetCard.passageId);
+    if (!passage) {
+      return undefined;
+    }
+
+    const maxVerses = Math.max(1, passage.verses.length);
+    const clampedStep = Math.max(1, Math.min(Math.round(step), maxVerses));
+    const now = new Date();
+    const isoNow = now.toISOString();
+
+    const updatedCard: Flashcard = {
+      ...targetCard,
+      learningStep: clampedStep,
+      updatedAt: isoNow,
+    };
+
+    this.flashcards.update((prev) =>
+      prev.map((c) => (c.id === targetCard.id ? updatedCard : c))
+    );
+    this.persistToStorage();
+
+    return {
+      passage,
+      card: updatedCard,
+      isDue:
+        (updatedCard.state !== CardState.CARD_STATE_NEW || Boolean(updatedCard.isRepairCard)) &&
+        this.srs.isDue(updatedCard, now),
     };
   }
 
@@ -570,7 +619,10 @@ export class StorageService {
       updatedAt: isoNow,
     };
 
-    const card = this.srs.createInitialFlashcard(passage.id, now);
+    const card: Flashcard = {
+      ...this.srs.createInitialFlashcard(passage.id, now),
+      learningStep: 1,
+    };
 
     this.passages.update((prev) => [passage, ...prev]);
     this.flashcards.update((prev) => [card, ...prev]);
@@ -712,7 +764,16 @@ export class StorageService {
       };
     }
 
-    this.flashcards.update((prev) => prev.map((c) => (c.id === targetCard.id ? updatedCard : c)));
+    const maxVerses = Math.max(1, passage?.verses.length ?? 1);
+    const preservedStep = Math.max(1, Math.min(targetCard.learningStep || 1, maxVerses));
+    const finalUpdatedCard: Flashcard = {
+      ...updatedCard,
+      learningStep: preservedStep,
+    };
+
+    this.flashcards.update((prev) =>
+      prev.map((c) => (c.id === targetCard.id ? finalUpdatedCard : c))
+    );
     this.reviewLogs.update((prev) => [reviewLog, ...prev]);
     this.persistToStorage();
 
@@ -722,8 +783,10 @@ export class StorageService {
 
     return {
       passage,
-      card: updatedCard,
-      isDue: updatedCard.state !== CardState.CARD_STATE_NEW && this.srs.isDue(updatedCard, now),
+      card: finalUpdatedCard,
+      isDue:
+        finalUpdatedCard.state !== CardState.CARD_STATE_NEW &&
+        this.srs.isDue(finalUpdatedCard, now),
     };
   }
 
@@ -1222,11 +1285,19 @@ export class StorageService {
     const now = new Date();
     const mainCards: Flashcard[] = [];
     for (const passage of passages) {
+      const maxVerses = Math.max(1, passage.verses.length);
       const found = mainCardByPassageId.get(passage.id);
       if (found) {
-        mainCards.push(found);
+        const normalizedStep = Math.max(1, Math.min(found.learningStep || 1, maxVerses));
+        mainCards.push({
+          ...found,
+          learningStep: normalizedStep,
+        });
       } else {
-        mainCards.push(this.srs.createInitialFlashcard(passage.id, now));
+        mainCards.push({
+          ...this.srs.createInitialFlashcard(passage.id, now),
+          learningStep: 1,
+        });
       }
     }
 
@@ -1356,7 +1427,7 @@ export class StorageService {
           state: CardState.CARD_STATE_REVIEW,
           intervalDays: 3,
           repetitions: 2,
-          learningStep: 2,
+          learningStep: 5,
           lastReviewedAt: threeDaysAgoIso,
           dueAt: twoHoursAgoIso,
         },
@@ -1374,6 +1445,7 @@ export class StorageService {
     const flashcards: Flashcard[] = starterData.map((s) => ({
       ...this.srs.createInitialFlashcard(s.id, now),
       id: s.cardId,
+      learningStep: 1,
       ...(s.cardOverrides ?? {}),
     }));
 
