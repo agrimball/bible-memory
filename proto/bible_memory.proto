@@ -52,6 +52,12 @@ message Flashcard {
   int32 lapses = 10;
   string created_at = 11;
   string updated_at = 12;
+  // Long-passage memory repair fields (temporary targeted verse flashcard that heals after N successes)
+  bool is_repair_card = 13;
+  int32 repair_verse_number = 14;
+  int32 repair_streak = 15;
+  int32 repair_target_streak = 16;
+  string parent_card_id = 17;
 }
 
 // Immutable log of each review session for analytics and future cloud sync.

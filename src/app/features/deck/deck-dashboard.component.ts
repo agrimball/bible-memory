@@ -1,6 +1,6 @@
 import { Component, EventEmitter, Input, Output, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { CardState, ReviewRating } from '../../core/proto/bible_memory.pb';
+import { CardState, ReviewRating, Verse } from '../../core/proto/bible_memory.pb';
 import { SrsService } from '../../core/services/srs.service';
 import { DeckItem, StorageService } from '../../core/services/storage.service';
 
@@ -157,7 +157,7 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         >
           <span class="kpi-label">Currently Memorizing</span>
           <strong class="kpi-value">{{ storageService.stats().learningCount }}</strong>
-          <span class="kpi-sub">In-progress stitching</span>
+          <span class="kpi-sub">In-progress &amp; repair</span>
         </div>
 
         <div
@@ -194,7 +194,7 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         </div>
 
         <div class="kpi-card total-kpi" data-testid="kpi-total">
-          <span class="kpi-label">Total Passages</span>
+          <span class="kpi-label">Total Cards</span>
           <strong class="kpi-value">{{ storageService.stats().total }}</strong>
           <span class="kpi-sub">In ProtoJSON store</span>
         </div>
@@ -212,8 +212,8 @@ export type DashboardTab = 'queue' | 'due' | 'active';
               <p class="hero-description">
                 Move any passage between <strong>Saved to Memorize Next</strong> and
                 <strong>Currently Memorizing</strong> in any order. Click any passage card to open
-                its <strong>Flashcard</strong> (with accumulative verse stitching &amp; a dedicated
-                <strong>First-Letter Study Page</strong>).
+                its <strong>Flashcard</strong> (with accumulative verse stitching, single-verse
+                <strong>Memory Repair</strong>, &amp; a dedicated <strong>First-Letter Study Page</strong>).
               </p>
             </div>
 
@@ -247,7 +247,7 @@ export type DashboardTab = 'queue' | 'due' | 'active';
             </div>
           </div>
 
-          <!-- SECTION A: CURRENTLY MEMORIZING (LEARNING / RELEARNING) -->
+          <!-- SECTION A: CURRENTLY MEMORIZING (LEARNING / RELEARNING + REPAIR CARDS) -->
           <div class="home-subsection" data-testid="currently-memorizing-section">
             <div class="section-header">
               <div>
@@ -255,16 +255,17 @@ export type DashboardTab = 'queue' | 'due' | 'active';
                   🔥 Currently Memorizing ({{ currentlyMemorizingItems().length }})
                 </h3>
                 <p class="section-subtitle">
-                  Passages you are actively working on memorizing and stitching together right now.
+                  Passages and temporary verse-repair cards you are actively working on right now.
                   Click any card to open its Flashcard.
                 </p>
               </div>
             </div>
 
             <div class="passage-deck-list" data-testid="currently-memorizing-list">
-              @for (item of currentlyMemorizingItems(); track item.passage.id; let i = $index) {
+              @for (item of currentlyMemorizingItems(); track item.card.id; let i = $index) {
                 <article
                   class="deck-item-card clickable-card memorizing-card"
+                  [class.repair-card]="item.card.isRepairCard"
                   (click)="onOpenFlashcard(item)"
                   role="button"
                   tabindex="0"
@@ -277,32 +278,42 @@ export type DashboardTab = 'queue' | 'due' | 'active';
                         {{ item.passage.reference }}
                       </h4>
 
-                      <span class="verse-count-pill">
-                        {{ item.passage.verses.length }}
-                        {{ item.passage.verses.length === 1 ? 'verse' : 'verses' }}
-                      </span>
+                      @if (item.card.isRepairCard) {
+                        <span class="repair-card-badge" data-testid="repair-card-badge">
+                          🔧 Memory Repair · v. {{ item.card.repairVerseNumber }}
+                        </span>
+                        <span class="repair-heal-pill" data-testid="repair-heal-pill">
+                          Heal Streak: {{ item.card.repairStreak || 0 }} /
+                          {{ item.card.repairTargetStreak || 3 }}
+                        </span>
+                      } @else {
+                        <span class="verse-count-pill">
+                          {{ item.passage.verses.length }}
+                          {{ item.passage.verses.length === 1 ? 'verse' : 'verses' }}
+                        </span>
 
-                      <span class="state-badge badge-learning">
-                        MEMORIZING
-                      </span>
+                        <span class="state-badge badge-learning">
+                          MEMORIZING
+                        </span>
 
-                      <span class="stitch-progress-pill" [attr.data-testid]="'memorizing-stitch-pill-' + i">
-                        🧵 Stitched: {{ getStitchedProgressLabel(item) }}
-                      </span>
+                        <span class="stitch-progress-pill" [attr.data-testid]="'memorizing-stitch-pill-' + i">
+                          🧵 Stitched: {{ getStitchedProgressLabel(item) }}
+                        </span>
+                      }
                     </div>
 
-                    <p class="first-verse-snippet">
-                      @if (item.passage.verses.length > 0) {
-                        <span class="verse-num">[{{ item.passage.verses[0].verseNumber }}]</span>
-                        {{ item.passage.verses[0].text }}
-                        @if (item.passage.verses.length > 1) {
+                    @if (getSnippetVerse(item); as snippetVerse) {
+                      <p class="first-verse-snippet">
+                        <span class="verse-num">[{{ snippetVerse.verseNumber }}]</span>
+                        {{ snippetVerse.text }}
+                        @if (!item.card.isRepairCard && item.passage.verses.length > 1) {
                           <span class="more-verses-hint">
                             (+{{ item.passage.verses.length - 1 }} more
                             {{ item.passage.verses.length - 1 === 1 ? 'verse' : 'verses' }})
                           </span>
                         }
-                      }
-                    </p>
+                      </p>
+                    }
                   </div>
 
                   <div class="deck-item-actions" (click)="$event.stopPropagation()">
@@ -312,26 +323,38 @@ export type DashboardTab = 'queue' | 'due' | 'active';
                       (click)="onOpenFlashcard(item)"
                       [attr.data-testid]="'btn-open-memorizing-card-' + i"
                     >
-                      Open Flashcard →
+                      {{ item.card.isRepairCard ? 'Practice Repair Card →' : 'Open Flashcard →' }}
                     </button>
-                    <button
-                      type="button"
-                      class="phase-action-btn mark-memorized-btn"
-                      (click)="markAsMemorized(item, $event)"
-                      title="Graduate to Memorized / Known"
-                      [attr.data-testid]="'btn-mark-memorized-' + i"
-                    >
-                      ✓ Mark Memorized
-                    </button>
-                    <button
-                      type="button"
-                      class="phase-action-btn move-saved-btn"
-                      (click)="moveBackToSaved(item, $event)"
-                      title="Move back to Saved to Memorize Next"
-                      [attr.data-testid]="'btn-move-to-saved-' + i"
-                    >
-                      ↩ Move back to Saved
-                    </button>
+                    @if (!item.card.isRepairCard) {
+                      <button
+                        type="button"
+                        class="phase-action-btn mark-memorized-btn"
+                        (click)="markAsMemorized(item, $event)"
+                        title="Graduate to Memorized / Known"
+                        [attr.data-testid]="'btn-mark-memorized-' + i"
+                      >
+                        ✓ Mark Memorized
+                      </button>
+                      <button
+                        type="button"
+                        class="phase-action-btn move-saved-btn"
+                        (click)="moveBackToSaved(item, $event)"
+                        title="Move back to Saved to Memorize Next"
+                        [attr.data-testid]="'btn-move-to-saved-' + i"
+                      >
+                        ↩ Move back to Saved
+                      </button>
+                    } @else {
+                      <button
+                        type="button"
+                        class="delete-card-btn"
+                        (click)="deleteItem(item, $event)"
+                        title="Dismiss repair card"
+                        [attr.data-testid]="'btn-dismiss-repair-' + i"
+                      >
+                        ✕
+                      </button>
+                    }
                   </div>
                 </article>
               } @empty {
@@ -361,7 +384,7 @@ export type DashboardTab = 'queue' | 'due' | 'active';
             </div>
 
             <div class="passage-deck-list" data-testid="passage-deck-list">
-              @for (item of storageService.queuedDeckItems(); track item.passage.id; let i = $index) {
+              @for (item of storageService.queuedDeckItems(); track item.card.id; let i = $index) {
                 <article
                   class="deck-item-card clickable-card queue-card"
                   (click)="onOpenFlashcard(item)"
@@ -389,18 +412,18 @@ export type DashboardTab = 'queue' | 'due' | 'active';
                       </span>
                     </div>
 
-                    <p class="first-verse-snippet">
-                      @if (item.passage.verses.length > 0) {
-                        <span class="verse-num">[{{ item.passage.verses[0].verseNumber }}]</span>
-                        {{ item.passage.verses[0].text }}
+                    @if (getSnippetVerse(item); as snippetVerse) {
+                      <p class="first-verse-snippet">
+                        <span class="verse-num">[{{ snippetVerse.verseNumber }}]</span>
+                        {{ snippetVerse.text }}
                         @if (item.passage.verses.length > 1) {
                           <span class="more-verses-hint">
                             (+{{ item.passage.verses.length - 1 }} more
                             {{ item.passage.verses.length - 1 === 1 ? 'verse' : 'verses' }})
                           </span>
                         }
-                      }
-                    </p>
+                      </p>
+                    }
                   </div>
 
                   <div class="deck-item-actions" (click)="$event.stopPropagation()">
@@ -431,7 +454,7 @@ export type DashboardTab = 'queue' | 'due' | 'active';
                     <button
                       type="button"
                       class="delete-card-btn"
-                      (click)="deletePassage(item.passage.id, $event)"
+                      (click)="deleteItem(item, $event)"
                       aria-label="Delete passage"
                       title="Delete passage"
                       [attr.data-testid]="'btn-delete-card-' + i"
@@ -475,8 +498,9 @@ export type DashboardTab = 'queue' | 'due' | 'active';
                 Due for Review ({{ storageService.dueDeckItems().length }})
               </h2>
               <p class="hero-description">
-                Passages in your active rotation whose Anki / SM-2 review interval is due right now.
-                Tap any passage below to open its Flashcard, or practice all due cards in sequence.
+                Passages and temporary verse-repair cards whose Anki / SM-2 review interval is due
+                right now. Tap any card below to open its Flashcard, or practice all due cards in
+                sequence.
               </p>
             </div>
 
@@ -503,9 +527,10 @@ export type DashboardTab = 'queue' | 'due' | 'active';
           </div>
 
           <div class="passage-deck-list" data-testid="passage-deck-list">
-            @for (item of storageService.dueDeckItems(); track item.passage.id; let i = $index) {
+            @for (item of storageService.dueDeckItems(); track item.card.id; let i = $index) {
               <article
                 class="deck-item-card is-due clickable-card"
+                [class.repair-card]="item.card.isRepairCard"
                 (click)="onOpenFlashcard(item)"
                 role="button"
                 tabindex="0"
@@ -517,34 +542,44 @@ export type DashboardTab = 'queue' | 'due' | 'active';
                       {{ item.passage.reference }}
                     </h4>
 
-                    <span class="verse-count-pill">
-                      {{ item.passage.verses.length }}
-                      {{ item.passage.verses.length === 1 ? 'verse' : 'verses' }}
-                    </span>
+                    @if (item.card.isRepairCard) {
+                      <span class="repair-card-badge" data-testid="repair-card-badge">
+                        🔧 Memory Repair · v. {{ item.card.repairVerseNumber }}
+                      </span>
+                      <span class="repair-heal-pill" data-testid="repair-heal-pill">
+                        Heal Streak: {{ item.card.repairStreak || 0 }} /
+                        {{ item.card.repairTargetStreak || 3 }}
+                      </span>
+                    } @else {
+                      <span class="verse-count-pill">
+                        {{ item.passage.verses.length }}
+                        {{ item.passage.verses.length === 1 ? 'verse' : 'verses' }}
+                      </span>
 
-                    <span
-                      class="state-badge"
-                      [ngClass]="getBadgeClass(item.card.state)"
-                      [attr.data-testid]="'deck-item-badge-' + i"
-                    >
-                      {{ getStateLabel(item.card.state) }}
-                    </span>
+                      <span
+                        class="state-badge"
+                        [ngClass]="getBadgeClass(item.card.state)"
+                        [attr.data-testid]="'deck-item-badge-' + i"
+                      >
+                        {{ getStateLabel(item.card.state) }}
+                      </span>
+                    }
 
                     <span class="due-indicator">Due Now</span>
                   </div>
 
-                  <p class="first-verse-snippet">
-                    @if (item.passage.verses.length > 0) {
-                      <span class="verse-num">[{{ item.passage.verses[0].verseNumber }}]</span>
-                      {{ item.passage.verses[0].text }}
-                      @if (item.passage.verses.length > 1) {
+                  @if (getSnippetVerse(item); as snippetVerse) {
+                    <p class="first-verse-snippet">
+                      <span class="verse-num">[{{ snippetVerse.verseNumber }}]</span>
+                      {{ snippetVerse.text }}
+                      @if (!item.card.isRepairCard && item.passage.verses.length > 1) {
                         <span class="more-verses-hint">
                           (+{{ item.passage.verses.length - 1 }} more
                           {{ item.passage.verses.length - 1 === 1 ? 'verse' : 'verses' }})
                         </span>
                       }
-                    }
-                  </p>
+                    </p>
+                  }
 
                   <div class="srs-meta-row">
                     <span class="meta-chip">
@@ -569,7 +604,7 @@ export type DashboardTab = 'queue' | 'due' | 'active';
                     (click)="onOpenFlashcard(item)"
                     [attr.data-testid]="'btn-study-card-' + i"
                   >
-                    Open Flashcard →
+                    {{ item.card.isRepairCard ? 'Repair Verse →' : 'Open Flashcard →' }}
                   </button>
                 </div>
               </article>
@@ -632,10 +667,11 @@ export type DashboardTab = 'queue' | 'due' | 'active';
           </div>
 
           <div class="passage-deck-list" data-testid="passage-deck-list">
-            @for (item of storageService.activeDeckItems(); track item.passage.id; let i = $index) {
+            @for (item of storageService.activeDeckItems(); track item.card.id; let i = $index) {
               <article
                 class="deck-item-card clickable-card"
                 [class.is-due]="item.isDue"
+                [class.repair-card]="item.card.isRepairCard"
                 (click)="onOpenFlashcard(item)"
                 role="button"
                 tabindex="0"
@@ -647,18 +683,28 @@ export type DashboardTab = 'queue' | 'due' | 'active';
                       {{ item.passage.reference }}
                     </h4>
 
-                    <span class="verse-count-pill">
-                      {{ item.passage.verses.length }}
-                      {{ item.passage.verses.length === 1 ? 'verse' : 'verses' }}
-                    </span>
+                    @if (item.card.isRepairCard) {
+                      <span class="repair-card-badge" data-testid="repair-card-badge">
+                        🔧 Memory Repair · v. {{ item.card.repairVerseNumber }}
+                      </span>
+                      <span class="repair-heal-pill" data-testid="repair-heal-pill">
+                        Heal Streak: {{ item.card.repairStreak || 0 }} /
+                        {{ item.card.repairTargetStreak || 3 }}
+                      </span>
+                    } @else {
+                      <span class="verse-count-pill">
+                        {{ item.passage.verses.length }}
+                        {{ item.passage.verses.length === 1 ? 'verse' : 'verses' }}
+                      </span>
 
-                    <span
-                      class="state-badge"
-                      [ngClass]="getBadgeClass(item.card.state)"
-                      [attr.data-testid]="'deck-item-badge-' + i"
-                    >
-                      {{ getStateLabel(item.card.state) }}
-                    </span>
+                      <span
+                        class="state-badge"
+                        [ngClass]="getBadgeClass(item.card.state)"
+                        [attr.data-testid]="'deck-item-badge-' + i"
+                      >
+                        {{ getStateLabel(item.card.state) }}
+                      </span>
+                    }
 
                     @if (item.isDue) {
                       <span class="due-indicator">Due Now</span>
@@ -667,18 +713,18 @@ export type DashboardTab = 'queue' | 'due' | 'active';
                     }
                   </div>
 
-                  <p class="first-verse-snippet">
-                    @if (item.passage.verses.length > 0) {
-                      <span class="verse-num">[{{ item.passage.verses[0].verseNumber }}]</span>
-                      {{ item.passage.verses[0].text }}
-                      @if (item.passage.verses.length > 1) {
+                  @if (getSnippetVerse(item); as snippetVerse) {
+                    <p class="first-verse-snippet">
+                      <span class="verse-num">[{{ snippetVerse.verseNumber }}]</span>
+                      {{ snippetVerse.text }}
+                      @if (!item.card.isRepairCard && item.passage.verses.length > 1) {
                         <span class="more-verses-hint">
                           (+{{ item.passage.verses.length - 1 }} more
                           {{ item.passage.verses.length - 1 === 1 ? 'verse' : 'verses' }})
                         </span>
                       }
-                    }
-                  </p>
+                    </p>
+                  }
 
                   <div class="srs-meta-row">
                     <span class="meta-chip">
@@ -705,20 +751,22 @@ export type DashboardTab = 'queue' | 'due' | 'active';
                   >
                     Open Flashcard →
                   </button>
-                  <button
-                    type="button"
-                    class="phase-action-btn move-saved-btn"
-                    (click)="moveBackToSaved(item, $event)"
-                    title="Move back to Saved to Memorize Next"
-                  >
-                    ↩ Move to Saved
-                  </button>
+                  @if (!item.card.isRepairCard) {
+                    <button
+                      type="button"
+                      class="phase-action-btn move-saved-btn"
+                      (click)="moveBackToSaved(item, $event)"
+                      title="Move back to Saved to Memorize Next"
+                    >
+                      ↩ Move to Saved
+                    </button>
+                  }
                   <button
                     type="button"
                     class="delete-card-btn"
-                    (click)="deletePassage(item.passage.id, $event)"
-                    aria-label="Delete passage"
-                    title="Delete passage"
+                    (click)="deleteItem(item, $event)"
+                    aria-label="Delete card"
+                    title="Delete card"
                     [attr.data-testid]="'btn-delete-card-' + i"
                   >
                     🗑
@@ -745,6 +793,29 @@ export type DashboardTab = 'queue' | 'due' | 'active';
   `,
   styles: [
     `
+      :host {
+        --bg-surface: #1e293b;
+        --bg-surface-elevated: #0f172a;
+        --bg-subtle: #0f172a;
+        --border-color: #334155;
+        --border-hover: #475569;
+        --text-primary: #f8fafc;
+        --text-secondary: #cbd5e1;
+        --text-muted: #94a3b8;
+        display: block;
+      }
+
+      :host-context(.light-theme) {
+        --bg-surface: #fffdf9;
+        --bg-surface-elevated: #faf6ee;
+        --bg-subtle: #efe9dc;
+        --border-color: #e7e0d3;
+        --border-hover: #b8afa0;
+        --text-primary: #1c1917;
+        --text-secondary: #44403c;
+        --text-muted: #78716c;
+      }
+
       .dashboard-container {
         display: flex;
         flex-direction: column;
@@ -757,8 +828,8 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .data-file-empty-row {
-        background: #fffbeb;
-        border: 1px solid #f59e0b;
+        background: rgba(120, 53, 15, 0.28);
+        border: 1px solid rgba(245, 158, 11, 0.45);
         border-radius: 0.85rem;
         padding: 0.8rem 1.15rem;
         display: flex;
@@ -768,9 +839,14 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         flex-wrap: wrap;
       }
 
+      :host-context(.light-theme) .data-file-empty-row {
+        background: #fffbeb;
+        border-color: #f59e0b;
+      }
+
       .data-file-connected-row {
-        background: #f0fdf4;
-        border: 1px solid #86efac;
+        background: rgba(6, 78, 59, 0.32);
+        border: 1px solid rgba(52, 211, 153, 0.45);
         border-radius: 0.85rem;
         padding: 0.75rem 1.15rem;
         display: flex;
@@ -778,6 +854,11 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         justify-content: space-between;
         gap: 1rem;
         flex-wrap: wrap;
+      }
+
+      :host-context(.light-theme) .data-file-connected-row {
+        background: #f0fdf4;
+        border-color: #86efac;
       }
 
       .data-file-info {
@@ -797,18 +878,18 @@ export type DashboardTab = 'queue' | 'due' | 'active';
 
       .file-status-dot.disconnected,
       .file-status-dot.warning {
-        background: #d97706;
-        box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.2);
+        background: #f59e0b;
+        box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
       }
 
       .file-status-dot.connected {
-        background: #16a34a;
-        box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.2);
+        background: #10b981;
+        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25);
       }
 
       .file-status-dot.error {
-        background: #dc2626;
-        box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.2);
+        background: #ef4444;
+        box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.25);
       }
 
       .file-copy {
@@ -820,19 +901,24 @@ export type DashboardTab = 'queue' | 'due' | 'active';
 
       .file-headline {
         font-size: 0.85rem;
-        color: #1c1917;
+        color: var(--text-primary);
       }
 
       .file-headline code {
-        background: rgba(28, 25, 23, 0.08);
+        background: rgba(148, 163, 184, 0.18);
         padding: 0.08rem 0.38rem;
         border-radius: 0.3rem;
         font-size: 0.82rem;
+        color: #5eead4;
+      }
+
+      :host-context(.light-theme) .file-headline code {
+        color: #0f766e;
       }
 
       .file-subtext {
         font-size: 0.77rem;
-        color: #57534e;
+        color: var(--text-secondary);
       }
 
       .data-file-actions {
@@ -853,45 +939,45 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .open-file-btn {
-        background: #ffffff;
-        border: 1px solid #d6cfc2;
-        color: #292524;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
       }
 
       .open-file-btn:hover {
-        background: #f5f0e6;
+        border-color: var(--border-hover);
       }
 
       .create-file-btn {
-        background: #0f766e;
-        border: 1px solid #0f766e;
+        background: #0d9488;
+        border: 1px solid #0d9488;
         color: #ffffff;
       }
 
       .create-file-btn:hover {
-        background: #115e59;
+        background: #0f766e;
       }
 
       .disconnect-file-btn {
         background: transparent;
-        border: 1px solid #d6cfc2;
-        color: #78716c;
+        border: 1px solid var(--border-color);
+        color: var(--text-muted);
       }
 
       .disconnect-file-btn:hover {
-        background: #fee2e2;
-        border-color: #fecaca;
-        color: #991b1b;
+        background: rgba(239, 68, 68, 0.15);
+        border-color: #f87171;
+        color: #fca5a5;
       }
 
       .dashboard-tabs-bar {
         display: flex;
         align-items: center;
         gap: 0.65rem;
-        background: #efe9dc;
+        background: var(--bg-subtle);
         padding: 0.4rem;
         border-radius: 0.85rem;
-        border: 1px solid #e2dac9;
+        border: 1px solid var(--border-color);
         flex-wrap: wrap;
       }
 
@@ -905,7 +991,7 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         border-radius: 0.65rem;
         border: none;
         background: transparent;
-        color: #57534e;
+        color: var(--text-muted);
         font-size: 0.9rem;
         font-weight: 700;
         cursor: pointer;
@@ -913,14 +999,14 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .tab-pill:hover {
-        color: #1c1917;
-        background: rgba(255, 255, 255, 0.55);
+        color: var(--text-primary);
+        background: rgba(255, 255, 255, 0.05);
       }
 
       .tab-pill.active {
-        background: #fffdf9;
-        color: #1c1917;
-        box-shadow: 0 2px 8px rgba(28, 25, 23, 0.08);
+        background: var(--bg-surface);
+        color: var(--text-primary);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
       }
 
       .tab-badge {
@@ -931,18 +1017,18 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .queue-badge {
-        background: #dbeafe;
-        color: #1e40af;
+        background: rgba(59, 130, 246, 0.22);
+        color: #93c5fd;
       }
 
       .due-badge {
-        background: #ccfbf1;
-        color: #0f766e;
+        background: rgba(20, 184, 166, 0.22);
+        color: #5eead4;
       }
 
       .active-badge {
-        background: #dcfce7;
-        color: #166534;
+        background: rgba(34, 197, 94, 0.22);
+        color: #86efac;
       }
 
       .tab-view-section {
@@ -958,8 +1044,9 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .hero-card {
-        background: linear-gradient(135deg, #292524 0%, #1c1917 100%);
-        color: #fafaf9;
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        border: 1px solid var(--border-color);
+        color: #f8fafc;
         border-radius: 1.1rem;
         padding: 1.55rem 1.8rem;
         display: flex;
@@ -967,15 +1054,15 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         justify-content: space-between;
         gap: 1.4rem;
         flex-wrap: wrap;
-        box-shadow: 0 12px 28px rgba(28, 25, 23, 0.14);
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
       }
 
       .due-hero {
-        background: linear-gradient(135deg, #134e4a 0%, #0f766e 100%);
+        background: linear-gradient(135deg, #134e4a 0%, #0f172a 100%);
       }
 
       .active-hero {
-        background: linear-gradient(135deg, #3f3a34 0%, #292524 100%);
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
       }
 
       .hero-copy {
@@ -1004,7 +1091,7 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         margin: 0.45rem 0 0;
         font-size: 0.87rem;
         line-height: 1.5;
-        color: #e7e5e4;
+        color: #cbd5e1;
       }
 
       .hero-description code {
@@ -1048,22 +1135,22 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .add-passage-btn {
-        background: #fde68a;
-        color: #1c1917;
+        background: #f59e0b;
+        color: #0f172a;
       }
 
       .add-passage-btn:hover {
-        background: #fcd34d;
+        background: #fbbf24;
       }
 
       .proto-sync-btn {
-        background: rgba(255, 255, 255, 0.1);
-        color: #f5f5f4;
-        border-color: rgba(255, 255, 255, 0.22);
+        background: rgba(255, 255, 255, 0.08);
+        color: #f8fafc;
+        border-color: rgba(255, 255, 255, 0.2);
       }
 
       .proto-sync-btn:hover {
-        background: rgba(255, 255, 255, 0.18);
+        background: rgba(255, 255, 255, 0.16);
       }
 
       .stats-grid {
@@ -1073,14 +1160,13 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .kpi-card {
-        background: #fffdf9;
-        border: 1px solid #e7e0d3;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-color);
         border-radius: 0.85rem;
         padding: 0.95rem 1.1rem;
         display: flex;
         flex-direction: column;
         gap: 0.18rem;
-        box-shadow: 0 2px 6px rgba(28, 25, 23, 0.04);
       }
 
       .clickable-kpi {
@@ -1089,13 +1175,13 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .clickable-kpi:hover {
-        border-color: #b8afa0;
+        border-color: var(--border-hover);
         transform: translateY(-1px);
       }
 
       .selected-kpi {
-        border-color: #0f766e;
-        box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.14);
+        border-color: #14b8a6;
+        box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.2);
       }
 
       .kpi-label {
@@ -1103,35 +1189,35 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.05em;
-        color: #78716c;
+        color: var(--text-muted);
       }
 
       .kpi-value {
         font-size: 1.7rem;
         font-weight: 800;
         line-height: 1.15;
-        color: #1c1917;
+        color: var(--text-primary);
       }
 
       .queue-kpi .kpi-value {
-        color: #2563eb;
+        color: #60a5fa;
       }
 
       .due-kpi .kpi-value {
-        color: #0f766e;
+        color: #2dd4bf;
       }
 
       .learning-kpi .kpi-value {
-        color: #d97706;
+        color: #fbbf24;
       }
 
       .review-kpi .kpi-value {
-        color: #15803d;
+        color: #4ade80;
       }
 
       .kpi-sub {
         font-size: 0.74rem;
-        color: #a8a29e;
+        color: var(--text-muted);
       }
 
       .section-header {
@@ -1146,13 +1232,13 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         margin: 0;
         font-size: 1.12rem;
         font-weight: 700;
-        color: #1c1917;
+        color: var(--text-primary);
       }
 
       .section-subtitle {
         margin: 0.2rem 0 0;
         font-size: 0.82rem;
-        color: #57534e;
+        color: var(--text-secondary);
       }
 
       .passage-deck-list {
@@ -1162,8 +1248,8 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .deck-item-card {
-        background: #fffdf9;
-        border: 1px solid #e7e0d3;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-color);
         border-radius: 0.9rem;
         padding: 1.15rem 1.3rem;
         display: flex;
@@ -1178,20 +1264,25 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .clickable-card:hover {
-        border-color: #0f766e;
-        box-shadow: 0 6px 18px rgba(28, 25, 23, 0.08);
+        border-color: #14b8a6;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
       }
 
       .memorizing-card {
-        border-left: 4px solid #d97706;
+        border-left: 4px solid #f59e0b;
+      }
+
+      .repair-card {
+        border-left: 4px solid #f43f5e !important;
+        background: linear-gradient(90deg, rgba(244, 63, 94, 0.08) 0%, var(--bg-surface) 35%);
       }
 
       .queue-card {
-        border-left: 4px solid #2563eb;
+        border-left: 4px solid #3b82f6;
       }
 
       .deck-item-card.is-due {
-        border-left: 4px solid #0f766e;
+        border-left: 4px solid #14b8a6;
       }
 
       .deck-item-main {
@@ -1213,7 +1304,7 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         margin: 0;
         font-size: 1.05rem;
         font-weight: 700;
-        color: #1c1917;
+        color: var(--text-primary);
       }
 
       .verse-count-pill {
@@ -1221,9 +1312,9 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         font-weight: 600;
         padding: 0.15rem 0.55rem;
         border-radius: 999px;
-        background: #f5f0e6;
-        color: #57534e;
-        border: 1px solid #e7e0d3;
+        background: var(--bg-subtle);
+        color: var(--text-secondary);
+        border: 1px solid var(--border-color);
       }
 
       .stitch-progress-pill {
@@ -1231,9 +1322,47 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         font-weight: 700;
         padding: 0.15rem 0.58rem;
         border-radius: 999px;
+        background: rgba(245, 158, 11, 0.18);
+        color: #fcd34d;
+        border: 1px solid rgba(245, 158, 11, 0.4);
+      }
+
+      :host-context(.light-theme) .stitch-progress-pill {
         background: #fffbeb;
         color: #92400e;
-        border: 1px solid #fde68a;
+        border-color: #fde68a;
+      }
+
+      .repair-card-badge {
+        font-size: 0.72rem;
+        font-weight: 800;
+        padding: 0.18rem 0.6rem;
+        border-radius: 999px;
+        background: rgba(244, 63, 94, 0.22);
+        color: #fda4af;
+        border: 1px solid rgba(244, 63, 94, 0.45);
+      }
+
+      :host-context(.light-theme) .repair-card-badge {
+        background: #ffe4e6;
+        color: #be123c;
+        border-color: #fda4af;
+      }
+
+      .repair-heal-pill {
+        font-size: 0.72rem;
+        font-weight: 700;
+        padding: 0.16rem 0.55rem;
+        border-radius: 999px;
+        background: rgba(16, 185, 129, 0.18);
+        color: #6ee7b7;
+        border: 1px solid rgba(16, 185, 129, 0.4);
+      }
+
+      :host-context(.light-theme) .repair-heal-pill {
+        background: #d1fae5;
+        color: #065f46;
+        border-color: #6ee7b7;
       }
 
       .state-badge {
@@ -1247,16 +1376,32 @@ export type DashboardTab = 'queue' | 'due' | 'active';
 
       .badge-queued,
       .badge-new {
+        background: rgba(59, 130, 246, 0.2);
+        color: #93c5fd;
+      }
+
+      :host-context(.light-theme) .badge-queued,
+      :host-context(.light-theme) .badge-new {
         background: #dbeafe;
         color: #1e40af;
       }
 
       .badge-learning {
+        background: rgba(245, 158, 11, 0.2);
+        color: #fcd34d;
+      }
+
+      :host-context(.light-theme) .badge-learning {
         background: #fef3c7;
         color: #92400e;
       }
 
       .badge-review {
+        background: rgba(34, 197, 94, 0.2);
+        color: #86efac;
+      }
+
+      :host-context(.light-theme) .badge-review {
         background: #dcfce7;
         color: #166534;
       }
@@ -1264,17 +1409,22 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       .due-indicator {
         font-size: 0.72rem;
         font-weight: 700;
-        color: #0f766e;
-        background: #ccfbf1;
+        color: #5eead4;
+        background: rgba(20, 184, 166, 0.2);
         padding: 0.14rem 0.5rem;
         border-radius: 999px;
+      }
+
+      :host-context(.light-theme) .due-indicator {
+        color: #0f766e;
+        background: #ccfbf1;
       }
 
       .scheduled-indicator {
         font-size: 0.72rem;
         font-weight: 600;
-        color: #78716c;
-        background: #f5f0e6;
+        color: var(--text-muted);
+        background: var(--bg-subtle);
         padding: 0.14rem 0.5rem;
         border-radius: 999px;
       }
@@ -1282,21 +1432,25 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       .first-verse-snippet {
         margin: 0;
         font-size: 0.9rem;
-        color: #44403c;
+        color: var(--text-secondary);
         line-height: 1.48;
       }
 
       .verse-num {
         font-weight: 700;
-        color: #0f766e;
+        color: #2dd4bf;
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         font-size: 0.8rem;
         margin-right: 0.25rem;
       }
 
+      :host-context(.light-theme) .verse-num {
+        color: #0f766e;
+      }
+
       .more-verses-hint {
         font-size: 0.8rem;
-        color: #78716c;
+        color: var(--text-muted);
         font-style: italic;
         margin-left: 0.3rem;
       }
@@ -1311,11 +1465,11 @@ export type DashboardTab = 'queue' | 'due' | 'active';
 
       .meta-chip {
         font-size: 0.76rem;
-        color: #78716c;
+        color: var(--text-muted);
       }
 
       .meta-chip strong {
-        color: #292524;
+        color: var(--text-primary);
       }
 
       .deck-item-actions {
@@ -1329,9 +1483,9 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       .start-memorize-btn {
         padding: 0.56rem 0.95rem;
         border-radius: 0.6rem;
-        border: 1px solid #d97706;
-        background: #fffbeb;
-        color: #92400e;
+        border: 1px solid rgba(245, 158, 11, 0.5);
+        background: rgba(245, 158, 11, 0.16);
+        color: #fde68a;
         font-size: 0.81rem;
         font-weight: 700;
         cursor: pointer;
@@ -1339,15 +1493,21 @@ export type DashboardTab = 'queue' | 'due' | 'active';
         white-space: nowrap;
       }
 
+      :host-context(.light-theme) .start-memorize-btn {
+        background: #fffbeb;
+        color: #92400e;
+        border-color: #d97706;
+      }
+
       .start-memorize-btn:hover {
-        background: #fef3c7;
+        background: rgba(245, 158, 11, 0.28);
       }
 
       .study-card-btn {
         padding: 0.58rem 1rem;
         border-radius: 0.6rem;
-        border: 1px solid #0f766e;
-        background: #0f766e;
+        border: 1px solid #0d9488;
+        background: #0d9488;
         color: #ffffff;
         font-size: 0.83rem;
         font-weight: 600;
@@ -1357,17 +1517,17 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .study-card-btn:hover {
-        background: #115e59;
+        background: #0f766e;
       }
 
       .subtle-study-btn {
-        background: #f5f0e6;
-        color: #292524;
-        border-color: #d6cfc2;
+        background: var(--bg-subtle);
+        color: var(--text-primary);
+        border-color: var(--border-color);
       }
 
       .subtle-study-btn:hover {
-        background: #e7e0d3;
+        border-color: var(--border-hover);
       }
 
       .phase-action-btn {
@@ -1381,50 +1541,56 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       .mark-memorized-btn {
+        background: rgba(34, 197, 94, 0.18);
+        border: 1px solid rgba(34, 197, 94, 0.45);
+        color: #86efac;
+      }
+
+      :host-context(.light-theme) .mark-memorized-btn {
         background: #dcfce7;
-        border: 1px solid #86efac;
+        border-color: #86efac;
         color: #166534;
       }
 
       .mark-memorized-btn:hover {
-        background: #bbf7d0;
+        background: rgba(34, 197, 94, 0.28);
       }
 
       .move-saved-btn {
-        background: #faf6ee;
-        border: 1px solid #d6cfc2;
-        color: #57534e;
+        background: var(--bg-subtle);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
       }
 
       .move-saved-btn:hover {
-        background: #efe9dc;
-        color: #1c1917;
+        border-color: var(--border-hover);
+        color: var(--text-primary);
       }
 
       .delete-card-btn {
         padding: 0.55rem 0.7rem;
         border-radius: 0.55rem;
-        border: 1px solid #e7e0d3;
-        background: #faf6ee;
-        color: #78716c;
+        border: 1px solid var(--border-color);
+        background: var(--bg-subtle);
+        color: var(--text-muted);
         font-size: 0.85rem;
         cursor: pointer;
         transition: all 0.15s ease;
       }
 
       .delete-card-btn:hover {
-        background: #fee2e2;
-        border-color: #fecaca;
-        color: #991b1b;
+        background: rgba(239, 68, 68, 0.18);
+        border-color: #f87171;
+        color: #fca5a5;
       }
 
       .empty-deck-box {
         text-align: center;
-        background: #fffdf9;
-        border: 1px dashed #d6cfc2;
+        background: var(--bg-surface);
+        border: 1px dashed var(--border-color);
         border-radius: 0.9rem;
         padding: 2.2rem 1.5rem;
-        color: #57534e;
+        color: var(--text-secondary);
       }
 
       .compact-empty {
@@ -1434,7 +1600,7 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       .empty-deck-box h4 {
         margin: 0 0 0.4rem;
         font-size: 1.08rem;
-        color: #1c1917;
+        color: var(--text-primary);
       }
 
       .empty-deck-box p {
@@ -1478,7 +1644,7 @@ export class DeckDashboardComponent {
   @Output() openProtoSync = new EventEmitter<void>();
 
   /**
-   * Passages the user has chosen to actively work on memorizing right now
+   * Passages and temporary repair cards the user is actively working on right now
    * (between "Saved / Not Known Yet" and "Fully Memorized / Review").
    */
   readonly currentlyMemorizingItems = computed<DeckItem[]>(() => {
@@ -1498,6 +1664,21 @@ export class DeckDashboardComponent {
 
   onOpenFlashcard(item: DeckItem): void {
     this.startMemorizeFlow.emit(item);
+  }
+
+  getSnippetVerse(item: DeckItem): Verse | null {
+    if (!item.passage.verses || item.passage.verses.length === 0) {
+      return null;
+    }
+    if (item.card.isRepairCard && item.card.repairVerseNumber) {
+      const target = item.passage.verses.find(
+        (v) => v.verseNumber === item.card.repairVerseNumber
+      );
+      if (target) {
+        return target;
+      }
+    }
+    return item.passage.verses[0];
   }
 
   async onOpenDataFile(): Promise<void> {
@@ -1598,8 +1779,20 @@ export class DeckDashboardComponent {
     return this.srsService.formatIntervalDays(item.card.intervalDays);
   }
 
-  deletePassage(passageId: string, event?: Event): void {
+  deleteItem(item: DeckItem, event?: Event): void {
     event?.stopPropagation();
-    this.storageService.deletePassage(passageId);
+    const svc = this.storageService as unknown as {
+      deleteCard?: (cardId: string) => void;
+    };
+    if (item.card.isRepairCard && typeof svc.deleteCard === 'function') {
+      svc.deleteCard(item.card.id);
+      return;
+    }
+    if (item.card.isRepairCard) {
+      this.storageService.flashcards.update((prev) => prev.filter((c) => c.id !== item.card.id));
+      this.storageService.importProtoJson(this.storageService.exportProtoJson(false), false);
+      return;
+    }
+    this.storageService.deletePassage(item.passage.id);
   }
 }

@@ -265,10 +265,31 @@ const VERSE_NUMBER_TOKEN_REGEX =
   `,
   styles: [
     `
+      :host {
+        --modal-bg: #1e293b;
+        --modal-header-bg: #0f172a;
+        --input-bg: #0f172a;
+        --border-color: #334155;
+        --text-primary: #f8fafc;
+        --text-secondary: #cbd5e1;
+        --text-muted: #94a3b8;
+        display: block;
+      }
+
+      :host-context(.light-theme) {
+        --modal-bg: #fffdf9;
+        --modal-header-bg: #faf6ee;
+        --input-bg: #ffffff;
+        --border-color: #e7e0d3;
+        --text-primary: #1c1917;
+        --text-secondary: #44403c;
+        --text-muted: #78716c;
+      }
+
       .modal-backdrop {
         position: fixed;
         inset: 0;
-        background: rgba(28, 25, 23, 0.58);
+        background: rgba(2, 6, 23, 0.72);
         backdrop-filter: blur(4px);
         display: flex;
         align-items: center;
@@ -281,10 +302,10 @@ const VERSE_NUMBER_TOKEN_REGEX =
         width: 100%;
         max-width: 740px;
         max-height: 92vh;
-        background: #fffdf9;
-        border: 1px solid #e7e0d3;
+        background: var(--modal-bg);
+        border: 1px solid var(--border-color);
         border-radius: 1rem;
-        box-shadow: 0 24px 48px rgba(28, 25, 23, 0.24);
+        box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
         display: flex;
         flex-direction: column;
         overflow: hidden;
@@ -296,8 +317,8 @@ const VERSE_NUMBER_TOKEN_REGEX =
         justify-content: space-between;
         gap: 1rem;
         padding: 1.35rem 1.5rem 1rem;
-        border-bottom: 1px solid #ede7db;
-        background: #faf6ee;
+        border-bottom: 1px solid var(--border-color);
+        background: var(--modal-header-bg);
       }
 
       .modal-eyebrow {
@@ -306,39 +327,43 @@ const VERSE_NUMBER_TOKEN_REGEX =
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.06em;
-        color: #0f766e;
+        color: #2dd4bf;
         margin-bottom: 0.25rem;
+      }
+
+      :host-context(.light-theme) .modal-eyebrow {
+        color: #0f766e;
       }
 
       .modal-title {
         margin: 0;
         font-size: 1.25rem;
         font-weight: 700;
-        color: #1c1917;
+        color: var(--text-primary);
       }
 
       .modal-subtitle {
         margin: 0.35rem 0 0;
         font-size: 0.84rem;
-        color: #57534e;
+        color: var(--text-secondary);
         line-height: 1.45;
       }
 
       .icon-close-btn {
         background: transparent;
-        border: 1px solid #d6cfc2;
+        border: 1px solid var(--border-color);
         border-radius: 0.5rem;
         width: 2rem;
         height: 2rem;
         font-size: 0.9rem;
-        color: #57534e;
+        color: var(--text-secondary);
         cursor: pointer;
         flex-shrink: 0;
       }
 
       .icon-close-btn:hover {
-        background: #ede7db;
-        color: #1c1917;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text-primary);
       }
 
       .modal-body {
@@ -377,7 +402,7 @@ const VERSE_NUMBER_TOKEN_REGEX =
       .field-label {
         font-size: 0.84rem;
         font-weight: 600;
-        color: #292524;
+        color: var(--text-primary);
         display: flex;
         align-items: baseline;
         gap: 0.45rem;
@@ -387,7 +412,7 @@ const VERSE_NUMBER_TOKEN_REGEX =
       .field-hint {
         font-size: 0.75rem;
         font-weight: 400;
-        color: #78716c;
+        color: var(--text-muted);
       }
 
       .verse-num-helper-actions {
@@ -412,13 +437,19 @@ const VERSE_NUMBER_TOKEN_REGEX =
       }
 
       .highlight-trigger-btn {
+        background: rgba(245, 158, 11, 0.18);
+        border: 1px solid rgba(245, 158, 11, 0.5);
+        color: #fcd34d;
+      }
+
+      :host-context(.light-theme) .highlight-trigger-btn {
         background: #fef3c7;
-        border: 1px solid #f59e0b;
+        border-color: #f59e0b;
         color: #92400e;
       }
 
       .highlight-trigger-btn:hover:not(:disabled) {
-        background: #fde68a;
+        background: rgba(245, 158, 11, 0.28);
       }
 
       .confirm-remove-btn {
@@ -432,13 +463,9 @@ const VERSE_NUMBER_TOKEN_REGEX =
       }
 
       .cancel-highlight-btn {
-        background: #ffffff;
-        border: 1px solid #d6cfc2;
-        color: #57534e;
-      }
-
-      .cancel-highlight-btn:hover {
-        background: #f5f0e6;
+        background: var(--input-bg);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
       }
 
       .text-input,
@@ -447,9 +474,9 @@ const VERSE_NUMBER_TOKEN_REGEX =
         box-sizing: border-box;
         padding: 0.65rem 0.85rem;
         border-radius: 0.6rem;
-        border: 1px solid #d6cfc2;
-        background: #ffffff;
-        color: #1c1917;
+        border: 1px solid var(--border-color);
+        background: var(--input-bg);
+        color: var(--text-primary);
         font-size: 0.92rem;
         font-family: inherit;
         transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -463,8 +490,8 @@ const VERSE_NUMBER_TOKEN_REGEX =
       .text-input:focus,
       .raw-textarea:focus {
         outline: none;
-        border-color: #0f766e;
-        box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
+        border-color: #14b8a6;
+        box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.2);
       }
 
       .example-action-wrap {
@@ -475,9 +502,9 @@ const VERSE_NUMBER_TOKEN_REGEX =
       .example-btn {
         padding: 0.65rem 0.95rem;
         border-radius: 0.6rem;
-        border: 1px solid #b45309;
-        background: #fffbeb;
-        color: #92400e;
+        border: 1px solid rgba(245, 158, 11, 0.5);
+        background: rgba(245, 158, 11, 0.16);
+        color: #fde68a;
         font-size: 0.83rem;
         font-weight: 600;
         cursor: pointer;
@@ -485,14 +512,20 @@ const VERSE_NUMBER_TOKEN_REGEX =
         transition: all 0.15s ease;
       }
 
+      :host-context(.light-theme) .example-btn {
+        background: #fffbeb;
+        color: #92400e;
+        border-color: #b45309;
+      }
+
       .example-btn:hover {
-        background: #fef3c7;
+        background: rgba(245, 158, 11, 0.28);
       }
 
       .missing-verse-nums-warning {
-        background: #fffbeb;
-        border: 1px solid #f59e0b;
-        border-left: 4px solid #d97706;
+        background: rgba(120, 53, 15, 0.35);
+        border: 1px solid rgba(245, 158, 11, 0.5);
+        border-left: 4px solid #f59e0b;
         border-radius: 0.65rem;
         padding: 0.75rem 1rem;
         display: flex;
@@ -500,20 +533,28 @@ const VERSE_NUMBER_TOKEN_REGEX =
         gap: 0.25rem;
       }
 
+      :host-context(.light-theme) .missing-verse-nums-warning {
+        background: #fffbeb;
+      }
+
       .warning-title {
         font-size: 0.84rem;
+        color: #fcd34d;
+      }
+
+      :host-context(.light-theme) .warning-title {
         color: #92400e;
       }
 
       .warning-body {
         margin: 0;
         font-size: 0.8rem;
-        color: #78350f;
+        color: var(--text-secondary);
         line-height: 1.45;
       }
 
       .warning-body code {
-        background: rgba(217, 119, 6, 0.12);
+        background: rgba(245, 158, 11, 0.2);
         padding: 0.08rem 0.3rem;
         border-radius: 0.25rem;
         font-weight: 600;
@@ -522,11 +563,15 @@ const VERSE_NUMBER_TOKEN_REGEX =
       .highlight-preview-box {
         border: 2px solid #f59e0b;
         border-radius: 0.75rem;
-        background: #fffbeb;
+        background: rgba(120, 53, 15, 0.28);
         padding: 0.9rem 1.1rem;
         display: flex;
         flex-direction: column;
         gap: 0.65rem;
+      }
+
+      :host-context(.light-theme) .highlight-preview-box {
+        background: #fffbeb;
       }
 
       .highlight-preview-header {
@@ -536,7 +581,7 @@ const VERSE_NUMBER_TOKEN_REGEX =
         gap: 0.75rem;
         flex-wrap: wrap;
         padding-bottom: 0.5rem;
-        border-bottom: 1px solid #fde68a;
+        border-bottom: 1px solid rgba(245, 158, 11, 0.35);
       }
 
       .highlight-badge {
@@ -546,32 +591,37 @@ const VERSE_NUMBER_TOKEN_REGEX =
         letter-spacing: 0.04em;
         padding: 0.2rem 0.55rem;
         border-radius: 999px;
+        background: rgba(245, 158, 11, 0.25);
+        color: #fde68a;
+        border: 1px solid #f59e0b;
+      }
+
+      :host-context(.light-theme) .highlight-badge {
         background: #fef3c7;
         color: #92400e;
-        border: 1px solid #f59e0b;
       }
 
       .highlight-summary {
         font-size: 0.8rem;
-        color: #78350f;
+        color: var(--text-secondary);
       }
 
       .highlight-preview-content {
-        background: #ffffff;
-        border: 1px solid #fde68a;
+        background: var(--input-bg);
+        border: 1px solid var(--border-color);
         border-radius: 0.55rem;
         padding: 0.75rem 0.9rem;
         font-size: 0.9rem;
         line-height: 1.65;
         white-space: pre-wrap;
-        color: #1c1917;
+        color: var(--text-primary);
         max-height: 180px;
         overflow-y: auto;
       }
 
       .highlighted-verse-num {
-        background: #fee2e2;
-        color: #b91c1c;
+        background: rgba(239, 68, 68, 0.25);
+        color: #fca5a5;
         border: 1px solid #f87171;
         border-radius: 0.3rem;
         padding: 0.05rem 0.3rem;
@@ -581,10 +631,15 @@ const VERSE_NUMBER_TOKEN_REGEX =
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       }
 
+      :host-context(.light-theme) .highlighted-verse-num {
+        background: #fee2e2;
+        color: #b91c1c;
+      }
+
       .preview-panel {
-        border: 1px solid #e2dacb;
+        border: 1px solid var(--border-color);
         border-radius: 0.75rem;
-        background: #faf7f0;
+        background: var(--modal-header-bg);
         padding: 0.9rem 1.1rem;
       }
 
@@ -596,7 +651,7 @@ const VERSE_NUMBER_TOKEN_REGEX =
         flex-wrap: wrap;
         margin-bottom: 0.65rem;
         padding-bottom: 0.55rem;
-        border-bottom: 1px solid #e7e0d3;
+        border-bottom: 1px solid var(--border-color);
       }
 
       .preview-title-group {
@@ -613,6 +668,11 @@ const VERSE_NUMBER_TOKEN_REGEX =
         letter-spacing: 0.04em;
         padding: 0.2rem 0.55rem;
         border-radius: 999px;
+        background: rgba(20, 184, 166, 0.2);
+        color: #5eead4;
+      }
+
+      :host-context(.light-theme) .preview-badge {
         background: #ccfbf1;
         color: #115e59;
       }
@@ -622,20 +682,26 @@ const VERSE_NUMBER_TOKEN_REGEX =
         font-weight: 600;
         padding: 0.18rem 0.6rem;
         border-radius: 999px;
+        background: rgba(34, 197, 94, 0.2);
+        color: #86efac;
+        border: 1px solid rgba(34, 197, 94, 0.45);
+      }
+
+      :host-context(.light-theme) .remembered-boundary-pill {
         background: #dcfce7;
         color: #166534;
-        border: 1px solid #86efac;
+        border-color: #86efac;
       }
 
       .preview-ref {
         font-size: 0.95rem;
         font-weight: 700;
-        color: #1c1917;
+        color: var(--text-primary);
       }
 
       .preview-count {
         font-size: 0.78rem;
-        color: #57534e;
+        color: var(--text-muted);
       }
 
       .parsed-verse-list {
@@ -655,29 +721,33 @@ const VERSE_NUMBER_TOKEN_REGEX =
         gap: 0.6rem;
         padding: 0.45rem 0.65rem;
         border-radius: 0.5rem;
-        background: #ffffff;
-        border: 1px solid #ece5d8;
+        background: var(--modal-bg);
+        border: 1px solid var(--border-color);
         font-size: 0.86rem;
         line-height: 1.45;
       }
 
       .verse-num-pill {
         font-weight: 700;
-        color: #0f766e;
+        color: #2dd4bf;
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         font-size: 0.78rem;
         flex-shrink: 0;
         margin-top: 0.05rem;
       }
 
+      :host-context(.light-theme) .verse-num-pill {
+        color: #0f766e;
+      }
+
       .verse-text-body {
-        color: #292524;
+        color: var(--text-primary);
         white-space: pre-line;
       }
 
       .preview-empty {
         font-size: 0.84rem;
-        color: #78716c;
+        color: var(--text-muted);
         text-align: center;
         padding: 0.85rem 0.5rem;
       }
@@ -688,30 +758,26 @@ const VERSE_NUMBER_TOKEN_REGEX =
         justify-content: flex-end;
         gap: 0.75rem;
         padding: 1rem 1.5rem;
-        border-top: 1px solid #ede7db;
-        background: #faf6ee;
+        border-top: 1px solid var(--border-color);
+        background: var(--modal-header-bg);
       }
 
       .secondary-btn {
         padding: 0.62rem 1.1rem;
         border-radius: 0.6rem;
-        border: 1px solid #d6cfc2;
-        background: #ffffff;
-        color: #44403c;
+        border: 1px solid var(--border-color);
+        background: var(--modal-bg);
+        color: var(--text-secondary);
         font-size: 0.88rem;
         font-weight: 600;
         cursor: pointer;
-      }
-
-      .secondary-btn:hover {
-        background: #f5f0e6;
       }
 
       .save-btn {
         padding: 0.65rem 1.25rem;
         border-radius: 0.6rem;
         border: none;
-        background: #0f766e;
+        background: #0d9488;
         color: #ffffff;
         font-size: 0.88rem;
         font-weight: 600;
@@ -720,7 +786,7 @@ const VERSE_NUMBER_TOKEN_REGEX =
       }
 
       .save-btn:hover:not(:disabled) {
-        background: #115e59;
+        background: #0f766e;
       }
 
       .save-btn:disabled {
@@ -741,11 +807,6 @@ export class AddPassageModalComponent {
   readonly rawText = signal<string>('');
   readonly isHighlightingVerseNumbers = signal<boolean>(false);
 
-  /**
-   * When the user strips verse numbers, we remember the exact verse numbers and
-   * separate verse boundaries by blank lines (`\n\n`) so multi-line poetic verses
-   * are NOT mistakenly split into separate verses on single line breaks.
-   */
   readonly rememberedVerseNumbers = signal<number[]>([]);
   readonly hasRememberedBoundaries = computed<boolean>(
     () => this.rememberedVerseNumbers().length > 0
@@ -818,8 +879,6 @@ export class AddPassageModalComponent {
       };
     }
 
-    // Case 1: Text currently contains explicit verse numbers -> split ONLY at verse numbers
-    // so multi-line poetry inside a verse stays together and inline verses split accurately.
     const segments = this.highlightSegments();
     const verseNumCount = segments.filter((s) => s.type === 'verse-num').length;
     if (verseNumCount > 0) {
@@ -832,9 +891,6 @@ export class AddPassageModalComponent {
       }
     }
 
-    // Case 2: Verse numbers were stripped via "Remove Highlighted Verse Numbers" ->
-    // use the remembered verse boundaries (separated by blank lines `\n\n` in the editor)
-    // and pair each block with its remembered verse number!
     const rememberedNums = this.rememberedVerseNumbers();
     if (rememberedNums.length > 0) {
       const blocksByBlankLine = trimmed
@@ -862,8 +918,6 @@ export class AddPassageModalComponent {
       };
     }
 
-    // Case 3: Plain text without verse numbers -> split by paragraph breaks (\n\n) if present,
-    // otherwise delegate to PassageParserService
     const paragraphBlocks = trimmed
       .split(/\n\s*\n/)
       .map((b) => b.trim())
@@ -910,8 +964,6 @@ export class AddPassageModalComponent {
       return;
     }
 
-    // Remember the exact verse numbers and boundaries, and format the plain text box
-    // with blank lines (\n\n) between verses so multi-line verses stay grouped together.
     this.rememberedVerseNumbers.set(verses.map((v) => v.verseNumber));
     const cleanedTextWithBoundaries = verses.map((v) => v.text).join('\n\n');
 

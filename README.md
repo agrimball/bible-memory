@@ -1,6 +1,8 @@
 # Bible Memory (`Selah Memory`)
 
-An Angular 19 scripture memorization web application (PWA & Android-ready) combining **Remember Me**'s voice recitation & progressive first-letter scaffolding with **Anki**'s spaced repetition scheduling, **2-Step Daily Verse Stitching**, and **Protobuf v3 (`ProtoJSON`)** background file auto-saving.
+An Angular 19 scripture memorization web application (PWA & Android-ready) combining **Remember Me**'s voice recitation & progressive first-letter scaffolding with **Anki**'s spaced repetition scheduling, **2-Step Daily Verse Stitching**, **Long Passage Memory Repair**, **Dark Mode**, and **Protobuf v3 (`ProtoJSON`)** background file auto-saving.
+
+🌐 **Live Web App (GitHub Pages):** **[https://agrimball.github.io/bible-memory/](https://agrimball.github.io/bible-memory/)**
 
 ---
 
@@ -24,7 +26,10 @@ An Angular 19 scripture memorization web application (PWA & Android-ready) combi
 5. **Simple Copy-Paste Editor with Verse Number Highlight, Stripping & Remembered Boundaries**
    - Plain, predictable text box for pasting passages from any Bible app, with an automatic warning if verse numbers are missing.
    - Click **Highlight Verse Numbers** to preview the exact verse number tokens (`[28]`, `(28)`, superscripts `²⁸`, or inline numbers) highlighted in red strikethrough, then click **Remove Highlighted Verse Numbers** to strip the numbers while **automatically remembering exact verse boundaries** for `+1v` study and stitching.
-6. **Active Memory Data File (`.proto.json`) & Protobuf v3 (`proto/bible_memory.proto`)**
+6. **Long Passage Memory Repair (`🔧 Repair v. X`) & Dark Mode**
+   - Stumbled on a specific verse inside a long passage? Click **`🔧 Repair v. X`** on the back of any multi-verse card to spawn a temporary **Spot-Repair Flashcard** that shows the preceding verse (`v. X-1`) as a lead-in cue and prompts you to recite `v. X` until it reaches a **3/3 Good/Easy heal streak** and auto-retires!
+   - Full **Dark Mode** by default with a 1-click **☀️ Light / 🌙 Dark** theme toggle in the top bar.
+7. **Active Memory Data File (`.proto.json`) & Protobuf v3 (`proto/bible_memory.proto`)**
    - Select or create a `.proto.json` file on your device via **Open Memory File...** or **Create New Memory File...** so every change auto-saves to disk in the background using canonical `biblememory.v1.UserDataBundle` ProtoJSON.
 
 ---
@@ -37,17 +42,10 @@ You can install **Selah Memory** on your Android phone either as a **Standalone 
 
 The app includes a preconfigured [`public/manifest.webmanifest`](public/manifest.webmanifest) (`"display": "standalone"`, portrait orientation, theme colors) so Chrome on Android installs it to your home screen as a full-screen standalone app with no browser address bar.
 
-#### Option A: Host for Free on GitHub Pages / Vercel / Netlify (Recommended)
-> **Note:** Chrome requires a secure context (`https://` or `localhost`) for Microphone Voice Recording (`MediaRecorder`) and PWA installation. Hosting over HTTPS ensures voice recitation recording works anywhere.
-
-1. Build the production bundle:
-   ```bash
-   npm run build
-   ```
-2. Deploy the `dist/bible-memory/browser` directory to **GitHub Pages**, **Vercel**, or **Netlify** (or run `npx vercel --prod dist/bible-memory/browser`).
-3. Open the deployed `https://...` URL in **Google Chrome** on your Android phone.
-4. Tap the **three-dot menu (`⋮`)** in the top-right corner of Chrome and select **Add to Home screen** → **Install app**.
-5. Launch **Selah Memory** from your Android home screen!
+#### Option A: Install Directly from GitHub Pages (Recommended)
+1. Open **[https://agrimball.github.io/bible-memory/](https://agrimball.github.io/bible-memory/)** in **Google Chrome** on your Android phone (or from any user account on your computer!).
+2. Tap the **three-dot menu (`⋮`)** in the top-right corner of Chrome and select **Add to Home screen** → **Install app**.
+3. Launch **Selah Memory** from your Android home screen! (Every push to `main` automatically deploys to GitHub Pages via [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml)).
 
 #### Option B: Run Locally over USB (`adb reverse`) or Tailscale
 If you want to run the app directly from your computer onto your Android phone with full microphone & PWA support:
@@ -114,6 +112,7 @@ npm run test:screenshots
 - [`screenshot-tests/04-study-mode-first-letters-verse1.png`](screenshot-tests/04-study-mode-first-letters-verse1.png) — Separate **First-Letter Study Page** showing Verse 1 first letters (`+1w` / `+1v`)
 - [`screenshot-tests/05-study-mode-plus-1w-and-plus-1v.png`](screenshot-tests/05-study-mode-plus-1w-and-plus-1v.png) — Progressive `+1w` & `+1v` reveal completing Verse 1 and automatically surfacing Verse 2's first letters
 - [`screenshot-tests/06-voice-recording-active.png`](screenshot-tests/06-voice-recording-active.png) — Active Voice Recitation recording on card front
-- [`screenshot-tests/07-card-back-voice-playback-and-anki-grading.png`](screenshot-tests/07-card-back-voice-playback-and-anki-grading.png) — Card Back auto-playing recorded voice alongside passage text and Anki grading buttons
+- [`screenshot-tests/07-card-back-voice-playback-and-anki-grading.png`](screenshot-tests/07-card-back-voice-playback-and-anki-grading.png) — Card Back auto-playing recorded voice alongside passage text, per-verse `🔧 Repair` buttons, and Anki grading buttons
+- [`screenshot-tests/07b-memory-repair-card-front.png`](screenshot-tests/07b-memory-repair-card-front.png) — Temporary Long-Passage Memory Repair Flashcard (`0/3` Heal Streak + preceding verse context cue)
 - [`screenshot-tests/08-protojson-wire-format-modal.png`](screenshot-tests/08-protojson-wire-format-modal.png) — Live `biblememory.v1.UserDataBundle` ProtoJSON wire-format & auto-save file modal
 - [`screenshot-tests/test-report.json`](screenshot-tests/test-report.json) — Structured assertion & verification report

@@ -1,4 +1,4 @@
-<div class="app-shell">
+<div class="app-shell" [class.dark-theme]="isDarkMode()">
   <header class="app-topbar" data-testid="app-topbar">
     <div class="brand-group" (click)="openDashboardTab('queue')" role="button" tabindex="0">
       <div class="brand-logo" aria-hidden="true">✦</div>
@@ -52,10 +52,26 @@
       >
         ProtoJSON
       </button>
+      <button
+        type="button"
+        class="topbar-btn theme-toggle-btn"
+        (click)="toggleTheme()"
+        data-testid="btn-toggle-theme"
+        [attr.aria-label]="isDarkMode() ? 'Switch to light mode' : 'Switch to dark mode'"
+      >
+        {{ isDarkMode() ? '☀️ Light' : '🌙 Dark' }}
+      </button>
     </nav>
   </header>
 
   <main class="app-main">
+    @if (repairHealedBanner(); as bannerMsg) {
+      <div class="healed-banner" data-testid="repair-healed-banner">
+        <span>{{ bannerMsg }}</span>
+        <button type="button" class="healed-dismiss" (click)="repairHealedBanner.set(null)">✕</button>
+      </div>
+    }
+
     @if (activeView() === 'dashboard') {
       <app-deck-dashboard
         [activeTab]="dashboardTab()"
@@ -84,6 +100,7 @@
           (rated)="onCardRated($event)"
           (backToDeck)="returnToDashboard()"
           (openStudyPage)="openFirstLetterStudyPage($event)"
+          (openRepairCard)="practiceSingleItem($event)"
         />
       } @else {
         <div class="empty-study-state" data-testid="empty-study-state">

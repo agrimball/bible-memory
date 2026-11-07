@@ -51,6 +51,11 @@ export interface Flashcard {
   lapses: number;
   createdAt: string;
   updatedAt: string;
+  isRepairCard?: boolean;
+  repairVerseNumber?: number;
+  repairStreak?: number;
+  repairTargetStreak?: number;
+  parentCardId?: string;
 }
 
 export interface ReviewLog {
@@ -115,6 +120,16 @@ export interface FlashcardProtoJson {
   created_at?: string;
   updatedAt?: string;
   updated_at?: string;
+  isRepairCard?: boolean;
+  is_repair_card?: boolean;
+  repairVerseNumber?: number;
+  repair_verse_number?: number;
+  repairStreak?: number;
+  repair_streak?: number;
+  repairTargetStreak?: number;
+  repair_target_streak?: number;
+  parentCardId?: string;
+  parent_card_id?: string;
 }
 
 export interface ReviewLogProtoJson {
@@ -217,7 +232,7 @@ export const ProtoJsonCodec = {
   },
 
   flashcardToJson(c: Flashcard): FlashcardProtoJson {
-    return {
+    const out: FlashcardProtoJson = {
       id: c.id,
       passageId: c.passageId,
       state: cardStateToProtoJson(c.state),
@@ -231,10 +246,21 @@ export const ProtoJsonCodec = {
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
     };
+    if (c.isRepairCard) {
+      out.isRepairCard = true;
+      out.repairVerseNumber = c.repairVerseNumber ?? 1;
+      out.repairStreak = c.repairStreak ?? 0;
+      out.repairTargetStreak = c.repairTargetStreak ?? 3;
+      if (c.parentCardId) {
+        out.parentCardId = c.parentCardId;
+      }
+    }
+    return out;
   },
 
   flashcardFromJson(json: FlashcardProtoJson): Flashcard {
-    return {
+    const isRepair = Boolean(json.isRepairCard ?? json.is_repair_card ?? false);
+    const card: Flashcard = {
       id: String(json.id ?? ''),
       passageId: String(json.passageId ?? json.passage_id ?? ''),
       state: cardStateFromProtoJson(json.state),
@@ -248,6 +274,21 @@ export const ProtoJsonCodec = {
       createdAt: String(json.createdAt ?? json.created_at ?? new Date().toISOString()),
       updatedAt: String(json.updatedAt ?? json.updated_at ?? new Date().toISOString()),
     };
+    if (isRepair) {
+      card.isRepairCard = true;
+      card.repairVerseNumber = Number(
+        json.repairVerseNumber ?? json.repair_verse_number ?? 1
+      );
+      card.repairStreak = Number(json.repairStreak ?? json.repair_streak ?? 0);
+      card.repairTargetStreak = Number(
+        json.repairTargetStreak ?? json.repair_target_streak ?? 3
+      );
+      const parentId = json.parentCardId ?? json.parent_card_id;
+      if (parentId) {
+        card.parentCardId = String(parentId);
+      }
+    }
+    return card;
   },
 
   reviewLogToJson(r: ReviewLog): ReviewLogProtoJson {

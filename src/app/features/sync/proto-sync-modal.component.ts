@@ -202,10 +202,31 @@ import { StorageService } from '../../core/services/storage.service';
   `,
   styles: [
     `
+      :host {
+        --modal-bg: #1e293b;
+        --modal-header-bg: #0f172a;
+        --panel-bg: #0f172a;
+        --border-color: #334155;
+        --text-primary: #f8fafc;
+        --text-secondary: #cbd5e1;
+        --text-muted: #94a3b8;
+        display: block;
+      }
+
+      :host-context(.light-theme) {
+        --modal-bg: #fffdf9;
+        --modal-header-bg: #faf6ee;
+        --panel-bg: #faf7f0;
+        --border-color: #e7e0d3;
+        --text-primary: #1c1917;
+        --text-secondary: #44403c;
+        --text-muted: #78716c;
+      }
+
       .modal-backdrop {
         position: fixed;
         inset: 0;
-        background: rgba(28, 25, 23, 0.58);
+        background: rgba(2, 6, 23, 0.72);
         backdrop-filter: blur(4px);
         display: flex;
         align-items: center;
@@ -218,10 +239,10 @@ import { StorageService } from '../../core/services/storage.service';
         width: 100%;
         max-width: 780px;
         max-height: 92vh;
-        background: #fffdf9;
-        border: 1px solid #e7e0d3;
+        background: var(--modal-bg);
+        border: 1px solid var(--border-color);
         border-radius: 1rem;
-        box-shadow: 0 24px 48px rgba(28, 25, 23, 0.24);
+        box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
         display: flex;
         flex-direction: column;
         overflow: hidden;
@@ -233,8 +254,8 @@ import { StorageService } from '../../core/services/storage.service';
         justify-content: space-between;
         gap: 1rem;
         padding: 1.35rem 1.5rem 1rem;
-        border-bottom: 1px solid #ede7db;
-        background: #faf6ee;
+        border-bottom: 1px solid var(--border-color);
+        background: var(--modal-header-bg);
       }
 
       .modal-eyebrow {
@@ -243,39 +264,43 @@ import { StorageService } from '../../core/services/storage.service';
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.06em;
-        color: #0f766e;
+        color: #2dd4bf;
         margin-bottom: 0.25rem;
+      }
+
+      :host-context(.light-theme) .modal-eyebrow {
+        color: #0f766e;
       }
 
       .modal-title {
         margin: 0;
         font-size: 1.22rem;
         font-weight: 700;
-        color: #1c1917;
+        color: var(--text-primary);
       }
 
       .modal-subtitle {
         margin: 0.35rem 0 0;
         font-size: 0.83rem;
-        color: #57534e;
+        color: var(--text-secondary);
         line-height: 1.45;
       }
 
       .icon-close-btn {
         background: transparent;
-        border: 1px solid #d6cfc2;
+        border: 1px solid var(--border-color);
         border-radius: 0.5rem;
         width: 2rem;
         height: 2rem;
         font-size: 0.9rem;
-        color: #57534e;
+        color: var(--text-secondary);
         cursor: pointer;
         flex-shrink: 0;
       }
 
       .icon-close-btn:hover {
-        background: #ede7db;
-        color: #1c1917;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text-primary);
       }
 
       .modal-body {
@@ -287,8 +312,8 @@ import { StorageService } from '../../core/services/storage.service';
       }
 
       .active-file-panel {
-        background: #faf7f0;
-        border: 1px solid #dfd7c6;
+        background: var(--panel-bg);
+        border: 1px solid var(--border-color);
         border-radius: 0.75rem;
         padding: 0.95rem 1.1rem;
       }
@@ -306,6 +331,10 @@ import { StorageService } from '../../core/services/storage.service';
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.05em;
+        color: #2dd4bf;
+      }
+
+      :host-context(.light-theme) .active-file-label {
         color: #0f766e;
       }
 
@@ -313,17 +342,21 @@ import { StorageService } from '../../core/services/storage.service';
         margin: 0.15rem 0 0;
         font-size: 0.98rem;
         font-weight: 700;
-        color: #1c1917;
+        color: var(--text-primary);
       }
 
       .disconnected-text {
+        color: #fbbf24;
+      }
+
+      :host-context(.light-theme) .disconnected-text {
         color: #92400e;
       }
 
       .active-file-meta {
         margin: 0.2rem 0 0;
         font-size: 0.79rem;
-        color: #57534e;
+        color: var(--text-secondary);
       }
 
       .active-file-actions {
@@ -338,8 +371,8 @@ import { StorageService } from '../../core/services/storage.service';
         align-items: center;
         gap: 0.65rem;
         flex-wrap: wrap;
-        background: #f5f0e6;
-        border: 1px solid #e5dec9;
+        background: var(--panel-bg);
+        border: 1px solid var(--border-color);
         border-radius: 0.65rem;
         padding: 0.6rem 0.9rem;
       }
@@ -349,9 +382,9 @@ import { StorageService } from '../../core/services/storage.service';
         align-items: center;
         gap: 0.4rem;
         font-size: 0.8rem;
-        color: #292524;
+        color: var(--text-primary);
         padding-right: 0.65rem;
-        border-right: 1px solid #d6cfc2;
+        border-right: 1px solid var(--border-color);
       }
 
       .schema-pill:last-child {
@@ -360,7 +393,7 @@ import { StorageService } from '../../core/services/storage.service';
       }
 
       .pill-label {
-        color: #78716c;
+        color: var(--text-muted);
         font-weight: 500;
       }
 
@@ -374,9 +407,9 @@ import { StorageService } from '../../core/services/storage.service';
       .toolbar-btn {
         padding: 0.55rem 0.95rem;
         border-radius: 0.55rem;
-        border: 1px solid #d6cfc2;
-        background: #ffffff;
-        color: #292524;
+        border: 1px solid var(--border-color);
+        background: var(--modal-bg);
+        color: var(--text-primary);
         font-size: 0.83rem;
         font-weight: 600;
         cursor: pointer;
@@ -384,22 +417,22 @@ import { StorageService } from '../../core/services/storage.service';
       }
 
       .toolbar-btn:hover {
-        background: #f5f0e6;
+        border-color: #64748b;
       }
 
       .toolbar-btn.primary {
-        background: #0f766e;
+        background: #0d9488;
         color: #ffffff;
-        border-color: #0f766e;
+        border-color: #0d9488;
       }
 
       .toolbar-btn.primary:hover {
-        background: #115e59;
+        background: #0f766e;
       }
 
       .toolbar-btn.subtle {
-        background: #faf6ee;
-        color: #57534e;
+        background: var(--panel-bg);
+        color: var(--text-secondary);
       }
 
       .status-banner {
@@ -407,15 +440,21 @@ import { StorageService } from '../../core/services/storage.service';
         border-radius: 0.55rem;
         font-size: 0.83rem;
         font-weight: 600;
+        background: rgba(20, 184, 166, 0.2);
+        color: #5eead4;
+        border: 1px solid rgba(20, 184, 166, 0.45);
+      }
+
+      :host-context(.light-theme) .status-banner {
         background: #ccfbf1;
         color: #115e59;
-        border: 1px solid #99f6e4;
+        border-color: #99f6e4;
       }
 
       .status-banner.error {
-        background: #fee2e2;
-        color: #991b1b;
-        border-color: #fecaca;
+        background: rgba(239, 68, 68, 0.2);
+        color: #fca5a5;
+        border-color: rgba(239, 68, 68, 0.45);
       }
 
       .editor-wrapper {
@@ -432,13 +471,13 @@ import { StorageService } from '../../core/services/storage.service';
         flex-wrap: wrap;
         font-size: 0.82rem;
         font-weight: 600;
-        color: #292524;
+        color: var(--text-primary);
       }
 
       .editor-hint {
         font-size: 0.75rem;
         font-weight: 400;
-        color: #78716c;
+        color: var(--text-muted);
       }
 
       .proto-textarea {
@@ -446,9 +485,9 @@ import { StorageService } from '../../core/services/storage.service';
         box-sizing: border-box;
         padding: 0.85rem;
         border-radius: 0.65rem;
-        border: 1px solid #d6cfc2;
-        background: #1c1917;
-        color: #f5f5f4;
+        border: 1px solid var(--border-color);
+        background: #020617;
+        color: #f8fafc;
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         font-size: 0.8rem;
         line-height: 1.45;
@@ -457,8 +496,8 @@ import { StorageService } from '../../core/services/storage.service';
 
       .proto-textarea:focus {
         outline: none;
-        border-color: #0f766e;
-        box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.2);
+        border-color: #14b8a6;
+        box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.2);
       }
 
       .modal-footer {
@@ -467,32 +506,32 @@ import { StorageService } from '../../core/services/storage.service';
         justify-content: space-between;
         gap: 0.75rem;
         padding: 0.95rem 1.5rem;
-        border-top: 1px solid #ede7db;
-        background: #faf6ee;
+        border-top: 1px solid var(--border-color);
+        background: var(--modal-header-bg);
       }
 
       .reset-btn {
         padding: 0.55rem 0.95rem;
         border-radius: 0.55rem;
-        border: 1px solid #e7e0d3;
+        border: 1px solid var(--border-color);
         background: transparent;
-        color: #78716c;
+        color: var(--text-muted);
         font-size: 0.8rem;
         font-weight: 600;
         cursor: pointer;
       }
 
       .reset-btn:hover {
-        background: #fee2e2;
-        color: #991b1b;
-        border-color: #fecaca;
+        background: rgba(239, 68, 68, 0.18);
+        color: #fca5a5;
+        border-color: #f87171;
       }
 
       .done-btn {
         padding: 0.6rem 1.25rem;
         border-radius: 0.55rem;
         border: none;
-        background: #292524;
+        background: #0d9488;
         color: #ffffff;
         font-size: 0.86rem;
         font-weight: 600;
@@ -500,7 +539,7 @@ import { StorageService } from '../../core/services/storage.service';
       }
 
       .done-btn:hover {
-        background: #1c1917;
+        background: #0f766e;
       }
     `,
   ],

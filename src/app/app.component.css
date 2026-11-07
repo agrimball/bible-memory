@@ -4,6 +4,12 @@
   flex-direction: column;
   background: linear-gradient(180deg, #faf7f2 0%, #f3efe6 100%);
   color: #1c1917;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.app-shell.dark-theme {
+  background: linear-gradient(180deg, #0b1120 0%, #0f172a 100%);
+  color: #f8fafc;
 }
 
 .app-topbar {
@@ -19,6 +25,11 @@
   z-index: 30;
   gap: 1rem;
   flex-wrap: wrap;
+}
+
+.app-shell.dark-theme .app-topbar {
+  background: rgba(15, 23, 42, 0.94);
+  border-bottom-color: #1e293b;
 }
 
 .brand-group {
@@ -42,6 +53,11 @@
   box-shadow: 0 2px 8px rgba(28, 25, 23, 0.16);
 }
 
+.app-shell.dark-theme .brand-logo {
+  background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+  border: 1px solid #475569;
+}
+
 .brand-title {
   margin: 0;
   font-size: 1.15rem;
@@ -50,10 +66,18 @@
   color: #1c1917;
 }
 
+.app-shell.dark-theme .brand-title {
+  color: #f8fafc;
+}
+
 .brand-subtitle {
   margin: 0;
   font-size: 0.76rem;
   color: #78716c;
+}
+
+.app-shell.dark-theme .brand-subtitle {
+  color: #94a3b8;
 }
 
 .topbar-actions {
@@ -80,10 +104,28 @@
   border-color: #b8afa0;
 }
 
+.app-shell.dark-theme .topbar-btn {
+  background: #1e293b;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+.app-shell.dark-theme .topbar-btn:hover {
+  background: #334155;
+  border-color: #475569;
+}
+
 .topbar-btn.active {
   background: #292524;
   color: #fafaf9;
   border-color: #292524;
+}
+
+.app-shell.dark-theme .topbar-btn.active {
+  background: #f59e0b;
+  color: #0f172a;
+  border-color: #f59e0b;
+  font-weight: 700;
 }
 
 .topbar-btn.accent {
@@ -101,6 +143,16 @@
   color: #57534e;
 }
 
+.app-shell.dark-theme .topbar-btn.subtle {
+  background: #172033;
+  color: #94a3b8;
+  border-color: #334155;
+}
+
+.topbar-btn.theme-toggle-btn {
+  border-color: #475569;
+}
+
 .app-main {
   flex: 1;
   width: 100%;
@@ -110,6 +162,29 @@
   box-sizing: border-box;
 }
 
+.healed-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1.2rem;
+  margin-bottom: 1.15rem;
+  border-radius: 12px;
+  background: #064e3b;
+  border: 1px solid #10b981;
+  color: #ecfdf5;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.healed-dismiss {
+  background: transparent;
+  border: none;
+  color: #a7f3d0;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
 .empty-study-state {
   text-align: center;
   background: #ffffff;
@@ -117,6 +192,12 @@
   border-radius: 1rem;
   padding: 3rem 2rem;
   margin-top: 2rem;
+}
+
+.app-shell.dark-theme .empty-study-state {
+  background: #111827;
+  border-color: #334155;
+  color: #f8fafc;
 }
 
 .primary-btn {

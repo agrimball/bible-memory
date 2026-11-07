@@ -178,7 +178,7 @@ import {
         width: 100%;
         max-width: 860px;
         margin: 0 auto;
-        color: #1e293b;
+        color: #f8fafc;
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       }
 
@@ -209,9 +209,9 @@ import {
         gap: 0.5rem;
         padding: 0.55rem 1.05rem;
         border-radius: 999px;
-        border: 1px solid #b48a4e;
-        background: #fffaf0;
-        color: #5c4018;
+        border: 1px solid rgba(251, 191, 36, 0.35);
+        background: rgba(245, 158, 11, 0.14);
+        color: #fbbf24;
         font-size: 0.875rem;
         font-weight: 700;
         cursor: pointer;
@@ -219,23 +219,23 @@ import {
       }
 
       .btn-exit-to-card:hover {
-        background: #f5ebd6;
+        background: rgba(245, 158, 11, 0.24);
       }
 
       .btn-back-deck-subtle {
         padding: 0.52rem 0.9rem;
         border-radius: 999px;
-        border: 1px solid #d6d3c9;
-        background: #faf8f5;
-        color: #475569;
+        border: 1px solid #334155;
+        background: #1e293b;
+        color: #cbd5e1;
         font-size: 0.84rem;
         font-weight: 600;
         cursor: pointer;
       }
 
       .btn-back-deck-subtle:hover {
-        background: #f1ede4;
-        color: #0f172a;
+        background: #334155;
+        color: #f8fafc;
       }
 
       .study-page-progress {
@@ -250,14 +250,15 @@ import {
         border-radius: 999px;
         font-size: 0.8rem;
         font-weight: 700;
-        background: #292524;
-        color: #fafaf9;
+        background: #1e293b;
+        border: 1px solid #334155;
+        color: #f8fafc;
       }
 
       .progress-words {
         font-size: 0.82rem;
         font-weight: 600;
-        color: #57534e;
+        color: #94a3b8;
       }
 
       .completed-pill {
@@ -265,17 +266,18 @@ import {
         border-radius: 999px;
         font-size: 0.78rem;
         font-weight: 700;
-        background: #d1fae5;
-        color: #065f46;
+        background: rgba(16, 185, 129, 0.2);
+        color: #6ee7b7;
+        border: 1px solid rgba(52, 211, 153, 0.35);
       }
 
       .study-page-shell {
-        background: linear-gradient(180deg, #fffdf9 0%, #f8f4ea 100%);
-        border: 1px solid #ded6c6;
+        background: linear-gradient(180deg, #162032 0%, #0f172a 100%);
+        border: 1px solid #334155;
         border-radius: 20px;
         box-shadow:
-          0 14px 34px -10px rgba(30, 41, 59, 0.12),
-          0 4px 12px -2px rgba(30, 41, 59, 0.06);
+          0 16px 38px -10px rgba(0, 0, 0, 0.55),
+          0 4px 12px -2px rgba(0, 0, 0, 0.35);
         padding: 1.65rem 1.85rem;
         display: flex;
         flex-direction: column;
@@ -289,7 +291,7 @@ import {
         flex-wrap: wrap;
         gap: 1rem;
         padding-bottom: 1.1rem;
-        border-bottom: 1px solid #e6dfd1;
+        border-bottom: 1px solid #1e293b;
       }
 
       .header-titles {
@@ -306,14 +308,14 @@ import {
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.07em;
-        color: #855d23;
+        color: #fbbf24;
       }
 
       .study-dot {
         width: 9px;
         height: 9px;
         border-radius: 50%;
-        background: #d97706;
+        background: #f59e0b;
       }
 
       .study-page-reference {
@@ -321,18 +323,18 @@ import {
         font-family: 'Georgia', 'Cambria', 'Times New Roman', serif;
         font-size: 1.85rem;
         font-weight: 700;
-        color: #0f172a;
+        color: #f8fafc;
       }
 
       .header-hint {
         max-width: 340px;
         font-size: 0.83rem;
         line-height: 1.45;
-        color: #57534e;
-        background: #f3efe6;
+        color: #cbd5e1;
+        background: #1e293b;
         padding: 0.65rem 0.9rem;
         border-radius: 10px;
-        border: 1px solid #e4decb;
+        border: 1px solid #334155;
       }
 
       .study-verses-list {
@@ -351,14 +353,14 @@ import {
       }
 
       .study-verse-block.verse-completed {
-        background: #ecfdf5;
-        border: 1px solid #a7f3d0;
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(52, 211, 153, 0.3);
       }
 
       .study-verse-block.verse-active {
-        background: #ffffff;
-        border: 2px solid #d97706;
-        box-shadow: 0 4px 14px rgba(217, 119, 6, 0.09);
+        background: #1e293b;
+        border: 2px solid #f59e0b;
+        box-shadow: 0 4px 16px rgba(245, 158, 11, 0.12);
       }
 
       .verse-number-badge {
@@ -372,19 +374,19 @@ import {
         font-family: 'JetBrains Mono', 'Fira Code', monospace;
         font-size: 0.82rem;
         font-weight: 700;
-        background: #e7e2d8;
-        color: #44403c;
+        background: #0f172a;
+        color: #cbd5e1;
         margin-top: 0.12rem;
       }
 
       .verse-completed .verse-number-badge {
-        background: #a7f3d0;
-        color: #065f46;
+        background: rgba(16, 185, 129, 0.2);
+        color: #6ee7b7;
       }
 
       .verse-active .verse-number-badge {
-        background: #fef3c7;
-        color: #92400e;
+        background: rgba(245, 158, 11, 0.2);
+        color: #fde68a;
       }
 
       .verse-tokens-flow {
@@ -405,23 +407,23 @@ import {
         font-family: 'Georgia', 'Cambria', serif;
         font-size: 1.16rem;
         font-weight: 700;
-        color: #0f172a;
+        color: #f8fafc;
       }
 
       .verse-completed .word-token.revealed {
-        color: #064e3b;
+        color: #a7f3d0;
         font-weight: 600;
       }
 
       .word-token.first-letter {
         padding: 0.14rem 0.48rem;
         border-radius: 6px;
-        background: #f1ece1;
-        border: 1px solid #d6cebe;
+        background: #0f172a;
+        border: 1px solid #334155;
         font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
         font-size: 0.98rem;
         font-weight: 700;
-        color: #78350f;
+        color: #fbbf24;
         letter-spacing: 0.04em;
       }
 
@@ -446,7 +448,7 @@ import {
         flex-wrap: wrap;
         gap: 0.85rem;
         padding-top: 1rem;
-        border-top: 1px solid #e6dfd1;
+        border-top: 1px solid #1e293b;
       }
 
       .reveal-buttons-group {
@@ -474,13 +476,13 @@ import {
       }
 
       .btn-reveal-word {
-        background: #1e293b;
-        color: #ffffff;
-        border: 1px solid #0f172a;
+        background: #334155;
+        color: #f8fafc;
+        border: 1px solid #475569;
       }
 
       .btn-reveal-word:hover:not(:disabled) {
-        background: #334155;
+        background: #475569;
       }
 
       .btn-reveal-verse {
@@ -511,23 +513,23 @@ import {
       .btn-reset-study {
         padding: 0.6rem 0.95rem;
         border-radius: 8px;
-        border: 1px solid #d4cbb8;
-        background: #ffffff;
-        color: #475569;
+        border: 1px solid #334155;
+        background: #1e293b;
+        color: #cbd5e1;
         font-size: 0.84rem;
         font-weight: 600;
         cursor: pointer;
       }
 
       .btn-reset-study:hover {
-        background: #f1ede4;
-        color: #0f172a;
+        background: #334155;
+        color: #f8fafc;
       }
 
       .btn-return-card-primary {
         padding: 0.62rem 1.05rem;
         border-radius: 8px;
-        border: 1px solid #0f766e;
+        border: 1px solid #0d9488;
         background: #0f766e;
         color: #ffffff;
         font-size: 0.85rem;
@@ -537,6 +539,34 @@ import {
 
       .btn-return-card-primary:hover {
         background: #115e59;
+      }
+
+      /* Light mode overrides when html is not .dark-theme */
+      :host-context(html:not(.dark-theme)) {
+        color: #1e293b;
+      }
+      :host-context(html:not(.dark-theme)) .study-page-shell {
+        background: linear-gradient(180deg, #fffdf9 0%, #f8f4ea 100%);
+        border-color: #ded6c6;
+        box-shadow: 0 14px 34px -10px rgba(30, 41, 59, 0.12);
+      }
+      :host-context(html:not(.dark-theme)) .study-page-reference,
+      :host-context(html:not(.dark-theme)) .word-token.revealed {
+        color: #0f172a;
+      }
+      :host-context(html:not(.dark-theme)) .study-verse-block.verse-active {
+        background: #ffffff;
+        border-color: #d97706;
+      }
+      :host-context(html:not(.dark-theme)) .word-token.first-letter {
+        background: #f1ece1;
+        border-color: #d6cebe;
+        color: #78350f;
+      }
+      :host-context(html:not(.dark-theme)) .header-hint {
+        background: #f3efe6;
+        border-color: #e4decb;
+        color: #57534e;
       }
     `,
   ],

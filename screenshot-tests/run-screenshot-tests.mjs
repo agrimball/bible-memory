@@ -165,8 +165,9 @@ async function runScreenshotSuite() {
     // 1a. 01-deck-dashboard.png (Home Page: Active Memory Data File Bar,
     //     "Currently Memorizing", and "Saved to Memorize Next")
     // =========================================================================
-    console.log('Step 1a: Navigating to Home Page (Currently Memorizing & Saved to Memorize Next)...');
+    console.log('Step 1a: Navigating to Home Page (Dark Mode, Currently Memorizing & Saved to Memorize Next)...');
     await page.goto(APP_URL, { waitUntil: 'networkidle' });
+    await page.locator('[data-testid="btn-toggle-theme"]').waitFor({ state: 'visible', timeout: 15000 });
     await page.locator('[data-testid="active-data-file-bar"]').waitFor({ state: 'visible', timeout: 15000 });
     await page.locator('[data-testid="btn-open-data-file"]').waitFor({ state: 'visible', timeout: 15000 });
     await page.locator('[data-testid="btn-create-data-file"]').waitFor({ state: 'visible', timeout: 15000 });
@@ -467,16 +468,56 @@ async function runScreenshotSuite() {
       '07-card-back-voice-playback-and-anki-grading.png',
       stepResults,
       {
-        step: 7,
-        name: 'Card Back View with Auto Voice Playback, Full Passage Read-Along, and Anki Grading Bar',
+        step: '7a',
+        name: 'Card Back View with Auto Voice Playback, Full Passage Read-Along, Spot-Repair Buttons, and Anki Grading Bar',
         assertions: [
           '[data-testid="card-back-view"] is visible',
           '[data-testid="voice-playback-bar"] is visible and auto-playing recorded recitation',
-          '[data-testid="card-back-full-text"] displays full passage text',
+          '[data-testid="card-back-full-text"] displays full passage text with per-verse 🔧 Repair buttons',
           '[data-testid="anki-grading-bar"] displays Again / Hard / Good / Easy buttons',
         ],
       }
     );
+
+    // =========================================================================
+    // 7b. 07b-memory-repair-card-front.png (Long Passage Memory Repair Flow)
+    // =========================================================================
+    console.log('Step 7b: Spawning & Practicing Temporary Long-Passage Memory Repair Card...');
+    const repairButtons = page.locator('[data-testid^="btn-spawn-repair-"]');
+    const repairBtnCount = await repairButtons.count();
+    assertCondition(
+      repairBtnCount > 1,
+      `Expected multiple per-verse 🔧 Repair buttons on multi-verse card back, found ${repairBtnCount}`
+    );
+    await repairButtons.nth(1).click();
+
+    await page.locator('[data-testid="repair-spawned-toast"]').waitFor({ state: 'visible', timeout: 10000 });
+    const practiceRepairNowBtn = page.locator('[data-testid="btn-practice-repair-now"]');
+    await practiceRepairNowBtn.waitFor({ state: 'visible', timeout: 10000 });
+    await practiceRepairNowBtn.click();
+
+    await page.locator('[data-testid="repair-card-banner"]').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('[data-testid="repair-heal-progress"]').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('[data-testid="card-front-view"]').waitFor({ state: 'visible', timeout: 10000 });
+
+    await captureStepScreenshot(
+      page,
+      '07b-memory-repair-card-front.png',
+      stepResults,
+      {
+        step: '7b',
+        name: 'Temporary Long-Passage Memory Repair Flashcard Front (Preceding Verse Context Cue + Heal Streak)',
+        assertions: [
+          'Clicking [data-testid^="btn-spawn-repair-"] spawns a temporary verse repair card and displays [data-testid="repair-spawned-toast"]',
+          'Clicking [data-testid="btn-practice-repair-now"] opens the Temporary Memory Repair Flashcard',
+          '[data-testid="repair-card-banner"] and [data-testid="repair-heal-progress"] (0/3 heal streak) are visible on the front',
+        ],
+      }
+    );
+
+    // Flip the Repair Card to its back before grading it Good in Step 8
+    await page.locator('[data-testid="btn-flip-card"]').click();
+    await page.locator('[data-testid="card-back-view"]').waitFor({ state: 'visible', timeout: 10000 });
 
     // =========================================================================
     // 8. 08-protojson-wire-format-modal.png

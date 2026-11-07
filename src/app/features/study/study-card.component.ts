@@ -38,17 +38,57 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   @Output() rated = new EventEmitter<{ cardId: string; rating: ReviewRating }>();
   @Output() backToDeck = new EventEmitter<void>();
   @Output() openStudyPage = new EventEmitter<DeckItem>();
+  @Output() openRepairCard = new EventEmitter<DeckItem>();
   @Output() stitchedVerseCountChange = new EventEmitter<number>();
 
   readonly isFlipped = signal<boolean>(false);
   readonly localTargetVerseCount = signal<number>(2);
   readonly stitchPhase = signal<StitchPracticePhase>('new-verse-only');
   readonly stitchToastMessage = signal<string | null>(null);
+  readonly repairSpawnedMessage = signal<string | null>(null);
+  readonly spawnedRepairItem = signal<DeckItem | null>(null);
 
   readonly CardState = CardState;
   readonly ReviewRating = ReviewRating;
 
   private readonly currentItemSignal = signal<DeckItem | null>(null);
+
+  readonly isRepairCard = computed<boolean>(() => {
+    return Boolean(this.currentItemSignal()?.card.isRepairCard);
+  });
+
+  readonly repairTargetVerse = computed<Verse | null>(() => {
+    const current = this.currentItemSignal();
+    if (!current || !current.card.isRepairCard) {
+      return null;
+    }
+    const targetNum = current.card.repairVerseNumber;
+    return (
+      current.passage.verses.find((v) => v.verseNumber === targetNum) ??
+      current.passage.verses[0] ??
+      null
+    );
+  });
+
+  readonly repairPrecedingVerse = computed<Verse | null>(() => {
+    const current = this.currentItemSignal();
+    if (!current || !current.card.isRepairCard) {
+      return null;
+    }
+    const targetNum = current.card.repairVerseNumber;
+    const idx = current.passage.verses.findIndex((v) => v.verseNumber === targetNum);
+    if (idx > 0) {
+      return current.passage.verses[idx - 1];
+    }
+    return null;
+  });
+
+  readonly repairHealDots = computed<boolean[]>(() => {
+    const current = this.currentItemSignal();
+    const streak = current?.card.repairStreak ?? 0;
+    const target = current?.card.repairTargetStreak ?? 3;
+    return Array.from({ length: target }, (_, i) => i < streak);
+  });
 
   readonly totalVerses = computed<number>(() => {
     return this.currentItemSignal()?.passage.verses.length ?? 0;
@@ -77,57 +117,29 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     if (!current || current.passage.verses.length === 0) {
       return null;
     }
-    const targetIdx = Math.max(0, Math.min(this.activeStitchedCount() - 1, current.passage.verses.length - 1));
+    const targetIdx = Math.max(
+      0,
+      Math.min(this.activeStitchedCount() - 1, current.passage.verses.length - 1)
+    );
     return current.passage.verses[targetIdx] ?? null;
   });
 
   /**
-   * The verse immediately preceding today's new verse (used as a context cue when practicing only the new verse).
+   * The verse immediately preceding today's new verse.
    */
   readonly previousContextVerse = computed<Verse | null>(() => {
     const current = this.currentItemSignal();
     if (!current || current.passage.verses.length <= 1) {
       return null;
     }
-    const targetIdx = Math.max(0, Math.min(this.activeStitchedCount() - 1, current.passage.verses.length - 1));
+    const targetIdx = Math.max(
+      0,
+      Math.min(this.activeStitchedCount() - 1, current.passage.verses.length - 1)
+    );
     if (targetIdx === 0) {
       return null;
     }
     return current.passage.verses[targetIdx - 1] ?? null;
-  });
-
-  /**
-   * Verses included in the stitched block (Verses 1..target).
-   */
-  readonly stitchedVerses = computed<Verse[]>(() => {
-    const current = this.currentItemSignal();
-    if (!current) {
-      return [];
-    }
-    return current.passage.verses.slice(0, this.activeStitchedCount());
-  });
-
-  /**
-   * Verses shown on the back of the card for the current practice step.
-   */
-  readonly activeBackVerses = computed<Verse[]>(() => {
-    const current = this.currentItemSignal();
-    if (!current) {
-      return [];
-    }
-    if (current.passage.verses.length > 1 && this.stitchPhase() === 'new-verse-only') {
-      const nv = this.currentNewVerse();
-      return nv ? [nv] : current.passage.verses;
-    }
-    return this.stitchedVerses();
-  });
-
-  readonly unstitchedVerses = computed<Verse[]>(() => {
-    const current = this.currentItemSignal();
-    if (!current) {
-      return [];
-    }
-    return current.passage.verses.slice(this.activeStitchedCount());
   });
 
   readonly intervalPreviews = computed<Record<ReviewRating, string>>(() => {
@@ -146,10 +158,10 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['item']) {
-      const prevPassageId = changes['item'].previousValue?.passage?.id;
-      const nextPassageId = this.item?.passage?.id;
+      const prevCardId = changes['item'].previousValue?.card?.id;
+      const nextCardId = this.item?.card?.id;
       this.currentItemSignal.set(this.item);
-      if (prevPassageId !== nextPassageId) {
+      if (prevCardId !== nextCardId) {
         this.initializeForCurrentCard();
       }
     }
@@ -165,11 +177,13 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   private initializeForCurrentCard(): void {
     this.isFlipped.set(false);
     this.stitchToastMessage.set(null);
+    this.repairSpawnedMessage.set(null);
+    this.spawnedRepairItem.set(null);
     this.voiceService.resetForNewCard();
 
     const total = this.item?.passage.verses.length ?? 0;
-    if (total <= 1) {
-      this.localTargetVerseCount.set(1);
+    if (total <= 1 || this.item?.card.isRepairCard) {
+      this.localTargetVerseCount.set(Math.max(1, total));
       this.stitchPhase.set('full-passage');
       return;
     }
@@ -186,6 +200,32 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     } else {
       this.stitchPhase.set('new-verse-only');
     }
+  }
+
+  spawnRepairCardForVerse(verseNumber: number): void {
+    if (!this.item) {
+      return;
+    }
+    const repairItem = this.storageService.createRepairCard(
+      this.item.passage.id,
+      verseNumber,
+      3
+    );
+    if (repairItem) {
+      this.spawnedRepairItem.set(repairItem);
+      this.repairSpawnedMessage.set(
+        `🔧 Created Temporary Repair Card for v. ${verseNumber} (heals after 3 Good/Easy reviews)!`
+      );
+    }
+  }
+
+  practiceSpawnedRepairNow(): void {
+    const repair = this.spawnedRepairItem();
+    if (!repair) {
+      return;
+    }
+    this.voiceService.pausePlayback();
+    this.openRepairCard.emit(repair);
   }
 
   setStitchPhase(phase: StitchPracticePhase): void {
@@ -265,6 +305,15 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     }
     this.voiceService.pausePlayback();
 
+    // If this is a temporary Repair Card, emit directly so StorageService updates heal streak / retires when healed
+    if (this.item.card.isRepairCard) {
+      this.rated.emit({
+        cardId: this.item.card.id,
+        rating,
+      });
+      return;
+    }
+
     const isMultiVerse = this.item.passage.verses.length > 1;
     const isGoodOrEasy =
       rating === ReviewRating.REVIEW_RATING_GOOD ||
@@ -308,6 +357,9 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   }
 
   getCardStateLabel(state: CardState | undefined): string {
+    if (this.item?.card.isRepairCard) {
+      return 'REPAIR';
+    }
     switch (state) {
       case CardState.CARD_STATE_NEW:
         return 'SAVED';
@@ -322,6 +374,9 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   }
 
   getCardStateBadgeClass(state: CardState | undefined): string {
+    if (this.item?.card.isRepairCard) {
+      return 'state-pill state-repair';
+    }
     switch (state) {
       case CardState.CARD_STATE_NEW:
         return 'state-pill state-new';

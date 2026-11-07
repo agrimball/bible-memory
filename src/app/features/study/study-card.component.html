@@ -13,7 +13,7 @@
 
     <div class="session-progress" data-testid="study-queue-progress">
       <button
-        *ngIf="item.card.state === CardState.CARD_STATE_NEW"
+        *ngIf="item.card.state === CardState.CARD_STATE_NEW && !item.card.isRepairCard"
         type="button"
         class="btn-mark-memorizing"
         data-testid="btn-mark-memorizing"
@@ -29,17 +29,55 @@
     </div>
   </div>
 
-  <!-- Main Parchment/Slate Flashcard Container -->
+  <!-- Main Flashcard Container -->
   <article
     class="flashcard-shell"
     [class.is-flipped]="isFlipped()"
+    [class.is-repair-card]="isRepairCard()"
   >
+    <!-- Temporary Memory Repair Card Banner -->
+    <div
+      *ngIf="isRepairCard()"
+      class="repair-card-banner"
+      data-testid="repair-card-banner"
+    >
+      <div class="repair-banner-left">
+        <span class="repair-wrench" aria-hidden="true">🔧</span>
+        <div>
+          <strong class="repair-banner-title">
+            Repairing Verse {{ item.card.repairVerseNumber }}
+          </strong>
+          <span class="repair-banner-sub">
+            Temporary Spot-Repair Card · Auto-retires after {{ item.card.repairTargetStreak || 3 }} Good/Easy reviews
+          </span>
+        </div>
+      </div>
+
+      <div class="repair-heal-progress" data-testid="repair-heal-progress">
+        <span class="heal-streak-label">
+          Heal Streak: {{ item.card.repairStreak || 0 }} / {{ item.card.repairTargetStreak || 3 }}
+        </span>
+        <div class="heal-dots" aria-hidden="true">
+          <span
+            *ngFor="let filled of repairHealDots()"
+            class="heal-dot"
+            [class.filled]="filled"
+          >{{ filled ? '●' : '○' }}</span>
+        </div>
+      </div>
+    </div>
+
     <!-- Shared Card Header with Compact Study Pill -->
     <header class="card-header">
       <div class="header-left">
-        <span class="scripture-eyebrow">Scripture Memory Flashcard</span>
+        <span class="scripture-eyebrow">
+          {{ isRepairCard() ? 'Targeted Memory Repair Flashcard' : 'Scripture Memory Flashcard' }}
+        </span>
         <h1 class="card-reference" data-testid="card-reference">
           {{ item.passage.reference }}
+          <span *ngIf="isRepairCard()" class="repair-verse-tag">
+            (v. {{ item.card.repairVerseNumber }})
+          </span>
         </h1>
       </div>
 
@@ -68,9 +106,9 @@
       </div>
     </header>
 
-    <!-- Two-Step Daily Stitching Workflow Bar (for multi-verse passages) -->
+    <!-- Two-Step Daily Stitching Workflow Bar (for multi-verse non-repair passages) -->
     <div
-      *ngIf="item.passage.verses.length > 1"
+      *ngIf="item.passage.verses.length > 1 && !isRepairCard()"
       class="verse-stitching-bar"
       data-testid="verse-stitching-bar"
     >
@@ -160,52 +198,77 @@
         class="front-prompt-hero"
         data-testid="front-default-prompt"
       >
-        <!-- Step 1: Practicing Only Today's New Verse -->
-        <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only'">
-          <span class="active-step-pill step-1-pill">
-            Step 1 of 2 · New Verse for Today (Verse {{ currentNewVerse()?.verseNumber }})
+        <!-- Repair Card Front Prompt -->
+        <ng-container *ngIf="isRepairCard(); else normalFrontPrompt">
+          <span class="active-step-pill repair-step-pill">
+            🔧 Memory Repair · Verse {{ item.card.repairVerseNumber }}
           </span>
 
           <div
-            *ngIf="previousContextVerse() as prevVerse"
+            *ngIf="repairPrecedingVerse() as prevVerse"
             class="context-lead-in-box"
-            data-testid="new-verse-context-cue"
+            data-testid="repair-context-cue"
           >
-            <span class="context-label">Lead-in from Verse {{ prevVerse.verseNumber }}:</span>
+            <span class="context-label">Lead-in from [v. {{ prevVerse.verseNumber }}]:</span>
             <p class="context-text">“{{ prevVerse.text }}”</p>
           </div>
 
           <p class="prompt-instruction">
-            Recite <strong>Verse {{ currentNewVerse()?.verseNumber }}</strong> aloud from memory.
+            → Recite <strong>[v. {{ item.card.repairVerseNumber }}]</strong> aloud to repair this memory link.
           </p>
           <p class="prompt-subtext">
-            Once Verse {{ currentNewVerse()?.verseNumber }} is solid (graded Good/Easy), you'll immediately practice the whole stitched block (Verses {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }}) to complete the stitch.
+            Each Good or Easy recitation advances your heal streak ({{ item.card.repairStreak || 0 }}/{{ item.card.repairTargetStreak || 3 }}).
           </p>
         </ng-container>
 
-        <!-- Step 2: Practicing the Stitched Block -->
-        <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'stitch-block'">
-          <span class="active-step-pill step-2-pill">
-            Step 2 of 2 · Stitch Whole Block (Verses {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }})
-          </span>
+        <ng-template #normalFrontPrompt>
+          <!-- Step 1: Practicing Only Today's New Verse -->
+          <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only'">
+            <span class="active-step-pill step-1-pill">
+              Step 1 of 2 · New Verse for Today (Verse {{ currentNewVerse()?.verseNumber }})
+            </span>
 
-          <p class="prompt-instruction">
-            Recite the whole block (<strong>Verses {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }}</strong>) together from memory.
-          </p>
-          <p class="prompt-subtext">
-            Grading this block Good or Easy completes the stitching for Verse {{ currentNewVerse()?.verseNumber }}!
-          </p>
-        </ng-container>
+            <div
+              *ngIf="previousContextVerse() as prevVerse"
+              class="context-lead-in-box"
+              data-testid="new-verse-context-cue"
+            >
+              <span class="context-label">Lead-in from Verse {{ prevVerse.verseNumber }}:</span>
+              <p class="context-text">“{{ prevVerse.text }}”</p>
+            </div>
 
-        <!-- Single-Verse or Full Passage Mode -->
-        <ng-container *ngIf="item.passage.verses.length <= 1 || stitchPhase() === 'full-passage'">
-          <p class="prompt-instruction">
-            Recite this passage aloud from memory.
-          </p>
-          <p class="prompt-subtext">
-            Record your voice while reciting, then flip the card to read along while your recording plays back.
-          </p>
-        </ng-container>
+            <p class="prompt-instruction">
+              Recite <strong>Verse {{ currentNewVerse()?.verseNumber }}</strong> aloud from memory.
+            </p>
+            <p class="prompt-subtext">
+              Once Verse {{ currentNewVerse()?.verseNumber }} is solid (graded Good/Easy), you'll immediately practice the whole stitched block (Verses {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }}) to complete the stitch.
+            </p>
+          </ng-container>
+
+          <!-- Step 2: Practicing the Stitched Block -->
+          <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'stitch-block'">
+            <span class="active-step-pill step-2-pill">
+              Step 2 of 2 · Stitch Whole Block (Verses {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }})
+            </span>
+
+            <p class="prompt-instruction">
+              Recite the whole block (<strong>Verses {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }}</strong>) together from memory.
+            </p>
+            <p class="prompt-subtext">
+              Grading this block Good or Easy completes the stitching for Verse {{ currentNewVerse()?.verseNumber }}!
+            </p>
+          </ng-container>
+
+          <!-- Single-Verse or Full Passage Mode -->
+          <ng-container *ngIf="item.passage.verses.length <= 1 || stitchPhase() === 'full-passage'">
+            <p class="prompt-instruction">
+              Recite this passage aloud from memory.
+            </p>
+            <p class="prompt-subtext">
+              Record your voice while reciting, then flip the card to read along while your recording plays back.
+            </p>
+          </ng-container>
+        </ng-template>
       </div>
 
       <!-- Voice Recording Bar on Front of Card -->
@@ -302,15 +365,20 @@
     >
       <div class="back-subheader">
         <span class="back-verify-badge">
-          <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only'">
-            Back · Verify New Verse (v. {{ currentNewVerse()?.verseNumber }})
+          <ng-container *ngIf="isRepairCard(); else normalBackBadge">
+            Back · Verify Repair Verse (v. {{ item.card.repairVerseNumber }})
           </ng-container>
-          <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'stitch-block'">
-            Back · Verify Stitched Block (v. {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }})
-          </ng-container>
-          <ng-container *ngIf="item.passage.verses.length <= 1 || stitchPhase() === 'full-passage'">
-            Back · Verify &amp; Listen
-          </ng-container>
+          <ng-template #normalBackBadge>
+            <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only'">
+              Back · Verify New Verse (v. {{ currentNewVerse()?.verseNumber }})
+            </ng-container>
+            <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'stitch-block'">
+              Back · Verify Stitched Block (v. {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }})
+            </ng-container>
+            <ng-container *ngIf="item.passage.verses.length <= 1 || stitchPhase() === 'full-passage'">
+              Back · Verify &amp; Listen
+            </ng-container>
+          </ng-template>
         </span>
         <div class="back-subheader-actions">
           <button
@@ -386,40 +454,95 @@
         </ng-template>
       </div>
 
+      <!-- Repair Card Spawned Confirmation Toast -->
+      <div
+        *ngIf="repairSpawnedMessage() as repairMsg"
+        class="repair-spawned-toast"
+        data-testid="repair-spawned-toast"
+      >
+        <span>{{ repairMsg }}</span>
+        <button
+          *ngIf="spawnedRepairItem()"
+          type="button"
+          class="btn-practice-repair-now"
+          data-testid="btn-practice-repair-now"
+          (click)="practiceSpawnedRepairNow()"
+        >
+          Practice Repair Card Now →
+        </button>
+      </div>
+
       <!-- Full Passage / Target Verse Text (`data-testid="card-back-full-text"`) -->
       <div class="card-back-full-text" data-testid="card-back-full-text">
-        <!-- When in 'new-verse-only' mode, show prior verse context muted above the target verse -->
-        <div
-          *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only' && previousContextVerse() as prevVerse"
-          class="back-verse-row prior-context-row"
-        >
-          <span class="verse-number-badge">[{{ prevVerse.verseNumber }}]</span>
-          <p class="back-verse-text">{{ prevVerse.text }}</p>
-        </div>
+        <!-- When practicing a Temporary Repair Card -->
+        <ng-container *ngIf="isRepairCard(); else normalBackVerses">
+          <div
+            *ngIf="repairPrecedingVerse() as prevVerse"
+            class="back-verse-row prior-context-row"
+          >
+            <span class="verse-number-badge">[{{ prevVerse.verseNumber }}]</span>
+            <p class="back-verse-text">{{ prevVerse.text }}</p>
+          </div>
 
-        <div
-          *ngFor="let verse of activeBackVerses()"
-          class="back-verse-row"
-          [class.target-new-verse-highlight]="item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only'"
-          [attr.data-testid]="'back-verse-' + verse.verseNumber"
-        >
-          <span class="verse-number-badge">[{{ verse.verseNumber }}]</span>
-          <p class="back-verse-text">{{ verse.text }}</p>
-        </div>
+          <div
+            *ngIf="repairTargetVerse() as targetVerse"
+            class="back-verse-row target-new-verse-highlight"
+            [attr.data-testid]="'back-verse-' + targetVerse.verseNumber"
+          >
+            <span class="verse-number-badge">[{{ targetVerse.verseNumber }}]</span>
+            <p class="back-verse-text">{{ targetVerse.text }}</p>
+          </div>
+        </ng-container>
+
+        <!-- When practicing a Multi-Verse or Single-Verse Passage Card -->
+        <ng-template #normalBackVerses>
+          <div
+            *ngIf="item.passage.verses.length > 1"
+            class="spot-repair-hint"
+          >
+            Stumbled on a specific verse? Tap <strong>🔧 Repair v. X</strong> next to any verse below to spawn a temporary repair card until it's healed.
+          </div>
+
+          <div
+            *ngFor="let verse of item.passage.verses"
+            class="back-verse-row"
+            [class.target-new-verse-highlight]="item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only' && currentNewVerse()?.verseNumber === verse.verseNumber"
+            [attr.data-testid]="'back-verse-' + verse.verseNumber"
+          >
+            <span class="verse-number-badge">[{{ verse.verseNumber }}]</span>
+            <p class="back-verse-text">{{ verse.text }}</p>
+
+            <button
+              *ngIf="item.passage.verses.length > 1"
+              type="button"
+              class="btn-spawn-repair"
+              [attr.data-testid]="'btn-spawn-repair-' + verse.verseNumber"
+              (click)="spawnRepairCardForVerse(verse.verseNumber)"
+              title="Create temporary repair card for Verse {{ verse.verseNumber }}"
+            >
+              🔧 Repair v. {{ verse.verseNumber }}
+            </button>
+          </div>
+        </ng-template>
       </div>
 
       <!-- Anki Spaced Repetition Grading Bar (`data-testid="anki-grading-bar"`) -->
       <div class="anki-grading-section">
         <div class="grading-prompt-label" data-testid="grading-step-hint">
-          <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only'">
-            Step 1: Grade New Verse (v. {{ currentNewVerse()?.verseNumber }}) — Good or Easy advances to Step 2 (Stitch Block v. {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }})!
+          <ng-container *ngIf="isRepairCard(); else normalGradingPrompt">
+            Repair Streak: {{ item.card.repairStreak || 0 }} / {{ item.card.repairTargetStreak || 3 }} — Grade Good or Easy to advance heal streak!
           </ng-container>
-          <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'stitch-block'">
-            Step 2: Grade Stitched Block (v. {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }}) — Good or Easy completes the stitching!
-          </ng-container>
-          <ng-container *ngIf="item.passage.verses.length <= 1 || stitchPhase() === 'full-passage'">
-            How well did you recite this passage?
-          </ng-container>
+          <ng-template #normalGradingPrompt>
+            <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only'">
+              Step 1: Grade New Verse (v. {{ currentNewVerse()?.verseNumber }}) — Good or Easy advances to Step 2 (Stitch Block v. {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }})!
+            </ng-container>
+            <ng-container *ngIf="item.passage.verses.length > 1 && stitchPhase() === 'stitch-block'">
+              Step 2: Grade Stitched Block (v. {{ item.passage.verses[0].verseNumber }}–{{ currentNewVerse()?.verseNumber }}) — Good or Easy completes the stitching!
+            </ng-container>
+            <ng-container *ngIf="item.passage.verses.length <= 1 || stitchPhase() === 'full-passage'">
+              How well did you recite this passage?
+            </ng-container>
+          </ng-template>
         </div>
 
         <div class="anki-grading-bar" data-testid="anki-grading-bar">
@@ -430,7 +553,7 @@
             (click)="submitRating(ReviewRating.REVIEW_RATING_AGAIN)"
           >
             <span class="grade-interval" data-testid="interval-again">
-              {{ intervalPreviews()[ReviewRating.REVIEW_RATING_AGAIN] }}
+              {{ isRepairCard() ? 'Reset (0/' + (item.card.repairTargetStreak || 3) + ')' : intervalPreviews()[ReviewRating.REVIEW_RATING_AGAIN] }}
             </span>
             <span class="grade-label">Again</span>
           </button>
@@ -454,10 +577,10 @@
             (click)="submitRating(ReviewRating.REVIEW_RATING_GOOD)"
           >
             <span class="grade-interval" data-testid="interval-good">
-              {{ intervalPreviews()[ReviewRating.REVIEW_RATING_GOOD] }}
+              {{ isRepairCard() ? '+1 Heal (' + ((item.card.repairStreak || 0) + 1) + '/' + (item.card.repairTargetStreak || 3) + ')' : intervalPreviews()[ReviewRating.REVIEW_RATING_GOOD] }}
             </span>
             <span class="grade-label">
-              {{ item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only' ? 'Good → Stitch Block' : 'Good' }}
+              {{ !isRepairCard() && item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only' ? 'Good → Stitch Block' : 'Good' }}
             </span>
           </button>
 
@@ -468,10 +591,10 @@
             (click)="submitRating(ReviewRating.REVIEW_RATING_EASY)"
           >
             <span class="grade-interval" data-testid="interval-easy">
-              {{ intervalPreviews()[ReviewRating.REVIEW_RATING_EASY] }}
+              {{ isRepairCard() ? '+1 Heal (' + ((item.card.repairStreak || 0) + 1) + '/' + (item.card.repairTargetStreak || 3) + ')' : intervalPreviews()[ReviewRating.REVIEW_RATING_EASY] }}
             </span>
             <span class="grade-label">
-              {{ item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only' ? 'Easy → Stitch Block' : 'Easy' }}
+              {{ !isRepairCard() && item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only' ? 'Easy → Stitch Block' : 'Easy' }}
             </span>
           </button>
         </div>

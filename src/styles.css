@@ -1,28 +1,96 @@
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
+/* Global Theme & Dark Mode Foundation (Dark Mode Default ON) */
+:root {
+  color-scheme: dark;
+  --bg-canvas: #0b1120;
+  --bg-surface: #111827;
+  --bg-elevated: #1e293b;
+  --bg-subtle: #172033;
+  --border-subtle: #334155;
+  --border-strong: #475569;
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --accent-gold: #f59e0b;
+  --accent-teal: #14b8a6;
 }
 
 html,
 body {
   margin: 0;
   padding: 0;
-  font-family:
-    'Inter',
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    Roboto,
-    Oxygen,
-    Ubuntu,
-    Cantarell,
-    sans-serif;
-  background-color: #faf7f2;
-  color: #1c1917;
-  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  background-color: #0b1120;
+  color: #f8fafc;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-button {
-  font-family: inherit;
+html:not(.dark-theme),
+html:not(.dark-theme) body {
+  color-scheme: light;
+  background-color: #f6f3ec;
+  color: #1c1917;
+}
+
+/* Global Dark Mode Overrides for Dashboard, Modals, and Cards */
+html.dark-theme .dashboard-container .kpi-card,
+html.dark-theme .dashboard-container .deck-item-card,
+html.dark-theme .dashboard-container .empty-deck-box,
+html.dark-theme .dashboard-container .tab-bar,
+html.dark-theme .dashboard-container .sub-section-card {
+  background: #111827 !important;
+  border-color: #334155 !important;
+  color: #f1f5f9 !important;
+}
+
+html.dark-theme .dashboard-container .section-title,
+html.dark-theme .dashboard-container .passage-ref,
+html.dark-theme .dashboard-container .kpi-value,
+html.dark-theme .dashboard-container .meta-chip strong {
+  color: #f8fafc !important;
+}
+
+html.dark-theme .dashboard-container .section-subtitle,
+html.dark-theme .dashboard-container .first-verse-snippet,
+html.dark-theme .dashboard-container .kpi-label,
+html.dark-theme .dashboard-container .kpi-sub,
+html.dark-theme .dashboard-container .meta-chip {
+  color: #cbd5e1 !important;
+}
+
+html.dark-theme .dashboard-container .verse-count-pill,
+html.dark-theme .dashboard-container .delete-card-btn {
+  background: #1e293b !important;
+  border-color: #475569 !important;
+  color: #e2e8f0 !important;
+}
+
+html.dark-theme .modal-card,
+html.dark-theme .modal-container,
+html.dark-theme .sync-modal-card {
+  background: #111827 !important;
+  border-color: #334155 !important;
+  color: #f8fafc !important;
+}
+
+html.dark-theme .modal-header,
+html.dark-theme .modal-footer {
+  background: #0f172a !important;
+  border-color: #334155 !important;
+}
+
+html.dark-theme input,
+html.dark-theme textarea {
+  background: #0f172a !important;
+  border-color: #475569 !important;
+  color: #f8fafc !important;
+}
+
+html.dark-theme .preview-box,
+html.dark-theme .highlight-preview-box,
+html.dark-theme .parsed-verse-item,
+html.dark-theme .file-sync-panel {
+  background: #1e293b !important;
+  border-color: #334155 !important;
+  color: #f1f5f9 !important;
 }

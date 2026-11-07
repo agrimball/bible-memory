@@ -31,6 +31,7 @@ export interface DeckItem {
   passage: Passage;
   card: Flashcard;
   isDue: boolean;
+  healed?: boolean;
 }
 
 export interface DeckStats {
@@ -41,6 +42,7 @@ export interface DeckStats {
   learningCount: number;
   reviewCount: number;
   activeCount: number;
+  repairCount?: number;
 }
 
 interface FileSystemHandlePermissionDescriptor {
@@ -83,19 +85,20 @@ export class StorageService {
   readonly deckItems = computed<DeckItem[]>(() => {
     const passageList = this.passages();
     const cardList = this.flashcards();
-    const cardByPassageId = new Map<string, Flashcard>();
+    const passageById = new Map<string, Passage>();
 
-    for (const card of cardList) {
-      cardByPassageId.set(card.passageId, card);
+    for (const passage of passageList) {
+      passageById.set(passage.id, passage);
     }
 
     const now = new Date();
     const items: DeckItem[] = [];
 
-    for (const passage of passageList) {
-      const card = cardByPassageId.get(passage.id);
-      if (card) {
-        const isActive = card.state !== CardState.CARD_STATE_NEW;
+    // Include all flashcards (both main passage flashcards and any active temporary repair flashcards)
+    for (const card of cardList) {
+      const passage = passageById.get(card.passageId);
+      if (passage) {
+        const isActive = card.state !== CardState.CARD_STATE_NEW || Boolean(card.isRepairCard);
         items.push({
           passage,
           card,
@@ -108,26 +111,41 @@ export class StorageService {
   });
 
   /**
-   * Passages in the user's Memorization Queue (not yet started: state === CARD_STATE_NEW).
+   * Passages in the user's Memorization Queue (not yet started: state === CARD_STATE_NEW and not a repair card).
    */
   readonly queuedDeckItems = computed<DeckItem[]>(() => {
-    return this.deckItems().filter((item) => item.card.state === CardState.CARD_STATE_NEW);
+    return this.deckItems().filter(
+      (item) => item.card.state === CardState.CARD_STATE_NEW && !item.card.isRepairCard
+    );
   });
 
   /**
-   * Passages the user is actively working on memorizing (state !== CARD_STATE_NEW).
+   * Passages and temporary verse-repair cards the user is actively working on memorizing.
    */
   readonly activeDeckItems = computed<DeckItem[]>(() => {
-    return this.deckItems().filter((item) => item.card.state !== CardState.CARD_STATE_NEW);
+    return this.deckItems().filter(
+      (item) => item.card.state !== CardState.CARD_STATE_NEW || Boolean(item.card.isRepairCard)
+    );
   });
 
   /**
-   * Active memorization passages that are currently due for review.
+   * Temporary single-verse repair flashcards currently active in the deck.
+   */
+  readonly repairDeckItems = computed<DeckItem[]>(() => {
+    return this.deckItems().filter((item) => Boolean(item.card.isRepairCard));
+  });
+
+  /**
+   * Active memorization passages (and repair cards) that are currently due for review.
+   * Repair cards are prioritized first when due at the same time.
    */
   readonly dueDeckItems = computed<DeckItem[]>(() => {
     return this.activeDeckItems()
       .filter((item) => item.isDue)
       .sort((a, b) => {
+        if (Boolean(a.card.isRepairCard) !== Boolean(b.card.isRepairCard)) {
+          return a.card.isRepairCard ? -1 : 1;
+        }
         const dueA = new Date(a.card.dueAt).getTime() || 0;
         const dueB = new Date(b.card.dueAt).getTime() || 0;
         return dueA - dueB;
@@ -140,9 +158,13 @@ export class StorageService {
     let queuedCount = 0;
     let learningCount = 0;
     let reviewCount = 0;
+    let repairCount = 0;
 
     for (const item of items) {
-      if (item.card.state === CardState.CARD_STATE_NEW) {
+      if (item.card.isRepairCard) {
+        repairCount += 1;
+      }
+      if (item.card.state === CardState.CARD_STATE_NEW && !item.card.isRepairCard) {
         queuedCount += 1;
       } else {
         if (item.isDue) {
@@ -150,7 +172,8 @@ export class StorageService {
         }
         if (
           item.card.state === CardState.CARD_STATE_LEARNING ||
-          item.card.state === CardState.CARD_STATE_RELEARNING
+          item.card.state === CardState.CARD_STATE_RELEARNING ||
+          item.card.isRepairCard
         ) {
           learningCount += 1;
         } else if (item.card.state === CardState.CARD_STATE_REVIEW) {
@@ -169,6 +192,7 @@ export class StorageService {
       learningCount,
       reviewCount,
       activeCount,
+      repairCount,
     };
   });
 
@@ -395,14 +419,79 @@ export class StorageService {
   }
 
   /**
+   * Creates (or surfaces) a temporary single-verse Repair Flashcard for a passage.
+   * Once the user grades Good/Easy `targetStreak` consecutive times (default 3),
+   * the repair card is considered healed and automatically retires from the deck.
+   */
+  createRepairCard(passageId: string, verseNumber: number, targetStreak = 3): DeckItem | undefined {
+    const passage = this.passages().find((p) => p.id === passageId);
+    if (!passage) {
+      return undefined;
+    }
+
+    const now = new Date();
+    const isoNow = now.toISOString();
+    const cards = this.flashcards();
+
+    // Check if an active repair card for (passageId, verseNumber) already exists
+    const existingRepair = cards.find(
+      (c) =>
+        Boolean(c.isRepairCard) &&
+        c.passageId === passageId &&
+        c.repairVerseNumber === verseNumber
+    );
+
+    if (existingRepair) {
+      const refreshed: Flashcard = {
+        ...existingRepair,
+        state: CardState.CARD_STATE_LEARNING,
+        dueAt: isoNow,
+        updatedAt: isoNow,
+      };
+      this.flashcards.update((prev) =>
+        prev.map((c) => (c.id === existingRepair.id ? refreshed : c))
+      );
+      this.persistToStorage();
+      return {
+        passage,
+        card: refreshed,
+        isDue: true,
+      };
+    }
+
+    const parentCard = cards.find((c) => c.passageId === passageId && !c.isRepairCard);
+    const baseCard = this.srs.createInitialFlashcard(passageId, now);
+    const repairCard: Flashcard = {
+      ...baseCard,
+      id: this.generateId('card_repair'),
+      state: CardState.CARD_STATE_LEARNING,
+      dueAt: isoNow,
+      isRepairCard: true,
+      repairVerseNumber: verseNumber,
+      repairStreak: 0,
+      repairTargetStreak: Math.max(1, targetStreak),
+      parentCardId: parentCard?.id,
+    };
+
+    this.flashcards.update((prev) => [repairCard, ...prev]);
+    this.persistToStorage();
+
+    return {
+      passage,
+      card: repairCard,
+      isDue: true,
+    };
+  }
+
+  /**
    * Transitions a queued passage (CARD_STATE_NEW) into active memorization (CARD_STATE_LEARNING).
    * Accepts either `card.id` or `passage.id`.
    */
   startMemorizingPassage(cardOrPassageId: string): DeckItem | undefined {
     const cards = this.flashcards();
-    const targetCard = cards.find(
-      (c) => c.id === cardOrPassageId || c.passageId === cardOrPassageId
-    );
+    const targetCard =
+      cards.find((c) => c.id === cardOrPassageId) ??
+      cards.find((c) => c.passageId === cardOrPassageId && !c.isRepairCard);
     if (!targetCard) {
       return undefined;
     }
@@ -490,23 +579,120 @@ export class StorageService {
   }
 
   /**
+   * Deletes a specific flashcard (such as dismissing a temporary repair card).
+   */
+  deleteCard(cardId: string): void {
+    this.flashcards.update((prev) => prev.filter((c) => c.id !== cardId));
+    this.persistToStorage();
+  }
+
+  /**
    * Grades a flashcard, updates its SRS state, appends a ReviewLog entry, and persists to ProtoJSON.
+   * If the card is a temporary Repair Card and reaches `repairTargetStreak` consecutive Good/Easy reviews,
+   * it is marked `healed: true` and automatically removed from `this.flashcards`.
    */
   recordReview(cardId: string, rating: ReviewRating): DeckItem | undefined {
     const cards = this.flashcards();
-    const targetCard = cards.find((c) => c.id === cardId || c.passageId === cardId);
+    const targetCard =
+      cards.find((c) => c.id === cardId) ??
+      cards.find((c) => c.passageId === cardId && !c.isRepairCard);
     if (!targetCard) {
       return undefined;
     }
 
     const now = new Date();
+    const isoNow = now.toISOString();
     const { updatedCard, reviewLog } = this.srs.gradeCard(targetCard, rating, now);
+    const passage = this.passages().find((p) => p.id === updatedCard.passageId);
+
+    if (targetCard.isRepairCard) {
+      const targetStreak = targetCard.repairTargetStreak || 3;
+      const currentStreak = targetCard.repairStreak ?? 0;
+
+      if (
+        rating === ReviewRating.REVIEW_RATING_GOOD ||
+        rating === ReviewRating.REVIEW_RATING_EASY
+      ) {
+        const nextStreak = currentStreak + 1;
+        const healedCard: Flashcard = {
+          ...updatedCard,
+          state: CardState.CARD_STATE_LEARNING,
+          isRepairCard: true,
+          repairVerseNumber: targetCard.repairVerseNumber,
+          repairStreak: nextStreak,
+          repairTargetStreak: targetStreak,
+          parentCardId: targetCard.parentCardId,
+        };
+
+        if (nextStreak >= targetStreak) {
+          // Healed! Retire the temporary repair card from flashcards
+          this.flashcards.update((prev) => prev.filter((c) => c.id !== targetCard.id));
+          this.reviewLogs.update((prev) => [reviewLog, ...prev]);
+          this.persistToStorage();
+
+          if (!passage) {
+            return undefined;
+          }
+          return {
+            passage,
+            card: healedCard,
+            isDue: false,
+            healed: true,
+          };
+        }
+
+        // Still healing: keep in learning state so user can continue or review on schedule
+        this.flashcards.update((prev) =>
+          prev.map((c) => (c.id === targetCard.id ? healedCard : c))
+        );
+        this.reviewLogs.update((prev) => [reviewLog, ...prev]);
+        this.persistToStorage();
+
+        if (!passage) {
+          return undefined;
+        }
+        return {
+          passage,
+          card: healedCard,
+          isDue: this.srs.isDue(healedCard, now),
+          healed: false,
+        };
+      }
+
+      // Rating is AGAIN or HARD on a repair card
+      const nextStreak = rating === ReviewRating.REVIEW_RATING_AGAIN ? 0 : currentStreak;
+      const ongoingRepairCard: Flashcard = {
+        ...updatedCard,
+        state: CardState.CARD_STATE_LEARNING,
+        dueAt: rating === ReviewRating.REVIEW_RATING_AGAIN ? isoNow : updatedCard.dueAt,
+        isRepairCard: true,
+        repairVerseNumber: targetCard.repairVerseNumber,
+        repairStreak: nextStreak,
+        repairTargetStreak: targetStreak,
+        parentCardId: targetCard.parentCardId,
+      };
+
+      this.flashcards.update((prev) =>
+        prev.map((c) => (c.id === targetCard.id ? ongoingRepairCard : c))
+      );
+      this.reviewLogs.update((prev) => [reviewLog, ...prev]);
+      this.persistToStorage();
+
+      if (!passage) {
+        return undefined;
+      }
+      return {
+        passage,
+        card: ongoingRepairCard,
+        isDue: this.srs.isDue(ongoingRepairCard, now),
+        healed: false,
+      };
+    }
 
     this.flashcards.update((prev) => prev.map((c) => (c.id === targetCard.id ? updatedCard : c)));
     this.reviewLogs.update((prev) => [reviewLog, ...prev]);
     this.persistToStorage();
 
-    const passage = this.passages().find((p) => p.id === updatedCard.passageId);
     if (!passage) {
       return undefined;
     }
@@ -915,24 +1101,34 @@ export class StorageService {
   }
 
   private ensureFlashcardsForPassages(passages: Passage[], existingCards: Flashcard[]): Flashcard[] {
-    const byPassageId = new Map<string, Flashcard>();
+    const validPassageIds = new Set(passages.map((p) => p.id));
+    const mainCardByPassageId = new Map<string, Flashcard>();
+    const repairCards: Flashcard[] = [];
+
     for (const c of existingCards) {
-      if (c.passageId) {
-        byPassageId.set(c.passageId, c);
+      if (!c.passageId || !validPassageIds.has(c.passageId)) {
+        continue;
+      }
+      if (c.isRepairCard) {
+        repairCards.push(c);
+      } else {
+        mainCardByPassageId.set(c.passageId, c);
       }
     }
 
     const now = new Date();
-    const result: Flashcard[] = [];
+    const mainCards: Flashcard[] = [];
     for (const passage of passages) {
-      const found = byPassageId.get(passage.id);
+      const found = mainCardByPassageId.get(passage.id);
       if (found) {
-        result.push(found);
+        mainCards.push(found);
       } else {
-        result.push(this.srs.createInitialFlashcard(passage.id, now));
+        mainCards.push(this.srs.createInitialFlashcard(passage.id, now));
       }
     }
-    return result;
+
+    // Keep active repair cards at the front so they surface cleanly alongside main cards
+    return [...repairCards, ...mainCards];
   }
 
   private seedDefaults(): void {
