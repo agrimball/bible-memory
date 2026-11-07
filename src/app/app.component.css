@@ -1,0 +1,130 @@
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #faf7f2 0%, #f3efe6 100%);
+  color: #1c1917;
+}
+
+.app-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.9rem 1.75rem;
+  background: rgba(255, 253, 249, 0.92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid #e7e0d3;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.brand-group {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.brand-logo {
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 0.7rem;
+  background: linear-gradient(135deg, #292524 0%, #44403c 100%);
+  color: #fde68a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  box-shadow: 0 2px 8px rgba(28, 25, 23, 0.16);
+}
+
+.brand-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #1c1917;
+}
+
+.brand-subtitle {
+  margin: 0;
+  font-size: 0.76rem;
+  color: #78716c;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.topbar-btn {
+  padding: 0.48rem 0.9rem;
+  border-radius: 0.55rem;
+  border: 1px solid #d6cfc2;
+  background: #ffffff;
+  color: #292524;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.topbar-btn:hover {
+  background: #f5f1e8;
+  border-color: #b8afa0;
+}
+
+.topbar-btn.active {
+  background: #292524;
+  color: #fafaf9;
+  border-color: #292524;
+}
+
+.topbar-btn.accent {
+  background: #0f766e;
+  color: #ffffff;
+  border-color: #0f766e;
+}
+
+.topbar-btn.accent:hover {
+  background: #115e59;
+}
+
+.topbar-btn.subtle {
+  background: #f5f0e6;
+  color: #57534e;
+}
+
+.app-main {
+  flex: 1;
+  width: 100%;
+  max-width: 1060px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 3rem;
+  box-sizing: border-box;
+}
+
+.empty-study-state {
+  text-align: center;
+  background: #ffffff;
+  border: 1px solid #e7e0d3;
+  border-radius: 1rem;
+  padding: 3rem 2rem;
+  margin-top: 2rem;
+}
+
+.primary-btn {
+  padding: 0.7rem 1.3rem;
+  border-radius: 0.6rem;
+  border: none;
+  background: #0f766e;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}

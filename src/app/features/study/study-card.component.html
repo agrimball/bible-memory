@@ -1,0 +1,435 @@
+<div class="study-workspace" *ngIf="item; else emptyState">
+  <!-- Top Session Navigation Bar -->
+  <div class="study-topbar">
+    <button
+      type="button"
+      class="btn-back-deck"
+      data-testid="btn-back-to-deck"
+      (click)="backToDeck.emit()"
+    >
+      <span class="icon-arrow" aria-hidden="true">←</span>
+      <span>Back to Deck</span>
+    </button>
+
+    <div class="session-progress" data-testid="study-queue-progress">
+      <span class="queue-pill">Card {{ queuePosition }} of {{ queueTotal }}</span>
+      <span class="ease-pill" title="Anki Ease Factor & Interval">
+        Ease {{ (item.card.easeFactor * 100) | number:'1.0-0' }}% ·
+        {{ item.card.intervalDays > 0 ? srsService.formatIntervalDays(item.card.intervalDays) : 'New' }}
+      </span>
+    </div>
+  </div>
+
+  <!-- Main Parchment/Slate Flashcard Container -->
+  <article
+    class="flashcard-shell"
+    [class.is-flipped]="isFlipped()"
+    [class.study-active]="studyService.isStudyModeActive() && !isFlipped()"
+  >
+    <!-- Shared Card Header -->
+    <header class="card-header">
+      <div class="header-left">
+        <span class="scripture-eyebrow">Scripture Memory Flashcard</span>
+        <h1 class="card-reference" data-testid="card-reference">
+          {{ item.passage.reference }}
+        </h1>
+      </div>
+
+      <div class="header-badges">
+        <span class="verse-count-badge" data-testid="card-verse-count">
+          {{ item.passage.verses.length }}
+          {{ item.passage.verses.length === 1 ? 'verse' : 'verses' }}
+        </span>
+        <span
+          [class]="getCardStateBadgeClass(item.card.state)"
+          data-testid="card-state-pill"
+        >
+          {{ getCardStateLabel(item.card.state) }}
+        </span>
+      </div>
+    </header>
+
+    <!-- ================================================================== -->
+    <!-- FRONT OF CARD (`isFlipped() === false`)                            -->
+    <!-- ================================================================== -->
+    <section
+      *ngIf="!isFlipped()"
+      class="card-face card-front"
+      data-testid="card-front-view"
+    >
+      <!-- Default Front State (before hitting Study) -->
+      <div
+        *ngIf="!studyService.isStudyModeActive()"
+        class="front-prompt-hero"
+        data-testid="front-default-prompt"
+      >
+        <div class="prompt-ornament" aria-hidden="true">✦</div>
+        <p class="prompt-instruction">
+          Recite aloud from memory, or enter First-Letter Study Mode for scaffolding.
+        </p>
+        <p class="prompt-subtext">
+          Record your voice while reciting, then flip the card to read the passage while listening to your playback.
+        </p>
+
+        <button
+          type="button"
+          class="btn-enter-study"
+          data-testid="btn-enter-study"
+          (click)="enterStudyMode()"
+        >
+          <span class="study-icon" aria-hidden="true">Aa</span>
+          <span>Study (First Letters)</span>
+        </button>
+      </div>
+
+      <!-- First-Letter Study Mode (`studyService.isStudyModeActive() === true`) -->
+      <div
+        *ngIf="studyService.isStudyModeActive()"
+        class="first-letter-study-panel"
+        data-testid="first-letter-study-panel"
+      >
+        <div class="study-panel-header">
+          <div class="study-mode-title">
+            <span class="study-dot" aria-hidden="true"></span>
+            <span>First-Letter Study Mode</span>
+          </div>
+
+          <div class="study-progress-meta" data-testid="study-progress-indicator">
+            <span class="progress-badge">
+              Verse {{ studyService.activeVerseIndex() + 1 }} of {{ studyService.totalVersesCount() }}
+            </span>
+            <span class="progress-words" *ngIf="activeVerseView() as activeVerse">
+              {{ activeVerse.revealedWordCount }} / {{ activeVerse.totalWordCount }} words revealed
+            </span>
+            <span class="completed-pill" *ngIf="studyService.allVersesCompleted()">
+              All verses revealed
+            </span>
+          </div>
+        </div>
+
+        <!-- Visible Verses Scaffold (Completed Verses + Current Active Verse) -->
+        <div class="study-verses-list" data-testid="study-visible-verses">
+          <div
+            *ngFor="let verse of studyService.visibleVerses(); trackBy: trackByVerseNumber"
+            class="study-verse-block"
+            [class.verse-completed]="verse.status === 'completed'"
+            [class.verse-active]="verse.status === 'active'"
+            [attr.data-testid]="'study-verse-' + verse.verseNumber"
+          >
+            <span class="verse-number-badge">[{{ verse.verseNumber }}]</span>
+
+            <!-- Completed Verse: Full Revealed Text in subtle sage/emerald tint -->
+            <div *ngIf="verse.status === 'completed'" class="verse-tokens-flow completed-flow">
+              <span
+                *ngFor="let word of verse.words; trackBy: trackByWordIndex"
+                class="word-token revealed"
+              >{{ word.fullText }}</span>
+              <span class="verse-check-badge" title="Verse completed" aria-hidden="true">✓</span>
+            </div>
+
+            <!-- Active Verse: Word-by-word revealed tokens + First-letter hint tokens -->
+            <div *ngIf="verse.status === 'active'" class="verse-tokens-flow active-flow">
+              <span
+                *ngFor="let word of verse.words; trackBy: trackByWordIndex"
+                class="word-token"
+                [class.revealed]="word.isRevealed"
+                [class.first-letter]="!word.isRevealed"
+              >{{ word.isRevealed ? word.fullText : word.firstLetterText }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Study Reveal Controls Bar (+1w, +1v, Reset) -->
+        <div class="study-controls-bar" data-testid="study-controls-bar">
+          <div class="reveal-buttons-group">
+            <button
+              type="button"
+              class="btn-study-reveal btn-reveal-word"
+              data-testid="btn-reveal-1w"
+              [disabled]="studyService.allVersesCompleted()"
+              (click)="revealOneWord()"
+            >
+              <span class="btn-key">+1w</span>
+              <span class="btn-desc">+1w (Reveal Word)</span>
+            </button>
+
+            <button
+              type="button"
+              class="btn-study-reveal btn-reveal-verse"
+              data-testid="btn-reveal-1v"
+              [disabled]="studyService.allVersesCompleted()"
+              (click)="revealOneVerse()"
+            >
+              <span class="btn-key">+1v</span>
+              <span class="btn-desc">+1v (Reveal Verse)</span>
+            </button>
+          </div>
+
+          <div class="study-secondary-actions">
+            <button
+              type="button"
+              class="btn-reset-study"
+              data-testid="btn-reset-study"
+              (click)="resetStudyMode()"
+            >
+              Reset Study
+            </button>
+            <button
+              type="button"
+              class="btn-exit-study"
+              data-testid="btn-exit-study"
+              (click)="exitStudyMode()"
+            >
+              Hide Hints
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Voice Recording Bar on Front of Card -->
+      <div
+        class="voice-recorder-bar"
+        [class.is-recording]="voiceService.isRecording()"
+        [class.has-recorded]="voiceService.hasRecording() && !voiceService.isRecording()"
+        data-testid="front-voice-bar"
+      >
+        <div class="voice-status-area">
+          <!-- Idle State -->
+          <ng-container *ngIf="!voiceService.isRecording() && !voiceService.hasRecording()">
+            <span class="mic-status-dot idle" aria-hidden="true"></span>
+            <div class="voice-status-text">
+              <strong>Voice Recitation</strong>
+              <span>Tap Record Voice, speak the passage aloud, then Flip Card to listen back.</span>
+            </div>
+          </ng-container>
+
+          <!-- Active Recording State -->
+          <div
+            *ngIf="voiceService.isRecording()"
+            class="recording-active-banner"
+            data-testid="recording-active-indicator"
+          >
+            <span class="pulsing-red-dot" aria-hidden="true"></span>
+            <span class="recording-live-label">Recording Recitation</span>
+            <span class="recording-timer" data-testid="recording-timer">
+              {{ formatDuration(voiceService.recordingDurationSec()) }}
+            </span>
+          </div>
+
+          <!-- Recorded & Ready State -->
+          <div
+            *ngIf="voiceService.hasRecording() && !voiceService.isRecording()"
+            class="voice-recorded-badge-wrap"
+            data-testid="voice-recorded-badge"
+          >
+            <span class="recorded-check-icon" aria-hidden="true">●</span>
+            <span class="recorded-badge-title">Voice Recorded</span>
+            <span class="recorded-duration">
+              ({{ formatDuration(voiceService.recordingDurationSec()) }})
+            </span>
+            <span class="recorded-hint">Will auto-play when you flip the card</span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          class="btn-record-voice"
+          [class.recording]="voiceService.isRecording()"
+          [class.re-record]="voiceService.hasRecording() && !voiceService.isRecording()"
+          data-testid="btn-record-voice"
+          (click)="toggleVoiceRecording()"
+        >
+          <span class="mic-icon" aria-hidden="true">
+            {{ voiceService.isRecording() ? '■' : '🎙' }}
+          </span>
+          <span *ngIf="!voiceService.isRecording() && !voiceService.hasRecording()">
+            Record Voice
+          </span>
+          <span *ngIf="voiceService.isRecording()">
+            Stop Recording ({{ formatDuration(voiceService.recordingDurationSec()) }})
+          </span>
+          <span *ngIf="voiceService.hasRecording() && !voiceService.isRecording()">
+            Re-record Voice
+          </span>
+        </button>
+      </div>
+
+      <!-- Primary Flip Card Action -->
+      <div class="front-footer-actions">
+        <button
+          type="button"
+          class="btn-flip-card"
+          data-testid="btn-flip-card"
+          (click)="flipToBack()"
+        >
+          <span>Flip Card</span>
+          <span class="flip-sublabel">
+            {{ voiceService.isRecording() || voiceService.hasRecording() ? 'Reveal Text & Auto-Play Voice' : 'Reveal Full Passage & Grade' }}
+          </span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ================================================================== -->
+    <!-- BACK OF CARD (`isFlipped() === true`)                              -->
+    <!-- ================================================================== -->
+    <section
+      *ngIf="isFlipped()"
+      class="card-face card-back"
+      data-testid="card-back-view"
+    >
+      <div class="back-subheader">
+        <span class="back-verify-badge">Back · Verify &amp; Listen</span>
+        <button
+          type="button"
+          class="btn-flip-back-front"
+          data-testid="btn-flip-to-front"
+          (click)="flipToFront()"
+        >
+          ↩ Return to Front
+        </button>
+      </div>
+
+      <!-- Voice Playback Bar -->
+      <div
+        class="voice-playback-bar"
+        [class.has-audio]="voiceService.hasRecording()"
+        data-testid="voice-playback-bar"
+      >
+        <ng-container *ngIf="voiceService.hasRecording(); else noVoiceRecorded">
+          <div class="playback-header-row">
+            <div class="playback-status-info">
+              <span
+                class="playback-indicator-dot"
+                [class.playing]="voiceService.isPlaying()"
+                aria-hidden="true"
+              ></span>
+              <span class="playback-status-text" data-testid="playback-status-label">
+                {{ voiceService.isPlaying() ? 'Playing back your recitation...' : 'Voice Recording Ready' }}
+              </span>
+              <span class="playback-duration-pill">
+                {{ formatDuration(voiceService.recordingDurationSec()) }}
+              </span>
+            </div>
+
+            <div class="playback-controls">
+              <button
+                type="button"
+                class="btn-playback-control"
+                data-testid="btn-toggle-playback"
+                (click)="voiceService.togglePlayback()"
+              >
+                <span aria-hidden="true">{{ voiceService.isPlaying() ? '⏸' : '▶' }}</span>
+                <span>{{ voiceService.isPlaying() ? 'Pause' : 'Play' }}</span>
+              </button>
+
+              <button
+                type="button"
+                class="btn-playback-control btn-replay"
+                data-testid="btn-replay-voice"
+                (click)="voiceService.replayRecording()"
+              >
+                <span aria-hidden="true">↻</span>
+                <span>Replay</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Animated Waveform / Progress Bar -->
+          <div class="playback-progress-track" role="progressbar" [attr.aria-valuenow]="voiceService.playbackProgressPercent()">
+            <div
+              class="playback-progress-fill"
+              [style.width.%]="voiceService.playbackProgressPercent()"
+            ></div>
+          </div>
+        </ng-container>
+
+        <ng-template #noVoiceRecorded>
+          <div class="no-voice-note" data-testid="no-voice-recorded-note">
+            <span class="no-voice-icon" aria-hidden="true">🎙</span>
+            <span>No voice recorded on this turn</span>
+          </div>
+        </ng-template>
+      </div>
+
+      <!-- Full Passage Text (`data-testid="card-back-full-text"`) -->
+      <div class="card-back-full-text" data-testid="card-back-full-text">
+        <div
+          *ngFor="let verse of item.passage.verses"
+          class="back-verse-row"
+          [attr.data-testid]="'back-verse-' + verse.verseNumber"
+        >
+          <span class="verse-number-badge">[{{ verse.verseNumber }}]</span>
+          <p class="back-verse-text">{{ verse.text }}</p>
+        </div>
+      </div>
+
+      <!-- Anki Spaced Repetition Grading Bar (`data-testid="anki-grading-bar"`) -->
+      <div class="anki-grading-section">
+        <div class="grading-prompt-label">
+          How well did you recite this passage?
+        </div>
+
+        <div class="anki-grading-bar" data-testid="anki-grading-bar">
+          <button
+            type="button"
+            class="btn-anki-grade grade-again"
+            data-testid="btn-grade-again"
+            (click)="submitRating(ReviewRating.REVIEW_RATING_AGAIN)"
+          >
+            <span class="grade-interval" data-testid="interval-again">
+              {{ intervalPreviews()[ReviewRating.REVIEW_RATING_AGAIN] }}
+            </span>
+            <span class="grade-label">Again</span>
+          </button>
+
+          <button
+            type="button"
+            class="btn-anki-grade grade-hard"
+            data-testid="btn-grade-hard"
+            (click)="submitRating(ReviewRating.REVIEW_RATING_HARD)"
+          >
+            <span class="grade-interval" data-testid="interval-hard">
+              {{ intervalPreviews()[ReviewRating.REVIEW_RATING_HARD] }}
+            </span>
+            <span class="grade-label">Hard</span>
+          </button>
+
+          <button
+            type="button"
+            class="btn-anki-grade grade-good"
+            data-testid="btn-grade-good"
+            (click)="submitRating(ReviewRating.REVIEW_RATING_GOOD)"
+          >
+            <span class="grade-interval" data-testid="interval-good">
+              {{ intervalPreviews()[ReviewRating.REVIEW_RATING_GOOD] }}
+            </span>
+            <span class="grade-label">Good</span>
+          </button>
+
+          <button
+            type="button"
+            class="btn-anki-grade grade-easy"
+            data-testid="btn-grade-easy"
+            (click)="submitRating(ReviewRating.REVIEW_RATING_EASY)"
+          >
+            <span class="grade-interval" data-testid="interval-easy">
+              {{ intervalPreviews()[ReviewRating.REVIEW_RATING_EASY] }}
+            </span>
+            <span class="grade-label">Easy</span>
+          </button>
+        </div>
+      </div>
+    </section>
+  </article>
+</div>
+
+<ng-template #emptyState>
+  <div class="study-empty-state" data-testid="study-empty-state">
+    <h2>No card selected for study</h2>
+    <p>Return to the deck dashboard to pick a passage or start a due review session.</p>
+    <button type="button" class="btn-back-deck" (click)="backToDeck.emit()">
+      ← Back to Deck
+    </button>
+  </div>
+</ng-template>

@@ -1,0 +1,147 @@
+{
+  "suite": "bible-memory-playwright-screenshot-tests",
+  "appUrl": "http://127.0.0.1:4200",
+  "startedAt": "2026-11-07T20:51:00.819Z",
+  "finishedAt": "2026-11-07T20:51:10.808Z",
+  "status": "PASSED",
+  "totalSteps": 9,
+  "consoleErrors": [],
+  "steps": [
+    {
+      "step": 1,
+      "name": "Deck Dashboard & Starter Passages",
+      "filename": "01-deck-dashboard.png",
+      "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/01-deck-dashboard.png",
+      "copiedPath": "/home/ashton/bible-memory/screenshot-tests/01-deck-dashboard.png",
+      "bytes": 586957,
+      "assertions": [
+        "[data-testid=\"deck-stats-grid\"] is visible",
+        "[data-testid=\"passage-deck-list\"] is visible",
+        "Starter passages (Romans 8:1-4, Psalm 23:1-6) and Anki due counts are displayed"
+      ],
+      "status": "PASS",
+      "timestamp": "2026-11-07T20:51:02.225Z"
+    },
+    {
+      "step": 2,
+      "name": "Smart Copy-Paste Modal - Highlighted Verse Numbers Preview",
+      "filename": "02-copy-paste-highlight-verse-numbers.png",
+      "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/02-copy-paste-highlight-verse-numbers.png",
+      "copiedPath": "/home/ashton/bible-memory/screenshot-tests/02-copy-paste-highlight-verse-numbers.png",
+      "bytes": 680891,
+      "assertions": [
+        "[data-testid=\"btn-open-add-passage\"] opens modal",
+        "[data-testid=\"btn-highlight-verse-numbers\"] triggers verse number highlighting",
+        "[data-testid=\"verse-number-highlight-preview\"] is visible showing highlighted verse numbers",
+        "[data-testid=\"parsed-verses-preview\"] splits multi-verse passage into individual verses"
+      ],
+      "status": "PASS",
+      "timestamp": "2026-11-07T20:51:03.918Z"
+    },
+    {
+      "step": 2,
+      "name": "Smart Copy-Paste Modal with Live Verse Splitting Preview",
+      "filename": "02-smart-copy-paste-modal.png",
+      "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/02-smart-copy-paste-modal.png",
+      "copiedPath": "/home/ashton/bible-memory/screenshot-tests/02-smart-copy-paste-modal.png",
+      "bytes": 680891,
+      "assertions": [
+        "[data-testid=\"btn-open-add-passage\"] opens modal",
+        "[data-testid=\"verse-number-highlight-preview\"] and [data-testid=\"parsed-verses-preview\"] are visible"
+      ],
+      "status": "PASS",
+      "timestamp": "2026-11-07T20:51:04.787Z"
+    },
+    {
+      "step": 3,
+      "name": "Flashcard Front Initial View",
+      "filename": "03-card-front-initial.png",
+      "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/03-card-front-initial.png",
+      "copiedPath": "/home/ashton/bible-memory/screenshot-tests/03-card-front-initial.png",
+      "bytes": 414928,
+      "assertions": [
+        "[data-testid=\"card-reference\"] is visible",
+        "[data-testid=\"btn-enter-study\"] is visible",
+        "[data-testid=\"btn-record-voice\"] is visible",
+        "[data-testid=\"btn-flip-card\"] is visible"
+      ],
+      "status": "PASS",
+      "timestamp": "2026-11-07T20:51:05.510Z"
+    },
+    {
+      "step": 4,
+      "name": "First-Letter Study Mode - Verse 1 Only with +1w and +1v Controls",
+      "filename": "04-study-mode-first-letters-verse1.png",
+      "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/04-study-mode-first-letters-verse1.png",
+      "copiedPath": "/home/ashton/bible-memory/screenshot-tests/04-study-mode-first-letters-verse1.png",
+      "bytes": 414743,
+      "assertions": [
+        "[data-testid=\"first-letter-study-panel\"] is visible with Verse 1 first letters only",
+        "[data-testid=\"btn-reveal-1w\"] (+1w) is visible",
+        "[data-testid=\"btn-reveal-1v\"] (+1v) is visible"
+      ],
+      "status": "PASS",
+      "timestamp": "2026-11-07T20:51:05.903Z"
+    },
+    {
+      "step": 5,
+      "name": "Progressive Reveal (+1w and +1v) Completing Verse 1 and Advancing to Verse 2 First Letters",
+      "filename": "05-study-mode-plus-1w-and-plus-1v.png",
+      "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/05-study-mode-plus-1w-and-plus-1v.png",
+      "copiedPath": "/home/ashton/bible-memory/screenshot-tests/05-study-mode-plus-1w-and-plus-1v.png",
+      "bytes": 458678,
+      "assertions": [
+        "Clicking +1w 3 times reveals first 3 words of Verse 1",
+        "Clicking +1v reveals remainder of Verse 1 and displays Verse 2 in first-letter mode below Verse 1",
+        "Clicking +1w twice on Verse 2 reveals first 2 words of Verse 2 while remaining words stay as first letters"
+      ],
+      "status": "PASS",
+      "timestamp": "2026-11-07T20:51:06.531Z"
+    },
+    {
+      "step": 6,
+      "name": "Active Voice Recording on Flashcard Front",
+      "filename": "06-voice-recording-active.png",
+      "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/06-voice-recording-active.png",
+      "copiedPath": "/home/ashton/bible-memory/screenshot-tests/06-voice-recording-active.png",
+      "bytes": 453115,
+      "assertions": [
+        "[data-testid=\"btn-record-voice\"] starts voice recording",
+        "[data-testid=\"recording-active-indicator\"] is active after ~1.2s of recording"
+      ],
+      "status": "PASS",
+      "timestamp": "2026-11-07T20:51:08.337Z"
+    },
+    {
+      "step": 7,
+      "name": "Card Back View with Auto Voice Playback, Full Passage Read-Along, and Anki Grading Bar",
+      "filename": "07-card-back-voice-playback-and-anki-grading.png",
+      "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/07-card-back-voice-playback-and-anki-grading.png",
+      "copiedPath": "/home/ashton/bible-memory/screenshot-tests/07-card-back-voice-playback-and-anki-grading.png",
+      "bytes": 393215,
+      "assertions": [
+        "[data-testid=\"card-back-view\"] is visible",
+        "[data-testid=\"voice-playback-bar\"] is visible and playing recorded audio",
+        "[data-testid=\"card-back-full-text\"] displays full passage text",
+        "[data-testid=\"anki-grading-bar\"] displays Again / Hard / Good / Easy buttons"
+      ],
+      "status": "PASS",
+      "timestamp": "2026-11-07T20:51:08.978Z"
+    },
+    {
+      "step": 8,
+      "name": "ProtoJSON (biblememory.v1) Wire-Format Export/Import Modal",
+      "filename": "08-protojson-wire-format-modal.png",
+      "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/08-protojson-wire-format-modal.png",
+      "copiedPath": "/home/ashton/bible-memory/screenshot-tests/08-protojson-wire-format-modal.png",
+      "bytes": 584103,
+      "assertions": [
+        "[data-testid=\"btn-grade-good\"] records Anki review log",
+        "[data-testid=\"btn-open-proto-sync\"] opens ProtoJSON wire format modal",
+        "[data-testid=\"protojson-textarea\"] contains valid biblememory.v1 JSON with passages, flashcards, and reviewLogs"
+      ],
+      "status": "PASS",
+      "timestamp": "2026-11-07T20:51:10.808Z"
+    }
+  ]
+}

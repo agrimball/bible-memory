@@ -1,0 +1,16 @@
+{
+  "name": "Selah Memory — Scripture SRS & Voice Recitation",
+  "short_name": "Selah Memory",
+  "description": "Anki-scheduled scripture memory with voice recitation playback and progressive first-letter study.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#faf7f2",
+  "theme_color": "#1c1917",
+  "icons": [
+    {
+      "src": "favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ]
+}
