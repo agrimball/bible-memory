@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package biblememory.v1;
+
+// A single verse segment within a passage.
+// Keeping verses structured enables +1v (reveal one verse),
+// automatic next-verse first-letter cues, and future long-passage memory repair.
+message Verse {
+  int32 verse_number = 1;
+  string text = 2;
+}
+
+// A scripture or text passage to memorize.
+// Treated purely as structured text + reference without translation lock-in.
+message Passage {
+  string id = 1;
+  string reference = 2;
+  repeated Verse verses = 3;
+  string created_at = 4;
+  string updated_at = 5;
+}
+
+// Anki-style spaced repetition states.
+enum CardState {
+  CARD_STATE_UNSPECIFIED = 0;
+  CARD_STATE_NEW = 1;
+  CARD_STATE_LEARNING = 2;
+  CARD_STATE_REVIEW = 3;
+  CARD_STATE_RELEARNING = 4;
+}
+
+// Anki-style self-grading ratings after reciting & listening back.
+enum ReviewRating {
+  REVIEW_RATING_UNSPECIFIED = 0;
+  REVIEW_RATING_AGAIN = 1;
+  REVIEW_RATING_HARD = 2;
+  REVIEW_RATING_GOOD = 3;
+  REVIEW_RATING_EASY = 4;
+}
+
+// A flashcard scheduling record linked to a Passage.
+message Flashcard {
+  string id = 1;
+  string passage_id = 2;
+  CardState state = 3;
+  double ease_factor = 4;
+  double interval_days = 5;
+  int32 repetitions = 6;
+  int32 learning_step = 7;
+  string due_at = 8;
+  string last_reviewed_at = 9;
+  int32 lapses = 10;
+  string created_at = 11;
+  string updated_at = 12;
+}
+
+// Immutable log of each review session for analytics and future cloud sync.
+message ReviewLog {
+  string id = 1;
+  string card_id = 2;
+  string passage_id = 3;
+  ReviewRating rating = 4;
+  CardState previous_state = 5;
+  CardState new_state = 6;
+  double previous_interval_days = 7;
+  double new_interval_days = 8;
+  double ease_factor = 9;
+  string reviewed_at = 10;
+}
+
+// Top-level ProtoJSON persistence and wire-sync envelope.
+message UserDataBundle {
+  int32 schema_version = 1;
+  string exported_at = 2;
+  repeated Passage passages = 3;
+  repeated Flashcard flashcards = 4;
+  repeated ReviewLog review_logs = 5;
+}
