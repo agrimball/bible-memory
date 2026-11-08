@@ -443,25 +443,59 @@ export class StorageService {
 
   /**
    * Creates (or surfaces) a temporary single-verse Repair Flashcard for a passage.
+   * Accepts `passageId` or `parentCardId` as the first argument, and supports optional `chapterNumber`
+   * (either as the 3rd argument when `chapterNumber` matches a chapter in a multi-chapter passage, or as the 4th argument).
    * Once the user grades Good/Easy `targetStreak` consecutive times (default 3),
    * the repair card is considered healed and automatically retires from the deck.
    */
-  createRepairCard(passageId: string, verseNumber: number, targetStreak = 3): DeckItem | undefined {
+  createRepairCard(
+    passageOrCardId: string,
+    verseNumber: number,
+    targetStreakOrChapter = 3,
+    explicitChapterNumber?: number
+  ): DeckItem | undefined {
+    const cards = this.flashcards();
+    const matchedCard = cards.find((c) => c.id === passageOrCardId);
+    const passageId = matchedCard ? matchedCard.passageId : passageOrCardId;
     const passage = this.passages().find((p) => p.id === passageId);
     if (!passage) {
       return undefined;
     }
 
+    let targetStreak = 3;
+    let resolvedChapter: number | undefined = explicitChapterNumber;
+
+    if (explicitChapterNumber !== undefined) {
+      targetStreak = targetStreakOrChapter > 0 ? targetStreakOrChapter : 3;
+    } else {
+      // Check if `targetStreakOrChapter` was passed as a chapterNumber for a verse in this passage
+      const matchesSpecificChapter = passage.verses.some(
+        (v) => v.verseNumber === verseNumber && v.chapterNumber === targetStreakOrChapter
+      );
+      if (matchesSpecificChapter && targetStreakOrChapter !== 3) {
+        resolvedChapter = targetStreakOrChapter;
+        targetStreak = 3;
+      } else {
+        targetStreak = targetStreakOrChapter > 0 ? targetStreakOrChapter : 3;
+        const matchedVerse = passage.verses.find((v) => v.verseNumber === verseNumber);
+        if (matchedVerse?.chapterNumber && matchedVerse.chapterNumber > 0) {
+          resolvedChapter = matchedVerse.chapterNumber;
+        }
+      }
+    }
+
     const now = new Date();
     const isoNow = now.toISOString();
-    const cards = this.flashcards();
 
-    // Check if an active repair card for (passageId, verseNumber) already exists
+    // Check if an active repair card for (passageId, verseNumber, resolvedChapter) already exists
     const existingRepair = cards.find(
       (c) =>
         Boolean(c.isRepairCard) &&
         c.passageId === passageId &&
-        c.repairVerseNumber === verseNumber
+        c.repairVerseNumber === verseNumber &&
+        (resolvedChapter === undefined ||
+          !c.repairChapterNumber ||
+          c.repairChapterNumber === resolvedChapter)
     );
 
     if (existingRepair) {
@@ -470,6 +504,9 @@ export class StorageService {
         state: CardState.CARD_STATE_LEARNING,
         dueAt: isoNow,
         updatedAt: isoNow,
+        ...(resolvedChapter && resolvedChapter > 0
+          ? { repairChapterNumber: resolvedChapter }
+          : {}),
       };
       this.flashcards.update((prev) =>
         prev.map((c) => (c.id === existingRepair.id ? refreshed : c))
@@ -482,7 +519,10 @@ export class StorageService {
       };
     }
 
-    const parentCard = cards.find((c) => c.passageId === passageId && !c.isRepairCard);
+    const parentCard =
+      matchedCard && !matchedCard.isRepairCard
+        ? matchedCard
+        : cards.find((c) => c.passageId === passageId && !c.isRepairCard);
     const baseCard = this.srs.createInitialFlashcard(passageId, now);
     const repairCard: Flashcard = {
       ...baseCard,
@@ -494,6 +534,9 @@ export class StorageService {
       repairStreak: 0,
       repairTargetStreak: Math.max(1, targetStreak),
       parentCardId: parentCard?.id,
+      ...(resolvedChapter && resolvedChapter > 0
+        ? { repairChapterNumber: resolvedChapter }
+        : {}),
     };
 
     this.flashcards.update((prev) => [repairCard, ...prev]);
@@ -608,6 +651,7 @@ export class StorageService {
       .map((v, idx) => ({
         verseNumber: v.verseNumber > 0 ? v.verseNumber : idx + 1,
         text: v.text.trim(),
+        ...(v.chapterNumber && v.chapterNumber > 0 ? { chapterNumber: v.chapterNumber } : {}),
       }))
       .filter((v) => v.text.length > 0);
 
@@ -697,6 +741,9 @@ export class StorageService {
           repairStreak: nextStreak,
           repairTargetStreak: targetStreak,
           parentCardId: targetCard.parentCardId,
+          ...(targetCard.repairChapterNumber
+            ? { repairChapterNumber: targetCard.repairChapterNumber }
+            : {}),
         };
 
         if (nextStreak >= targetStreak) {
@@ -745,6 +792,9 @@ export class StorageService {
         repairStreak: nextStreak,
         repairTargetStreak: targetStreak,
         parentCardId: targetCard.parentCardId,
+        ...(targetCard.repairChapterNumber
+          ? { repairChapterNumber: targetCard.repairChapterNumber }
+          : {}),
       };
 
       this.flashcards.update((prev) =>

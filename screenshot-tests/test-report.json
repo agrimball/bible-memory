@@ -1,8 +1,8 @@
 {
   "suite": "bible-memory-playwright-screenshot-tests",
   "appUrl": "http://127.0.0.1:4299",
-  "startedAt": "2026-11-07T22:59:05.724Z",
-  "finishedAt": "2026-11-07T22:59:18.473Z",
+  "startedAt": "2026-11-08T02:57:56.792Z",
+  "finishedAt": "2026-11-08T02:58:10.170Z",
   "status": "PASSED",
   "totalSteps": 12,
   "consoleErrors": [],
@@ -21,7 +21,7 @@
         "[data-testid=\"saved-backlog-section\"] displays saved backlog passages (Romans 8:1-4, Psalm 23:1-6)"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-07T22:59:07.285Z"
+      "timestamp": "2026-11-08T02:57:58.333Z"
     },
     {
       "step": "1c",
@@ -35,7 +35,7 @@
         "All Home Page cards, tabs, KPIs, and Active Memory Data File bar render in warm parchment Light Mode"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-07T22:59:07.983Z"
+      "timestamp": "2026-11-08T02:57:59.038Z"
     },
     {
       "step": "1b",
@@ -43,14 +43,14 @@
       "filename": "01b-due-page.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/01b-due-page.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/01b-due-page.png",
-      "bytes": 666975,
+      "bytes": 667207,
       "assertions": [
         "[data-testid=\"tab-due\"] opens [data-testid=\"due-page-section\"]",
         "[data-testid=\"btn-study-due\"] is visible",
         "Active due cards (Philippians 4:6-7, John 1:1-5) are listed separately from the Saved backlog"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-07T22:59:08.691Z"
+      "timestamp": "2026-11-08T02:57:59.798Z"
     },
     {
       "step": "2a",
@@ -58,7 +58,7 @@
       "filename": "02-copy-paste-highlight-verse-numbers.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/02-copy-paste-highlight-verse-numbers.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/02-copy-paste-highlight-verse-numbers.png",
-      "bytes": 606618,
+      "bytes": 599689,
       "assertions": [
         "[data-testid=\"warning-no-verse-numbers\"] warns when verse numbers are absent",
         "[data-testid=\"btn-paste-example\"] populates multi-verse scripture passage",
@@ -66,7 +66,7 @@
         "Highlighted verse numbers are marked for deletion while preserving verse boundaries"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-07T22:59:10.408Z"
+      "timestamp": "2026-11-08T02:58:01.575Z"
     },
     {
       "step": "2b",
@@ -74,14 +74,14 @@
       "filename": "02-smart-copy-paste-modal.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/02-smart-copy-paste-modal.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/02-smart-copy-paste-modal.png",
-      "bytes": 547841,
+      "bytes": 549895,
       "assertions": [
         "[data-testid=\"btn-remove-verse-numbers\"] strips verse numbers from raw textarea",
         "[data-testid=\"remembered-boundaries-badge\"] confirms exact verse boundaries are remembered",
         "[data-testid=\"parsed-verses-preview\"] preserves all 4 individual verses for +1v study"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-07T22:59:11.393Z"
+      "timestamp": "2026-11-08T02:58:02.670Z"
     },
     {
       "step": 3,
@@ -89,7 +89,7 @@
       "filename": "03-card-front-initial.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/03-card-front-initial.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/03-card-front-initial.png",
-      "bytes": 446313,
+      "bytes": 455175,
       "assertions": [
         "[data-testid=\"card-front-view\"] and [data-testid=\"card-reference\"] are visible",
         "Compact [data-testid=\"btn-enter-study\"] (\"Aa Study\") is in the card header",
@@ -97,7 +97,7 @@
         "[data-testid=\"btn-record-voice\"] and [data-testid=\"btn-flip-card\"] are visible"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-07T22:59:11.993Z"
+      "timestamp": "2026-11-08T02:58:03.373Z"
     },
     {
       "step": 4,
@@ -105,14 +105,14 @@
       "filename": "04-study-mode-first-letters-verse1.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/04-study-mode-first-letters-verse1.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/04-study-mode-first-letters-verse1.png",
-      "bytes": 278864,
+      "bytes": 300462,
       "assertions": [
         "Clicking [data-testid=\"btn-enter-study\"] opens separate [data-testid=\"first-letter-study-page\"]",
         "[data-testid=\"first-letter-study-panel\"] shows first letters for Verse 1 only",
         "[data-testid=\"btn-reveal-1w\"] (+1w), [data-testid=\"btn-reveal-1v\"] (+1v), and [data-testid=\"btn-back-to-card\"] (\"✕ Exit to Flashcard\") are visible"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-07T22:59:12.447Z"
+      "timestamp": "2026-11-08T02:58:03.783Z"
     },
     {
       "step": 5,
@@ -120,14 +120,14 @@
       "filename": "05-study-mode-plus-1w-and-plus-1v.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/05-study-mode-plus-1w-and-plus-1v.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/05-study-mode-plus-1w-and-plus-1v.png",
-      "bytes": 322998,
+      "bytes": 368052,
       "assertions": [
         "Clicking +1w 3 times reveals first 3 words of Verse 1",
         "Clicking +1v completes Verse 1 and displays Verse 2 in first-letter mode right below Verse 1",
         "Clicking +1w twice on Verse 2 reveals 2 words of Verse 2 while remaining words stay as first letters"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-07T22:59:14.093Z"
+      "timestamp": "2026-11-08T02:58:05.485Z"
     },
     {
       "step": 6,
@@ -135,14 +135,14 @@
       "filename": "06-voice-recording-active.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/06-voice-recording-active.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/06-voice-recording-active.png",
-      "bytes": 503111,
+      "bytes": 483468,
       "assertions": [
         "[data-testid=\"btn-back-to-card\"] exits Study Page back to [data-testid=\"card-front-view\"]",
         "[data-testid=\"btn-record-voice\"] starts voice recording on the card front",
         "[data-testid=\"recording-active-indicator\"] is active after ~1.2s of recording"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-07T22:59:16.103Z"
+      "timestamp": "2026-11-08T02:58:07.464Z"
     },
     {
       "step": "7a",
@@ -150,7 +150,7 @@
       "filename": "07-card-back-voice-playback-and-anki-grading.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/07-card-back-voice-playback-and-anki-grading.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/07-card-back-voice-playback-and-anki-grading.png",
-      "bytes": 493307,
+      "bytes": 507923,
       "assertions": [
         "[data-testid=\"card-back-view\"] is visible",
         "[data-testid=\"voice-playback-bar\"] is visible and auto-playing recorded recitation",
@@ -158,7 +158,7 @@
         "[data-testid=\"anki-grading-bar\"] displays Again / Hard / Good / Easy buttons"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-07T22:59:16.752Z"
+      "timestamp": "2026-11-08T02:58:08.003Z"
     },
     {
       "step": "7b",
@@ -166,14 +166,14 @@
       "filename": "07b-memory-repair-card-front.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/07b-memory-repair-card-front.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/07b-memory-repair-card-front.png",
-      "bytes": 526150,
+      "bytes": 552155,
       "assertions": [
         "Clicking [data-testid^=\"btn-spawn-repair-\"] spawns a temporary verse repair card and displays [data-testid=\"repair-spawned-toast\"]",
         "Clicking [data-testid=\"btn-practice-repair-now\"] opens the Temporary Memory Repair Flashcard",
         "[data-testid=\"repair-card-banner\"] and [data-testid=\"repair-heal-progress\"] (0/3 heal streak) are visible on the front"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-07T22:59:17.415Z"
+      "timestamp": "2026-11-08T02:58:08.661Z"
     },
     {
       "step": 8,
@@ -181,14 +181,14 @@
       "filename": "08-protojson-wire-format-modal.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/08-protojson-wire-format-modal.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/08-protojson-wire-format-modal.png",
-      "bytes": 539335,
+      "bytes": 540803,
       "assertions": [
         "[data-testid=\"btn-grade-good\"] records Anki review log",
         "[data-testid=\"btn-open-proto-sync\"] opens ProtoJSON wire format modal",
         "[data-testid=\"protojson-textarea\"] contains valid biblememory.v1 JSON with passages, flashcards, and reviewLogs"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-07T22:59:18.473Z"
+      "timestamp": "2026-11-08T02:58:10.170Z"
     }
   ]
 }

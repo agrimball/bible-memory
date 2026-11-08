@@ -12,15 +12,21 @@ export interface StudyWordToken {
 export interface StudyVerseView {
   verseIndex: number;
   verseNumber: number;
+  chapterNumber?: number;
+  verseLabel: string;
   status: 'completed' | 'active' | 'upcoming';
   words: StudyWordToken[];
   revealedWordCount: number;
   totalWordCount: number;
 }
 
+export type FirstLetterVerseState = StudyVerseView;
+
 interface ParsedVerseTokens {
   verseIndex: number;
   verseNumber: number;
+  chapterNumber?: number;
+  verseLabel: string;
   rawWords: Omit<StudyWordToken, 'isRevealed'>[];
 }
 
@@ -37,9 +43,18 @@ export class FirstLetterStudyService {
     if (!passage || !Array.isArray(passage.verses)) {
       return [];
     }
-    return passage.verses.map((verse: Verse, vIdx: number) => ({
+    const versesWithChapter = passage.verses as Array<Verse & { chapterNumber?: number }>;
+    const multiChapter =
+      new Set(versesWithChapter.map((v) => v.chapterNumber).filter(Boolean)).size > 1;
+
+    return versesWithChapter.map((verse, vIdx: number) => ({
       verseIndex: vIdx,
       verseNumber: verse.verseNumber,
+      chapterNumber: verse.chapterNumber,
+      verseLabel:
+        multiChapter && verse.chapterNumber
+          ? `${verse.chapterNumber}:${verse.verseNumber}`
+          : `v. ${verse.verseNumber}`,
       rawWords: this.tokenizeVerseText(verse.text),
     }));
   });
@@ -83,6 +98,8 @@ export class FirstLetterStudyService {
         result.push({
           verseIndex: parsed.verseIndex,
           verseNumber: parsed.verseNumber,
+          chapterNumber: parsed.chapterNumber,
+          verseLabel: parsed.verseLabel,
           status: 'completed',
           words: parsed.rawWords.map((w) => ({
             ...w,
@@ -96,6 +113,8 @@ export class FirstLetterStudyService {
         result.push({
           verseIndex: parsed.verseIndex,
           verseNumber: parsed.verseNumber,
+          chapterNumber: parsed.chapterNumber,
+          verseLabel: parsed.verseLabel,
           status: 'active',
           words: parsed.rawWords.map((w, wordIdx) => ({
             ...w,

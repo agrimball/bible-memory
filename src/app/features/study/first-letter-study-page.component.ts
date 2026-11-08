@@ -49,7 +49,7 @@ import {
 
         <div class="study-page-progress" data-testid="study-progress-indicator">
           <span class="progress-badge">
-            v. {{ activeVerseView()?.verseNumber ?? (studyService.activeVerseIndex() + 1) }} ({{ studyService.activeVerseIndex() + 1 }} of {{ studyService.totalVersesCount() }})
+            {{ activeVerseView()?.verseLabel ?? ('v. ' + (studyService.activeVerseIndex() + 1)) }} ({{ studyService.activeVerseIndex() + 1 }} of {{ studyService.totalVersesCount() }})
           </span>
           <span class="progress-words" *ngIf="activeVerseView() as activeVerse">
             {{ activeVerse.revealedWordCount }} / {{ activeVerse.totalWordCount }} words revealed
@@ -90,7 +90,7 @@ import {
             [class.verse-active]="verse.status === 'active'"
             [attr.data-testid]="'study-verse-' + verse.verseNumber"
           >
-            <span class="verse-number-badge">[{{ verse.verseNumber }}]</span>
+            <span class="verse-number-badge">[{{ verse.verseLabel }}]</span>
 
             <!-- Completed Verse: Full Revealed Text -->
             <div *ngIf="verse.status === 'completed'" class="verse-tokens-flow completed-flow">

@@ -22,13 +22,13 @@ const SUPERSCRIPT_MAP: Record<string, string> = {
 };
 
 const REFERENCE_LINE_REGEX =
-  /^(?:[1-3]\s+)?[A-Za-z]+(?:\s+of\s+[A-Za-z]+|\s+[A-Za-z]+)?\s+\d+(?::\d+(?:\s*[-–—]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-–—]\s*\d+)?)*)?(?:\s*\(?[A-Z]{2,6}\)?)?$/;
+  /^(?:[1-3]\s+)?[A-Za-z]+(?:\s+of\s+[A-Za-z]+|\s+[A-Za-z]+)?\s+\d+(?::\d+(?:\s*[-–—]\s*\d+(?::\d+)?)?(?:\s*,\s*\d+(?::\d+)?(?:\s*[-–—]\s*\d+(?::\d+)?)?)*)?(?:\s*\(?[A-Z]{2,6}\)?)?$/;
 
 @Injectable({ providedIn: 'root' })
 export class PassageParserService {
   /**
-   * Parses pasted Bible passage text (from ESV, YouVersion, BibleGateway, etc.)
-   * into a clean reference and structured array of Verse objects.
+   * Parses pasted Bible passage text (from BibleGateway, ESV, YouVersion, etc.)
+   * into a clean reference and structured array of Verse objects (supporting single-chapter and cross-chapter passages).
    */
   parseRawInput(rawText: string, explicitReference?: string): { reference: string; verses: Verse[] } {
     const trimmedRaw = (rawText ?? '').replace(/\r\n/g, '\n').trim();
@@ -61,16 +61,22 @@ export class PassageParserService {
 
     const bodyText = lines.join('\n');
     const cleanedBody = this.cleanFootnotesAndSuperscripts(bodyText);
-    const startVerseFromRef = this.extractStartVerseFromReference(detectedReference);
+    const { startChapter, startVerse } = this.extractStartChapterAndVerse(detectedReference);
 
-    const verses = this.extractVerses(cleanedBody, startVerseFromRef);
+    const verses = this.extractVerses(cleanedBody, startVerse, startChapter);
 
     if (!detectedReference) {
       if (verses.length > 0) {
-        const firstNum = verses[0].verseNumber;
-        const lastNum = verses[verses.length - 1].verseNumber;
-        detectedReference =
-          firstNum === lastNum ? `Passage (v. ${firstNum})` : `Passage (vv. ${firstNum}–${lastNum})`;
+        const first = verses[0];
+        const last = verses[verses.length - 1];
+        if (first.chapterNumber && last.chapterNumber && first.chapterNumber !== last.chapterNumber) {
+          detectedReference = `Passage (${first.chapterNumber}:${first.verseNumber}–${last.chapterNumber}:${last.verseNumber})`;
+        } else {
+          const firstNum = first.verseNumber;
+          const lastNum = last.verseNumber;
+          detectedReference =
+            firstNum === lastNum ? `Passage (v. ${firstNum})` : `Passage (vv. ${firstNum}–${lastNum})`;
+        }
       } else {
         detectedReference = 'Custom Passage';
       }
@@ -109,7 +115,6 @@ export class PassageParserService {
   }
 
   private maskSingleWord(word: string): string {
-    // Match leading non-alphanumeric punctuation, first letter/digit, middle characters, and trailing punctuation
     const match = word.match(/^([^A-Za-z0-9\u00C0-\u024F]*)([A-Za-z0-9\u00C0-\u024F])(.*)$/);
     if (!match) {
       return word;
@@ -119,13 +124,12 @@ export class PassageParserService {
     const firstChar = match[2];
     const rest = match[3];
 
-    // Replace alphanumeric characters in `rest` with underscores, keeping punctuation intact
     const maskedRest = rest.replace(/[A-Za-z0-9\u00C0-\u024F]/g, '_');
     return `${leadingPunct}${firstChar}${maskedRest}`;
   }
 
   private looksLikeReference(line: string): boolean {
-    if (!line || line.length > 60) {
+    if (!line || line.length > 65) {
       return false;
     }
     return REFERENCE_LINE_REGEX.test(line);
@@ -135,37 +139,62 @@ export class PassageParserService {
     return ref
       .replace(/^[-–—•\s]+/, '')
       .replace(/\s*\([A-Z]{2,6}\)\s*$/, '')
-      .replace(/\s+[A-Z]{2,5}$/, (match) => {
+      .replace(/\s+[A-Z]{2,6}$/, (match) => {
         const token = match.trim();
-        const translations = new Set(['ESV', 'NIV', 'KJV', 'NKJV', 'NLT', 'NASB', 'CSB', 'NRSV', 'AMP', 'MSG']);
+        const translations = new Set([
+          'ESV',
+          'NIV',
+          'KJV',
+          'NKJV',
+          'NLT',
+          'NASB',
+          'CSB',
+          'NRSV',
+          'NRSVUE',
+          'AMP',
+          'MSG',
+        ]);
         return translations.has(token) ? '' : match;
       })
       .replace(/\s+/g, ' ')
       .trim();
   }
 
-  private extractStartVerseFromReference(reference: string): number {
+  private extractStartChapterAndVerse(reference: string): {
+    startChapter?: number;
+    startVerse: number;
+  } {
     if (!reference) {
-      return 1;
+      return { startVerse: 1 };
     }
-    const colonMatch = reference.match(/:\s*(\d+)/);
-    if (colonMatch) {
-      const parsed = parseInt(colonMatch[1], 10);
-      if (!isNaN(parsed) && parsed > 0) {
-        return parsed;
-      }
+    const chapVerseMatch = reference.match(/(\d+)\s*:\s*(\d+)/);
+    if (chapVerseMatch) {
+      const chap = parseInt(chapVerseMatch[1], 10);
+      const verse = parseInt(chapVerseMatch[2], 10);
+      return {
+        startChapter: !isNaN(chap) && chap > 0 ? chap : undefined,
+        startVerse: !isNaN(verse) && verse > 0 ? verse : 1,
+      };
     }
-    return 1;
+    const chapOnlyMatch = reference.match(/\s(\d+)(?:\s|$)/);
+    if (chapOnlyMatch) {
+      const chap = parseInt(chapOnlyMatch[1], 10);
+      return {
+        startChapter: !isNaN(chap) && chap > 0 ? chap : undefined,
+        startVerse: 1,
+      };
+    }
+    return { startVerse: 1 };
   }
 
   private cleanFootnotesAndSuperscripts(text: string): string {
     let cleaned = text;
 
-    // Strip letter footnote markers like [a], [b], (a), (b)
+    // Strip letter footnote markers like [a], [b], (a), (b), (A), (B)
     cleaned = cleaned.replace(/\[[a-zA-Z]{1,2}\]/g, '');
-    cleaned = cleaned.replace(/\([a-zA-Z]\)/g, '');
+    cleaned = cleaned.replace(/\([a-zA-Z]{1,2}\)/g, '');
 
-    // Strip cross-reference markers like †, *, ‡
+    // Strip cross-reference symbols like †, *, ‡
     cleaned = cleaned.replace(/[†‡*]/g, '');
 
     // Convert sequences of Unicode superscript digits into bracketed verse markers `[12] `
@@ -180,58 +209,104 @@ export class PassageParserService {
     return cleaned;
   }
 
-  private extractVerses(cleanedBody: string, defaultStartVerse: number): Verse[] {
-    // Normalize bracketed or parenthesized numeric verse markers like [1] or (1) into a unified marker
-    // Also detect inline or line-start numbers like `1 There is therefore... 2 For the law...`
+  private extractVerses(
+    cleanedBody: string,
+    defaultStartVerse: number,
+    defaultStartChapter?: number
+  ): Verse[] {
+    // Normalize bracketed or parenthesized chapter:verse markers like [8:38] or (9:1) first
+    // and single verse markers like [1] or (1)
     const normalized = cleanedBody
-      .replace(/\[(\d{1,3})\]/g, ' __VERSE_MARKER_$1__ ')
-      .replace(/\((\d{1,3})\)/g, ' __VERSE_MARKER_$1__ ');
+      .replace(/\[(\d{1,3}):(\d{1,3})\]/g, ' __VERSE_MARKER_$1_$2__ ')
+      .replace(/\((\d{1,3}):(\d{1,3})\)/g, ' __VERSE_MARKER_$1_$2__ ')
+      .replace(/\[(\d{1,3})\]/g, ' __VERSE_MARKER_0_$1__ ')
+      .replace(/\((\d{1,3})\)/g, ' __VERSE_MARKER_0_$1__ ');
 
-    // Also match numbers at start of line or after sentence-ending punctuation followed by a capital letter or quote
-    const withInlineMarkers = normalized.replace(
+    // Also match inline chapter:verse (e.g. `8:38 For I am sure... 9:1 I am speaking...`)
+    const withInlineChapVerse = normalized.replace(
+      /(?:^|\n|\s)(\d{1,3}):(\d{1,3})(?=\s+["'“‘(]*[A-Za-z])/g,
+      (_fullMatch, chapStr, verseStr) => ` __VERSE_MARKER_${chapStr}_${verseStr}__ `
+    );
+
+    // Also match inline or line-start numbers like `1 There is therefore... 2 For the law...`
+    const withInlineMarkers = withInlineChapVerse.replace(
       /(?:^|\n|\s)(?:(\d{1,3}))(?=\s+["'“‘(]*[A-Z])/g,
       (fullMatch, numStr) => {
         const num = parseInt(numStr, 10);
         if (num >= 1 && num <= 176) {
-          return ` __VERSE_MARKER_${num}__ `;
+          return ` __VERSE_MARKER_0_${num}__ `;
         }
         return fullMatch;
       }
     );
 
     if (withInlineMarkers.includes('__VERSE_MARKER_')) {
-      const markerRegex = /__VERSE_MARKER_(\d{1,3})__/g;
+      const markerRegex = /__VERSE_MARKER_(\d{1,3})_(\d{1,3})__/g;
       const matches = Array.from(withInlineMarkers.matchAll(markerRegex));
 
       if (matches.length > 0) {
         const verses: Verse[] = [];
+        let activeChapter = defaultStartChapter;
 
-        // Check if there is leading text before the first verse marker
         const firstMarkerIndex = matches[0].index ?? 0;
         const leadingText = this.normalizeWhitespace(withInlineMarkers.slice(0, firstMarkerIndex));
-        const firstMarkerNum = parseInt(matches[0][1], 10);
+        const firstMarkerChap = parseInt(matches[0][1], 10);
+        const firstMarkerNum = parseInt(matches[0][2], 10);
+
+        if (firstMarkerChap > 0 && !activeChapter) {
+          activeChapter = firstMarkerChap;
+        }
 
         if (leadingText.length > 0) {
           const inferredFirstNum = firstMarkerNum > 1 ? firstMarkerNum - 1 : defaultStartVerse;
-          verses.push({
+          const verseObj: Verse = {
             verseNumber: inferredFirstNum,
             text: leadingText,
-          });
+          };
+          if (activeChapter && activeChapter > 0) {
+            verseObj.chapterNumber = activeChapter;
+          }
+          verses.push(verseObj);
         }
 
+        let prevVerseNum = 0;
         for (let i = 0; i < matches.length; i++) {
           const currentMatch = matches[i];
-          const verseNumber = parseInt(currentMatch[1], 10);
+          const explicitChap = parseInt(currentMatch[1], 10);
+          const verseNumber = parseInt(currentMatch[2], 10);
+
+          if (explicitChap > 0) {
+            activeChapter = explicitChap;
+          } else if (
+            activeChapter &&
+            prevVerseNum > 1 &&
+            verseNumber === 1 &&
+            i > 0
+          ) {
+            // Automatic chapter rollover when verse numbers reset to 1 (e.g. 38, 39 -> 1, 2)
+            activeChapter += 1;
+          }
+
+          prevVerseNum = verseNumber;
+
           const contentStart = (currentMatch.index ?? 0) + currentMatch[0].length;
           const contentEnd =
-            i + 1 < matches.length ? (matches[i + 1].index ?? withInlineMarkers.length) : withInlineMarkers.length;
-          const verseText = this.normalizeWhitespace(withInlineMarkers.slice(contentStart, contentEnd));
+            i + 1 < matches.length
+              ? (matches[i + 1].index ?? withInlineMarkers.length)
+              : withInlineMarkers.length;
+          const verseText = this.normalizeWhitespace(
+            withInlineMarkers.slice(contentStart, contentEnd)
+          );
 
           if (verseText.length > 0) {
-            verses.push({
+            const verseObj: Verse = {
               verseNumber,
               text: verseText,
-            });
+            };
+            if (activeChapter && activeChapter > 0) {
+              verseObj.chapterNumber = activeChapter;
+            }
+            verses.push(verseObj);
           }
         }
 
@@ -242,7 +317,6 @@ export class PassageParserService {
     }
 
     // Fallback when no explicit verse markers exist in the text:
-    // Split by non-empty lines, or by sentences if a single block
     const lines = cleanedBody
       .split('\n')
       .map((l) => this.normalizeWhitespace(l))
@@ -252,6 +326,7 @@ export class PassageParserService {
       return lines.map((line, idx) => ({
         verseNumber: defaultStartVerse + idx,
         text: line,
+        ...(defaultStartChapter ? { chapterNumber: defaultStartChapter } : {}),
       }));
     }
 
@@ -260,7 +335,6 @@ export class PassageParserService {
       return [];
     }
 
-    // Split single block into sentences if multiple sentences exist, or keep as 1 verse if short
     const sentences = singleBlock
       .split(/(?<=[.!?]["'”’)]*)\s+(?=["'“‘(]*[A-Z])/)
       .map((s) => this.normalizeWhitespace(s))
@@ -270,6 +344,7 @@ export class PassageParserService {
       return sentences.map((sentence, idx) => ({
         verseNumber: defaultStartVerse + idx,
         text: sentence,
+        ...(defaultStartChapter ? { chapterNumber: defaultStartChapter } : {}),
       }));
     }
 
@@ -277,6 +352,7 @@ export class PassageParserService {
       {
         verseNumber: defaultStartVerse,
         text: singleBlock,
+        ...(defaultStartChapter ? { chapterNumber: defaultStartChapter } : {}),
       },
     ];
   }

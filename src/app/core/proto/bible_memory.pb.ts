@@ -28,6 +28,7 @@ export enum ReviewRating {
 export interface Verse {
   verseNumber: number;
   text: string;
+  chapterNumber?: number;
 }
 
 export interface Passage {
@@ -56,6 +57,7 @@ export interface Flashcard {
   repairStreak?: number;
   repairTargetStreak?: number;
   parentCardId?: string;
+  repairChapterNumber?: number;
 }
 
 export interface ReviewLog {
@@ -80,6 +82,48 @@ export interface UserDataBundle {
 }
 
 // ============================================================================
+// Cross-Chapter Verse Formatting Helpers
+// ============================================================================
+
+export function isMultiChapterPassage(verses: Verse[]): boolean {
+  const chapters = new Set<number>();
+  for (const v of verses ?? []) {
+    if (v.chapterNumber && v.chapterNumber > 0) {
+      chapters.add(v.chapterNumber);
+      if (chapters.size >= 2) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+export function formatVerseBadge(verse: Verse, multiChapter: boolean): string {
+  if (multiChapter && verse.chapterNumber && verse.chapterNumber > 0) {
+    return `${verse.chapterNumber}:${verse.verseNumber}`;
+  }
+  return `v. ${verse.verseNumber}`;
+}
+
+export function formatVerseRange(
+  firstVerse: Verse,
+  lastVerse: Verse,
+  multiChapter: boolean
+): string {
+  const sameChapter = (firstVerse.chapterNumber ?? 0) === (lastVerse.chapterNumber ?? 0);
+  if (sameChapter && firstVerse.verseNumber === lastVerse.verseNumber) {
+    return formatVerseBadge(firstVerse, multiChapter);
+  }
+  if (multiChapter && firstVerse.chapterNumber && lastVerse.chapterNumber) {
+    if (firstVerse.chapterNumber === lastVerse.chapterNumber) {
+      return `${firstVerse.chapterNumber}:${firstVerse.verseNumber}–${lastVerse.verseNumber}`;
+    }
+    return `${firstVerse.chapterNumber}:${firstVerse.verseNumber}–${lastVerse.chapterNumber}:${lastVerse.verseNumber}`;
+  }
+  return `v. ${firstVerse.verseNumber}–${lastVerse.verseNumber}`;
+}
+
+// ============================================================================
 // Canonical ProtoJSON Serialization / Deserialization (Proto3 JSON Spec)
 // ============================================================================
 
@@ -87,6 +131,8 @@ export interface VerseProtoJson {
   verseNumber?: number;
   verse_number?: number;
   text?: string;
+  chapterNumber?: number;
+  chapter_number?: number;
 }
 
 export interface PassageProtoJson {
@@ -130,6 +176,8 @@ export interface FlashcardProtoJson {
   repair_target_streak?: number;
   parentCardId?: string;
   parent_card_id?: string;
+  repairChapterNumber?: number;
+  repair_chapter_number?: number;
 }
 
 export interface ReviewLogProtoJson {
@@ -196,17 +244,26 @@ export function reviewRatingFromProtoJson(val: string | number | undefined): Rev
 
 export const ProtoJsonCodec = {
   verseToJson(v: Verse): VerseProtoJson {
-    return {
+    const out: VerseProtoJson = {
       verseNumber: v.verseNumber,
       text: v.text,
     };
+    if (v.chapterNumber && v.chapterNumber > 0) {
+      out.chapterNumber = v.chapterNumber;
+    }
+    return out;
   },
 
   verseFromJson(json: VerseProtoJson): Verse {
-    return {
+    const chapterNum = Number(json.chapterNumber ?? json.chapter_number ?? 0);
+    const out: Verse = {
       verseNumber: Number(json.verseNumber ?? json.verse_number ?? 0),
       text: String(json.text ?? ''),
     };
+    if (chapterNum > 0) {
+      out.chapterNumber = chapterNum;
+    }
+    return out;
   },
 
   passageToJson(p: Passage): PassageProtoJson {
@@ -254,6 +311,9 @@ export const ProtoJsonCodec = {
       if (c.parentCardId) {
         out.parentCardId = c.parentCardId;
       }
+      if (c.repairChapterNumber && c.repairChapterNumber > 0) {
+        out.repairChapterNumber = c.repairChapterNumber;
+      }
     }
     return out;
   },
@@ -286,6 +346,12 @@ export const ProtoJsonCodec = {
       const parentId = json.parentCardId ?? json.parent_card_id;
       if (parentId) {
         card.parentCardId = String(parentId);
+      }
+      const repairChap = Number(
+        json.repairChapterNumber ?? json.repair_chapter_number ?? 0
+      );
+      if (repairChap > 0) {
+        card.repairChapterNumber = repairChap;
       }
     }
     return card;

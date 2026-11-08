@@ -274,6 +274,8 @@ async function runScreenshotSuite() {
     await page.locator('[data-testid="btn-open-add-passage"]').click();
     const rawTextarea = page.locator('[data-testid="textarea-passage-raw"]');
     await rawTextarea.waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('[data-testid="btn-open-biblegateway"]').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('[data-testid="select-bg-version"]').waitFor({ state: 'visible', timeout: 10000 });
 
     // Verify warning-no-verse-numbers appears when plain text without verse numbers is entered
     await rawTextarea.fill('For by grace you have been saved through faith. And this is not your own doing; it is the gift of God.');

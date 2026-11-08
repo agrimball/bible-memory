@@ -11,7 +11,14 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { CardState, ReviewRating, Verse } from '../../core/proto/bible_memory.pb';
+import {
+  CardState,
+  ReviewRating,
+  Verse,
+  formatVerseBadge,
+  formatVerseRange,
+  isMultiChapterPassage,
+} from '../../core/proto/bible_memory.pb';
 import { DeckItem, StorageService } from '../../core/services/storage.service';
 import { SrsService } from '../../core/services/srs.service';
 import { VoiceRecorderService } from '../../core/services/voice-recorder.service';
@@ -53,6 +60,11 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
 
   private readonly currentItemSignal = signal<DeckItem | null>(null);
 
+  readonly isMultiChapter = computed<boolean>(() => {
+    const verses = this.currentItemSignal()?.passage.verses ?? [];
+    return isMultiChapterPassage(verses);
+  });
+
   readonly isRepairCard = computed<boolean>(() => {
     return Boolean(this.currentItemSignal()?.card.isRepairCard);
   });
@@ -63,7 +75,13 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
       return null;
     }
     const targetNum = current.card.repairVerseNumber;
+    const targetChap = current.card.repairChapterNumber;
     return (
+      current.passage.verses.find(
+        (v) =>
+          v.verseNumber === targetNum &&
+          (!targetChap || !v.chapterNumber || v.chapterNumber === targetChap)
+      ) ??
       current.passage.verses.find((v) => v.verseNumber === targetNum) ??
       current.passage.verses[0] ??
       null
@@ -76,11 +94,43 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
       return null;
     }
     const targetNum = current.card.repairVerseNumber;
-    const idx = current.passage.verses.findIndex((v) => v.verseNumber === targetNum);
+    const targetChap = current.card.repairChapterNumber;
+    let idx = current.passage.verses.findIndex(
+      (v) =>
+        v.verseNumber === targetNum &&
+        (!targetChap || !v.chapterNumber || v.chapterNumber === targetChap)
+    );
+    if (idx < 0) {
+      idx = current.passage.verses.findIndex((v) => v.verseNumber === targetNum);
+    }
     if (idx > 0) {
       return current.passage.verses[idx - 1];
     }
     return null;
+  });
+
+  readonly repairTargetLabel = computed<string>(() => {
+    const target = this.repairTargetVerse();
+    if (target) {
+      return this.getVerseBadge(target);
+    }
+    const card = this.currentItemSignal()?.card;
+    if (this.isMultiChapter() && card?.repairChapterNumber && card?.repairVerseNumber) {
+      return `${card.repairChapterNumber}:${card.repairVerseNumber}`;
+    }
+    return `v. ${card?.repairVerseNumber ?? 1}`;
+  });
+
+  readonly repairTargetVerboseLabel = computed<string>(() => {
+    const target = this.repairTargetVerse();
+    if (target) {
+      return this.getVerseVerboseLabel(target);
+    }
+    const card = this.currentItemSignal()?.card;
+    if (this.isMultiChapter() && card?.repairChapterNumber && card?.repairVerseNumber) {
+      return `${card.repairChapterNumber}:${card.repairVerseNumber}`;
+    }
+    return `Verse ${card?.repairVerseNumber ?? 1}`;
   });
 
   readonly repairHealDots = computed<boolean[]>(() => {
@@ -128,22 +178,46 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     return current.passage.verses[targetIdx] ?? null;
   });
 
-  readonly stitchedVerseRangeLabel = computed<string>(() => {
-    const first = this.firstVerseNumber();
-    const curr = this.currentNewVerse()?.verseNumber ?? first;
-    if (this.activeStitchedCount() <= 1 || first === curr) {
-      return `v. ${first}`;
+  readonly targetVerseLabel = computed<string>(() => {
+    const curr = this.currentNewVerse();
+    if (!curr) {
+      return 'v. 1';
     }
-    return `v. ${first}–${curr}`;
+    return formatVerseBadge(curr, this.isMultiChapter());
+  });
+
+  readonly targetVerseVerboseLabel = computed<string>(() => {
+    const curr = this.currentNewVerse();
+    if (!curr) {
+      return 'Verse 1';
+    }
+    return this.getVerseVerboseLabel(curr);
+  });
+
+  readonly stitchedVerseRangeLabel = computed<string>(() => {
+    const verses = this.currentItemSignal()?.passage.verses ?? [];
+    if (verses.length === 0) {
+      return 'v. 1';
+    }
+    const first = verses[0];
+    const curr = this.currentNewVerse() ?? first;
+    return formatVerseRange(first, curr, this.isMultiChapter());
   });
 
   readonly stitchedVerseRangeVerboseLabel = computed<string>(() => {
-    const first = this.firstVerseNumber();
-    const curr = this.currentNewVerse()?.verseNumber ?? first;
-    if (this.activeStitchedCount() <= 1 || first === curr) {
-      return `Verse ${first}`;
+    const verses = this.currentItemSignal()?.passage.verses ?? [];
+    if (verses.length === 0) {
+      return 'Verse 1';
     }
-    return `Verses ${first}–${curr}`;
+    const first = verses[0];
+    const curr = this.currentNewVerse() ?? first;
+    if (this.isMultiChapter()) {
+      return formatVerseRange(first, curr, true);
+    }
+    if (this.activeStitchedCount() <= 1 || first.verseNumber === curr.verseNumber) {
+      return `Verse ${first.verseNumber}`;
+    }
+    return `Verses ${first.verseNumber}–${curr.verseNumber}`;
   });
 
   /**
@@ -227,19 +301,68 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     this.stitchPhase.set('new-verse-only');
   }
 
-  spawnRepairCardForVerse(verseNumber: number): void {
+  getVerseBadge(verse: Verse | null | undefined): string {
+    if (!verse) {
+      return '';
+    }
+    return formatVerseBadge(verse, this.isMultiChapter());
+  }
+
+  getVerseVerboseLabel(verse: Verse | null | undefined): string {
+    if (!verse) {
+      return '';
+    }
+    if (this.isMultiChapter() && verse.chapterNumber && verse.chapterNumber > 0) {
+      return `${verse.chapterNumber}:${verse.verseNumber}`;
+    }
+    return `Verse ${verse.verseNumber}`;
+  }
+
+  getVerseBracketLabel(verse: Verse | null | undefined): string {
+    if (!verse) {
+      return '';
+    }
+    if (this.isMultiChapter() && verse.chapterNumber && verse.chapterNumber > 0) {
+      return `[${verse.chapterNumber}:${verse.verseNumber}]`;
+    }
+    return `[${verse.verseNumber}]`;
+  }
+
+  isTargetNewVerse(verse: Verse): boolean {
+    const curr = this.currentNewVerse();
+    if (!curr) {
+      return false;
+    }
+    return (
+      curr.verseNumber === verse.verseNumber &&
+      (curr.chapterNumber ?? 0) === (verse.chapterNumber ?? 0)
+    );
+  }
+
+  spawnRepairCardForVerse(verseOrNumber: Verse | number, chapterNumber?: number): void {
     if (!this.item) {
       return;
     }
+    const verseNumber =
+      typeof verseOrNumber === 'number' ? verseOrNumber : verseOrNumber.verseNumber;
+    const resolvedChapter =
+      typeof verseOrNumber === 'number' ? chapterNumber : verseOrNumber.chapterNumber;
     const repairItem = this.storageService.createRepairCard(
       this.item.passage.id,
       verseNumber,
-      3
+      3,
+      resolvedChapter
     );
     if (repairItem) {
+      const badge =
+        typeof verseOrNumber === 'number'
+          ? this.isMultiChapter() && resolvedChapter
+            ? `${resolvedChapter}:${verseNumber}`
+            : `v. ${verseNumber}`
+          : this.getVerseBadge(verseOrNumber);
       this.spawnedRepairItem.set(repairItem);
       this.repairSpawnedMessage.set(
-        `🔧 Created Temporary Repair Card for v. ${verseNumber} (heals after 3 Good/Easy reviews)!`
+        `🔧 Created Temporary Repair Card for ${badge} (heals after 3 Good/Easy reviews)!`
       );
     }
   }
@@ -374,14 +497,14 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
       if (updated) {
         this.currentItemSignal.set(updated);
       }
-      const newVerseNum = this.currentNewVerse()?.verseNumber ?? currentTarget;
+      const newVerseLabel = this.targetVerseVerboseLabel();
       const rangeLabel = this.stitchedVerseRangeLabel();
 
       this.stitchPhase.set('stitch-block');
       this.isFlipped.set(false);
       this.voiceService.resetForNewCard();
       this.stitchToastMessage.set(
-        `✓ Verse ${newVerseNum} is solid! Step 2: Now recite the stitched block (${rangeLabel}) to complete the stitching.`
+        `✓ ${newVerseLabel} is solid! Step 2: Now recite the stitched block (${rangeLabel}) to complete the stitching.`
       );
       return;
     }

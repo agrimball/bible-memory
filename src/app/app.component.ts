@@ -1,7 +1,7 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StorageService, DeckItem } from './core/services/storage.service';
-import { CardState, ReviewRating } from './core/proto/bible_memory.pb';
+import { CardState, ReviewRating, isMultiChapterPassage } from './core/proto/bible_memory.pb';
 import { DeckDashboardComponent } from './features/deck/deck-dashboard.component';
 import { StudyCardComponent } from './features/study/study-card.component';
 import { FirstLetterStudyPageComponent } from './features/study/first-letter-study-page.component';
@@ -25,6 +25,7 @@ const THEME_STORAGE_KEY = 'bible_memory_theme';
   styleUrl: './app.component.css',
 })
 export class AppComponent implements OnInit {
+  readonly title = 'bible-memory';
   readonly storageService = inject(StorageService);
 
   readonly isDarkMode = signal<boolean>(true);
@@ -166,8 +167,13 @@ export class AppComponent implements OnInit {
   onCardRated(event: { cardId: string; rating: ReviewRating }): void {
     const result = this.storageService.recordReview(event.cardId, event.rating);
     if (result && (result as DeckItem & { healed?: boolean }).healed) {
+      const multiChap = isMultiChapterPassage(result.passage.verses);
+      const verseLabel =
+        multiChap && result.card.repairChapterNumber
+          ? `${result.card.repairChapterNumber}:${result.card.repairVerseNumber}`
+          : `v. ${result.card.repairVerseNumber}`;
       this.repairHealedBanner.set(
-        `✓ Memory Repair Complete! ${result.passage.reference} (v. ${result.card.repairVerseNumber}) has been healed and retired.`
+        `✓ Memory Repair Complete! ${result.passage.reference} (${verseLabel}) has been healed and retired.`
       );
     }
     const nextIndex = this.currentQueueIndex() + 1;
