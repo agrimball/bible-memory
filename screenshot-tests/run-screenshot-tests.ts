@@ -1,26 +1,53 @@
-#!/usr/bin/env node
+#!/usr/bin/env npx tsx
 /**
- * Automated Playwright Screenshot & E2E Verification Runner for Bible Memory App
+ * Automated Playwright Screenshot & E2E Verification Runner for Bible Memory App (100% TypeScript)
  *
  * Verifies all core user journeys against the running Angular 19 app and saves
  * high-resolution PNG screenshots to `screenshot-tests/output/` and `screenshot-tests/`.
  */
 
-import { chromium } from 'playwright-core';
+import { chromium, type Page } from 'playwright-core';
 import fs from 'node:fs/promises';
-import http from 'node:http';
+import http, { type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DEFAULT_URL = process.env.APP_URL || 'http://127.0.0.1:4200';
-const DIST_DIR = path.resolve(__dirname, '..', 'dist', 'bible-memory', 'browser');
-const OUTPUT_DIR = path.join(__dirname, 'output');
-const REPORT_PATH = path.join(__dirname, 'test-report.json');
+const DEFAULT_URL: string = process.env['APP_URL'] || 'http://127.0.0.1:4200';
+const DIST_DIR: string = path.resolve(__dirname, '..', 'dist', 'bible-memory', 'browser');
+const OUTPUT_DIR: string = path.join(__dirname, 'output');
+const REPORT_PATH: string = path.join(__dirname, 'test-report.json');
 
-const MIME_TYPES = {
+interface StepMeta {
+  step: string | number;
+  name: string;
+  assertions: string[];
+}
+
+interface StepResult extends StepMeta {
+  filename: string;
+  outputPath: string;
+  copiedPath: string;
+  bytes: number;
+  status: 'PASS' | 'FAIL';
+  timestamp: string;
+}
+
+interface StaticServerInfo {
+  server: Server;
+  url: string;
+}
+
+interface ProtoBundlePayload {
+  passages?: unknown[];
+  flashcards?: unknown[];
+  reviewLogs?: unknown[];
+}
+
+const MIME_TYPES: Readonly<Record<string, string>> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
   '.mjs': 'application/javascript; charset=utf-8',
@@ -32,7 +59,7 @@ const MIME_TYPES = {
   '.webmanifest': 'application/manifest+json; charset=utf-8',
 };
 
-async function startStaticDistServer(preferredPort = 0) {
+async function startStaticDistServer(preferredPort = 0): Promise<StaticServerInfo> {
   const server = http.createServer(async (req, res) => {
     try {
       const reqUrl = new URL(req.url || '/', 'http://127.0.0.1');
@@ -41,7 +68,7 @@ async function startStaticDistServer(preferredPort = 0) {
         relPath = '/index.html';
       }
       let filePath = path.join(DIST_DIR, relPath);
-      let data;
+      let data: Buffer;
       try {
         data = await fs.readFile(filePath);
       } catch {
@@ -51,16 +78,16 @@ async function startStaticDistServer(preferredPort = 0) {
       const ext = path.extname(filePath).toLowerCase();
       res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] || 'application/octet-stream' });
       res.end(data);
-    } catch (err) {
+    } catch (err: unknown) {
       res.writeHead(500);
       res.end(String(err));
     }
   });
 
-  return new Promise((resolve, reject) => {
+  return new Promise<StaticServerInfo>((resolve, reject) => {
     server.on('error', reject);
     server.listen(preferredPort, '127.0.0.1', () => {
-      const addr = server.address();
+      const addr = server.address() as AddressInfo;
       resolve({
         server,
         url: `http://127.0.0.1:${addr.port}`,
@@ -69,13 +96,18 @@ async function startStaticDistServer(preferredPort = 0) {
   });
 }
 
-function assertCondition(condition, message) {
+function assertCondition(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(`Assertion failed: ${message}`);
   }
 }
 
-async function captureStepScreenshot(page, filename, stepResults, stepMeta) {
+async function captureStepScreenshot(
+  page: Page,
+  filename: string,
+  stepResults: StepResult[],
+  stepMeta: StepMeta
+): Promise<void> {
   const outputFilePath = path.join(OUTPUT_DIR, filename);
   const rootCopyPath = path.join(__dirname, filename);
 
@@ -86,7 +118,7 @@ async function captureStepScreenshot(page, filename, stepResults, stepMeta) {
   await fs.copyFile(outputFilePath, rootCopyPath);
 
   const stat = await fs.stat(outputFilePath);
-  const entry = {
+  const entry: StepResult = {
     step: stepMeta.step,
     name: stepMeta.name,
     filename,
@@ -101,22 +133,22 @@ async function captureStepScreenshot(page, filename, stepResults, stepMeta) {
   console.log(`  [PASS] Step ${stepMeta.step}: ${filename} (${stat.size} bytes)`);
 }
 
-async function runScreenshotSuite() {
+async function runScreenshotSuite(): Promise<void> {
   await fs.mkdir(OUTPUT_DIR, { recursive: true });
 
-  const stepResults = [];
-  const consoleErrors = [];
+  const stepResults: StepResult[] = [];
+  const consoleErrors: string[] = [];
   const startedAt = new Date().toISOString();
 
-  const candidatePaths = [
-    process.env.CHROME_PATH,
+  const candidatePaths: string[] = [
+    process.env['CHROME_PATH'],
     '/usr/bin/google-chrome',
     '/usr/bin/google-chrome-stable',
     '/usr/bin/chromium',
     '/usr/bin/chromium-browser',
-  ].filter(Boolean);
+  ].filter((p): p is string => Boolean(p));
 
-  let executablePath;
+  let executablePath: string | undefined;
   for (const p of candidatePaths) {
     try {
       await fs.access(p);
@@ -127,18 +159,19 @@ async function runScreenshotSuite() {
     }
   }
 
-  let staticServerInfo = null;
-  let APP_URL = DEFAULT_URL;
+  let staticServerInfo: StaticServerInfo | null = null;
+  let APP_URL: string = DEFAULT_URL;
 
-  if (!process.env.APP_URL) {
+  const envAppUrl = process.env['APP_URL'];
+  if (!envAppUrl) {
     staticServerInfo = await startStaticDistServer(0);
     APP_URL = staticServerInfo.url;
   } else {
     try {
-      const probe = await fetch(process.env.APP_URL);
+      const probe = await fetch(envAppUrl);
       await probe.arrayBuffer();
     } catch {
-      const parsedPort = Number(new URL(process.env.APP_URL).port) || 0;
+      const parsedPort = Number(new URL(envAppUrl).port) || 0;
       staticServerInfo = await startStaticDistServer(parsedPort);
       APP_URL = staticServerInfo.url;
     }
@@ -167,7 +200,7 @@ async function runScreenshotSuite() {
     });
 
     const page = await context.newPage();
-    page.on('pageerror', (err) => {
+    page.on('pageerror', (err: Error) => {
       consoleErrors.push(String(err));
     });
 
@@ -217,7 +250,7 @@ async function runScreenshotSuite() {
     console.log('Step 1c: Toggling to Light Mode on Home Page & Verifying Light Theme...');
     await page.locator('[data-testid="btn-toggle-theme"]').click();
     await page.waitForTimeout(200);
-    const isLightModeActive = await page.evaluate(() => {
+    const isLightModeActive = await page.evaluate((): boolean => {
       return (
         document.documentElement.classList.contains('light-theme') ||
         document.body.classList.contains('light-theme') ||
@@ -577,7 +610,7 @@ async function runScreenshotSuite() {
 
     const rawProtoJson =
       (await protoTextarea.inputValue().catch(() => '')) || (await protoTextarea.innerText());
-    const parsedProto = JSON.parse(rawProtoJson);
+    const parsedProto = JSON.parse(rawProtoJson) as ProtoBundlePayload;
 
     assertCondition(
       Array.isArray(parsedProto.passages) && parsedProto.passages.length > 0,
@@ -607,7 +640,7 @@ async function runScreenshotSuite() {
       appUrl: APP_URL,
       startedAt,
       finishedAt: new Date().toISOString(),
-      status: 'PASSED',
+      status: 'PASSED' as const,
       totalSteps: stepResults.length,
       consoleErrors,
       steps: stepResults,
@@ -623,14 +656,14 @@ async function runScreenshotSuite() {
   }
 }
 
-runScreenshotSuite().catch(async (err) => {
+runScreenshotSuite().catch(async (err: unknown) => {
   console.error('\n[FAIL] Screenshot test suite failed:', err);
   const failureReport = {
     suite: 'bible-memory-playwright-screenshot-tests',
     appUrl: DEFAULT_URL,
     finishedAt: new Date().toISOString(),
-    status: 'FAILED',
-    error: err?.stack || String(err),
+    status: 'FAILED' as const,
+    error: err instanceof Error ? err.stack || err.message : String(err),
   };
   await fs.writeFile(REPORT_PATH, JSON.stringify(failureReport, null, 2), 'utf8').catch(() => {});
   process.exitCode = 1;

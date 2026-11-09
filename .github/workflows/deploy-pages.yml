@@ -28,12 +28,17 @@ jobs:
           node-version: "22"
           cache: "npm"
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies and protoc
+        run: |
+          sudo apt-get update && sudo apt-get install -y protobuf-compiler
+          npm ci
+
+      - name: Generate Protobuf TypeScript bindings and run unit tests
+        run: npm test
 
       - name: Build Angular production bundle for GitHub Pages
         run: |
-          npx ng build --configuration production --base-href /bible-memory/
+          npm run build -- --configuration production --base-href /bible-memory/
           cp dist/bible-memory/browser/index.html dist/bible-memory/browser/404.html
           touch dist/bible-memory/browser/.nojekyll
 

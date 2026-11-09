@@ -1,85 +1,37 @@
 /**
- * Generated & canonical Proto3 / ProtoJSON TypeScript bindings for:
- * proto/bible_memory.proto (package biblememory.v1)
+ * Thin ProtoJSON & helper adapter over the protoc-generated bindings in:
+ * `./generated/bible_memory` (generated from `proto/bible_memory.proto` via `npm run proto:gen`).
  *
- * Follows the official Protobuf v3 JSON Mapping specification:
- * https://protobuf.dev/programming-guides/proto3/#json
- * - proto snake_case fields map to lowerCamelCase in JSON (and accept both on parse)
- * - enums serialize as their proto string names (and accept both string names & numbers on parse)
- * - default/zero values can be emitted or omitted cleanly
+ * Do NOT hand-edit `./generated/bible_memory.ts`.
  */
 
-export enum CardState {
-  CARD_STATE_UNSPECIFIED = 0,
-  CARD_STATE_NEW = 1,
-  CARD_STATE_LEARNING = 2,
-  CARD_STATE_REVIEW = 3,
-  CARD_STATE_RELEARNING = 4,
-}
+import {
+  CardState,
+  cardStateFromJSON,
+  cardStateToJSON,
+  Flashcard,
+  Passage,
+  ReviewLog,
+  ReviewRating,
+  reviewRatingFromJSON,
+  reviewRatingToJSON,
+  UserDataBundle,
+  Verse,
+} from './generated/bible_memory';
 
-export enum ReviewRating {
-  REVIEW_RATING_UNSPECIFIED = 0,
-  REVIEW_RATING_AGAIN = 1,
-  REVIEW_RATING_HARD = 2,
-  REVIEW_RATING_GOOD = 3,
-  REVIEW_RATING_EASY = 4,
-}
-
-export interface Verse {
-  verseNumber: number;
-  text: string;
-  chapterNumber?: number;
-}
-
-export interface Passage {
-  id: string;
-  reference: string;
-  verses: Verse[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface Flashcard {
-  id: string;
-  passageId: string;
-  state: CardState;
-  easeFactor: number;
-  intervalDays: number;
-  repetitions: number;
-  learningStep: number;
-  dueAt: string;
-  lastReviewedAt: string;
-  lapses: number;
-  createdAt: string;
-  updatedAt: string;
-  isRepairCard?: boolean;
-  repairVerseNumber?: number;
-  repairStreak?: number;
-  repairTargetStreak?: number;
-  parentCardId?: string;
-  repairChapterNumber?: number;
-}
-
-export interface ReviewLog {
-  id: string;
-  cardId: string;
-  passageId: string;
-  rating: ReviewRating;
-  previousState: CardState;
-  newState: CardState;
-  previousIntervalDays: number;
-  newIntervalDays: number;
-  easeFactor: number;
-  reviewedAt: string;
-}
-
-export interface UserDataBundle {
-  schemaVersion: number;
-  exportedAt: string;
-  passages: Passage[];
-  flashcards: Flashcard[];
-  reviewLogs: ReviewLog[];
-}
+export {
+  CardState,
+  cardStateFromJSON,
+  cardStateToJSON,
+  Flashcard,
+  Passage,
+  ReviewLog,
+  ReviewRating,
+  reviewRatingFromJSON,
+  reviewRatingToJSON,
+  UserDataBundle,
+  Verse,
+};
 
 // ============================================================================
 // Cross-Chapter Verse Formatting Helpers
@@ -213,33 +165,41 @@ export interface UserDataBundleProtoJson {
 }
 
 export function cardStateToProtoJson(state: CardState): string {
-  return CardState[state] ?? 'CARD_STATE_UNSPECIFIED';
+  try {
+    return cardStateToJSON(state);
+  } catch {
+    return 'CARD_STATE_UNSPECIFIED';
+  }
 }
 
 export function cardStateFromProtoJson(val: string | number | undefined): CardState {
-  if (typeof val === 'number') {
-    return val in CardState ? (val as CardState) : CardState.CARD_STATE_UNSPECIFIED;
+  if (val === undefined || val === null || val === '') {
+    return CardState.CARD_STATE_UNSPECIFIED;
   }
-  if (typeof val === 'string') {
-    const mapped = (CardState as unknown as Record<string, number>)[val];
-    return typeof mapped === 'number' ? (mapped as CardState) : CardState.CARD_STATE_UNSPECIFIED;
+  try {
+    return cardStateFromJSON(val);
+  } catch {
+    return CardState.CARD_STATE_UNSPECIFIED;
   }
-  return CardState.CARD_STATE_UNSPECIFIED;
 }
 
 export function reviewRatingToProtoJson(rating: ReviewRating): string {
-  return ReviewRating[rating] ?? 'REVIEW_RATING_UNSPECIFIED';
+  try {
+    return reviewRatingToJSON(rating);
+  } catch {
+    return 'REVIEW_RATING_UNSPECIFIED';
+  }
 }
 
 export function reviewRatingFromProtoJson(val: string | number | undefined): ReviewRating {
-  if (typeof val === 'number') {
-    return val in ReviewRating ? (val as ReviewRating) : ReviewRating.REVIEW_RATING_UNSPECIFIED;
+  if (val === undefined || val === null || val === '') {
+    return ReviewRating.REVIEW_RATING_UNSPECIFIED;
   }
-  if (typeof val === 'string') {
-    const mapped = (ReviewRating as unknown as Record<string, number>)[val];
-    return typeof mapped === 'number' ? (mapped as ReviewRating) : ReviewRating.REVIEW_RATING_UNSPECIFIED;
+  try {
+    return reviewRatingFromJSON(val);
+  } catch {
+    return ReviewRating.REVIEW_RATING_UNSPECIFIED;
   }
-  return ReviewRating.REVIEW_RATING_UNSPECIFIED;
 }
 
 export const ProtoJsonCodec = {

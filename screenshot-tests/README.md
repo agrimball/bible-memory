@@ -8,9 +8,9 @@ This directory contains the automated headless Chromium screenshot and end-to-en
    ```bash
    npm run build
    ```
-2. Run the screenshot test runner (automatically serves `dist/bible-memory/browser` if `APP_URL` is not provided, or connects to `APP_URL`):
+2. Run the TypeScript screenshot test runner (automatically serves `dist/bible-memory/browser` if `APP_URL` is not provided, or connects to `APP_URL`):
    ```bash
-   node screenshot-tests/run-screenshot-tests.mjs
+   npx tsx screenshot-tests/run-screenshot-tests.ts
    ```
 
 ## Captured User Journeys & Screenshots

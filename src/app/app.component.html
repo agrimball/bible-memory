@@ -14,7 +14,7 @@
         class="topbar-btn memory-file-pill"
         [class.file-disconnected]="!storageService.activeFileName()"
         [class.file-connected]="!!storageService.activeFileName()"
-        (click)="showProtoSyncModal.set(true)"
+        (click)="openSyncModal()"
         data-testid="topbar-memory-file-status"
         title="Click to select, create, or manage your active Memory Data File (.proto.json)"
       >
@@ -54,7 +54,7 @@
       <button
         type="button"
         class="topbar-btn accent"
-        (click)="showAddPassageModal.set(true)"
+        (click)="openAddModal()"
         data-testid="nav-add-passage"
       >
         + Copy-Paste Text
@@ -62,7 +62,7 @@
       <button
         type="button"
         class="topbar-btn subtle"
-        (click)="showProtoSyncModal.set(true)"
+        (click)="openSyncModal()"
         data-testid="nav-proto-sync"
       >
         ProtoJSON
@@ -90,18 +90,18 @@
     @if (activeView() === 'dashboard') {
       <app-deck-dashboard
         [activeTab]="dashboardTab()"
-        (activeTabChange)="dashboardTab.set($event)"
+        (activeTabChange)="onDeckTabChange($event)"
         (startDueSession)="startDueSession()"
         (practiceSingleItem)="practiceSingleItem($event)"
         (startMemorizeFlow)="onStartMemorizeFlow($event)"
-        (openAddPassage)="showAddPassageModal.set(true)"
-        (openProtoSync)="showProtoSyncModal.set(true)"
+        (openAddPassage)="openAddModal()"
+        (openProtoSync)="openSyncModal()"
       />
     } @else if (activeView() === 'first-letter-page') {
       <app-first-letter-study-page
         [item]="currentStudyItem()"
         [stitchedVerseCount]="currentStitchedVerseCount()"
-        (backToCard)="activeView.set('study')"
+        (backToCard)="returnFromStudyPageToCard()"
         (backToDeck)="returnToDashboard()"
       />
     } @else {

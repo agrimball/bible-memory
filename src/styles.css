@@ -42,10 +42,53 @@ body {
   margin: 0;
   padding: 0;
   min-height: 100vh;
+  min-height: 100dvh;
   background-color: #0b1120;
   color: #f8fafc;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   transition: background-color 0.2s ease, color 0.2s ease;
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+
+.app-topbar {
+  padding-top: calc(0.9rem + env(safe-area-inset-top, 0px));
+  padding-left: calc(1.75rem + env(safe-area-inset-left, 0px));
+  padding-right: calc(1.75rem + env(safe-area-inset-right, 0px));
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.app-main {
+  padding-bottom: calc(3rem + env(safe-area-inset-bottom, 0px));
+}
+
+button,
+nav,
+.topbar-btn,
+.tab-btn,
+.action-btn,
+.btn-anki-grade,
+.btn-study-reveal,
+.stitch-mode-btn {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+input,
+textarea,
+code,
+pre,
+.back-verse-text,
+.first-verse-snippet,
+.context-text,
+.word-token.revealed {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 html.light-theme,

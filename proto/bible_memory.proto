@@ -8,7 +8,7 @@ package biblememory.v1;
 message Verse {
   int32 verse_number = 1;
   string text = 2;
-  int32 chapter_number = 4;
+  optional int32 chapter_number = 4;
 }
 
 // A scripture or text passage to memorize.
@@ -54,12 +54,12 @@ message Flashcard {
   string created_at = 11;
   string updated_at = 12;
   // Long-passage memory repair fields (temporary targeted verse flashcard that heals after N successes)
-  bool is_repair_card = 13;
-  int32 repair_verse_number = 14;
-  int32 repair_streak = 15;
-  int32 repair_target_streak = 16;
-  string parent_card_id = 17;
-  int32 repair_chapter_number = 18;
+  optional bool is_repair_card = 13;
+  optional int32 repair_verse_number = 14;
+  optional int32 repair_streak = 15;
+  optional int32 repair_target_streak = 16;
+  optional string parent_card_id = 17;
+  optional int32 repair_chapter_number = 18;
 }
 
 // Immutable log of each review session for analytics and future cloud sync.

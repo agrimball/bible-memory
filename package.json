@@ -3,11 +3,17 @@
   "version": "0.0.0",
   "scripts": {
     "ng": "ng",
+    "proto:clean": "rm -rf src/app/core/proto/generated",
+    "proto:gen": "npm run proto:clean && mkdir -p src/app/core/proto/generated && protoc --proto_path=proto --experimental_allow_proto3_optional --plugin=protoc-gen-ts_proto=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=src/app/core/proto/generated --ts_proto_opt=esModuleInterop=true,forceLong=number,useOptionals=messages,unrecognizedEnum=false proto/bible_memory.proto",
+    "prestart": "npm run proto:gen",
     "start": "ng serve",
+    "prebuild": "npm run proto:gen",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test",
-    "test:screenshots": "node screenshot-tests/run-screenshot-tests.mjs"
+    "pretest": "npm run proto:gen",
+    "test": "tsx src/app/core/proto/proto.spec.ts && tsx src/app/core/services/srs.service.spec.ts && tsx src/app/core/services/passage-parser.service.spec.ts && tsx src/app/core/services/first-letter-study.service.spec.ts",
+    "test:screenshots": "tsx screenshot-tests/run-screenshot-tests.ts",
+    "cap:sync": "npm run build && npx cap sync"
   },
   "private": true,
   "dependencies": {
@@ -19,6 +25,11 @@
     "@angular/platform-browser": "^19.0.0",
     "@angular/platform-browser-dynamic": "^19.0.0",
     "@angular/router": "^19.0.0",
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/ios": "^8.6.0",
+    "@capacitor/status-bar": "^8.0.4",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0",
     "zone.js": "~0.15.0"
@@ -27,6 +38,7 @@
     "@angular-devkit/build-angular": "^19.0.7",
     "@angular/cli": "^19.0.7",
     "@angular/compiler-cli": "^19.0.0",
+    "@capacitor/cli": "^8.6.0",
     "@types/jasmine": "~5.1.0",
     "jasmine-core": "~5.4.0",
     "karma": "~6.4.0",
@@ -35,6 +47,8 @@
     "karma-jasmine": "~5.1.0",
     "karma-jasmine-html-reporter": "~2.1.0",
     "playwright-core": "^1.65.0",
+    "ts-proto": "^2.18.4",
+    "tsx": "^4.23.15",
     "typescript": "~5.6.2"
   }
 }
