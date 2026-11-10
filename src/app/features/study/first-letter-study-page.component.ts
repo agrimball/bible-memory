@@ -8,9 +8,15 @@ import {
   SimpleChanges,
   computed,
   inject,
+  signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Passage } from '../../core/proto/bible_memory.pb';
+import {
+  Passage,
+  formatVerseBadge,
+  formatVerseRange,
+  isMultiChapterPassage,
+} from '../../core/proto/bible_memory.pb';
 import { DeckItem } from '../../core/services/storage.service';
 import {
   FirstLetterStudyService,
@@ -60,6 +66,44 @@ import {
           </button>
         </div>
       </header>
+
+      <!-- Compact Scope Bar when studying a multi-verse passage -->
+      <div
+        *ngIf="item.passage.verses.length > 1 && !item.card.isRepairCard"
+        class="study-page-scope-bar"
+        data-testid="study-page-scope-bar"
+      >
+        <button
+          type="button"
+          class="study-scope-chip"
+          [class.active]="studyScope() === 'new-verse'"
+          data-testid="btn-study-scope-new"
+          (click)="setStudyScope('new-verse')"
+        >
+          1 · New ({{ targetVerseLabel() }})
+        </button>
+
+        <button
+          *ngIf="localVerseStep() > 1"
+          type="button"
+          class="study-scope-chip"
+          [class.active]="studyScope() === 'stitched'"
+          data-testid="btn-study-scope-stitched"
+          (click)="setStudyScope('stitched')"
+        >
+          2 · Stitch ({{ stitchedRangeLabel() }})
+        </button>
+
+        <button
+          type="button"
+          class="study-scope-chip"
+          [class.active]="studyScope() === 'full'"
+          data-testid="btn-study-scope-full"
+          (click)="setStudyScope('full')"
+        >
+          All ({{ item.passage.verses.length }}v)
+        </button>
+      </div>
 
       <!-- Main Study Page Panel (Full-Screen Scrollable Verses) -->
       <article class="study-page-shell" data-testid="first-letter-study-panel">
@@ -269,6 +313,35 @@ import {
         font-size: 0.72rem;
         font-weight: 600;
         cursor: pointer;
+      }
+
+      .study-page-scope-bar {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 10px;
+        background: #0f172a;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+        flex-shrink: 0;
+      }
+
+      .study-scope-chip {
+        padding: 3px 9px;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        background: rgba(30, 41, 59, 0.5);
+        color: #cbd5e1;
+        font-size: 0.72rem;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .study-scope-chip.active {
+        background: rgba(245, 158, 11, 0.18);
+        border-color: #f59e0b;
+        color: #fbbf24;
+        font-weight: 700;
       }
 
       /* Full-Height Scrollable Study Panel */
@@ -499,8 +572,34 @@ export class FirstLetterStudyPageComponent implements OnInit, OnChanges {
 
   @Input() item: DeckItem | null = null;
   @Input() stitchedVerseCount: number | null = null;
+  @Input() initialStudyScope: 'new-verse' | 'stitched' | 'full' = 'new-verse';
   @Output() backToCard = new EventEmitter<void>();
   @Output() backToDeck = new EventEmitter<void>();
+
+  readonly studyScope = signal<'new-verse' | 'stitched' | 'full'>('new-verse');
+  readonly localVerseStep = signal<number>(1);
+
+  readonly isMultiChapter = computed<boolean>(() => {
+    return isMultiChapterPassage(this.item?.passage.verses ?? []);
+  });
+
+  readonly targetVerseLabel = computed<string>(() => {
+    const verses = this.item?.passage.verses ?? [];
+    if (verses.length === 0) {
+      return 'v. 1';
+    }
+    const idx = Math.max(0, Math.min(this.localVerseStep() - 1, verses.length - 1));
+    return formatVerseBadge(verses[idx], this.isMultiChapter());
+  });
+
+  readonly stitchedRangeLabel = computed<string>(() => {
+    const verses = this.item?.passage.verses ?? [];
+    if (verses.length === 0) {
+      return 'v. 1';
+    }
+    const idx = Math.max(0, Math.min(this.localVerseStep() - 1, verses.length - 1));
+    return formatVerseRange(verses[0], verses[idx], this.isMultiChapter());
+  });
 
   readonly passageTitleWithLabel = computed<string>(() => {
     const p = this.item?.passage as (Passage & { label?: string }) | undefined;
@@ -520,17 +619,66 @@ export class FirstLetterStudyPageComponent implements OnInit, OnChanges {
   });
 
   ngOnInit(): void {
-    this.initStudyMode();
+    this.syncInputsAndInit();
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['item'] || changes['stitchedVerseCount']) {
-      this.initStudyMode();
+    if (
+      changes['item'] ||
+      changes['stitchedVerseCount'] ||
+      changes['initialStudyScope']
+    ) {
+      this.syncInputsAndInit();
     }
   }
 
+  private syncInputsAndInit(): void {
+    const total = this.item?.passage.verses.length ?? 1;
+    const rawStep =
+      this.stitchedVerseCount && this.stitchedVerseCount >= 1
+        ? this.stitchedVerseCount
+        : this.item?.card.learningStep || 1;
+    const clampedStep = Math.max(1, Math.min(rawStep, total));
+    this.localVerseStep.set(clampedStep);
+
+    let effectiveScope = this.initialStudyScope;
+    if (clampedStep <= 1 && effectiveScope === 'stitched') {
+      effectiveScope = 'new-verse';
+    }
+    this.studyScope.set(effectiveScope);
+    this.initStudyMode();
+  }
+
+  setStudyScope(scope: 'new-verse' | 'stitched' | 'full'): void {
+    this.studyScope.set(scope);
+    this.initStudyMode();
+  }
+
   private getEffectivePassage(): Passage | null {
-    return this.item?.passage ?? null;
+    const basePassage = this.item?.passage;
+    if (!basePassage) {
+      return null;
+    }
+    const verses = basePassage.verses;
+    if (verses.length <= 1 || this.item?.card.isRepairCard) {
+      return basePassage;
+    }
+    const step = Math.max(1, Math.min(this.localVerseStep(), verses.length));
+    const scope = this.studyScope();
+    if (scope === 'new-verse') {
+      const targetV = verses[step - 1] ?? verses[0];
+      return {
+        ...basePassage,
+        verses: [targetV],
+      };
+    }
+    if (scope === 'stitched') {
+      return {
+        ...basePassage,
+        verses: verses.slice(0, step),
+      };
+    }
+    return basePassage;
   }
 
   private initStudyMode(): void {

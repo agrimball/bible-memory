@@ -1,5 +1,6 @@
 import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { StorageService, DeckItem } from './core/services/storage.service';
@@ -13,6 +14,14 @@ import { ProtoSyncModalComponent } from './features/sync/proto-sync-modal.compon
 const THEME_STORAGE_KEY = 'bible_memory_theme';
 const UI_SESSION_STORAGE_KEY = 'selah_ui_session_v1';
 const TEXT_SCALE_STORAGE_KEY = 'selah_text_scale_v1';
+const DAILY_REMINDER_STORAGE_KEY = 'selah_daily_reminder_v1';
+
+export interface SelahDailyReminderV1 {
+  enabled: boolean;
+  time: string;
+  onlyWhenDue: boolean;
+  lastTriggeredDate?: string;
+}
 
 export interface SelahUiSessionV1 {
   viewMode: 'deck' | 'study';
@@ -49,12 +58,24 @@ export class AppComponent implements OnInit, OnDestroy {
   readonly studyQueueIds = signal<string[]>([]);
   readonly currentQueueIndex = signal<number>(0);
   readonly stitchedCountByPassageId = signal<Record<string, number>>({});
+  readonly currentStudyScope = signal<'new-verse' | 'stitched' | 'full'>('new-verse');
   readonly repairHealedBanner = signal<string | null>(null);
 
   readonly showAddPassageModal = signal<boolean>(false);
   readonly editingPassage = signal<Passage | null>(null);
   readonly appendingToPassage = signal<Passage | null>(null);
   readonly showProtoSyncModal = signal<boolean>(false);
+  readonly showReminderModal = signal<boolean>(false);
+  readonly isMobileView = signal<boolean>(true);
+  readonly reminderSettings = signal<SelahDailyReminderV1>({
+    enabled: false,
+    time: '08:00',
+    onlyWhenDue: true,
+  });
+  private reminderIntervalId: ReturnType<typeof setInterval> | null = null;
+  private readonly boundResize = () => {
+    this.updateIsMobileView();
+  };
 
   /** Computed aliases matching the selah_ui_session_v1 schema */
   readonly viewMode = computed<'deck' | 'study'>(() =>
@@ -177,13 +198,24 @@ export class AppComponent implements OnInit, OnDestroy {
     }
     this.applyTheme(initialDark);
     this.applyTextScale(initialScale);
+    this.updateIsMobileView();
+    this.loadReminderSettings();
     this.restoreUiSession();
     this.registerNativeAndBrowserListeners();
+    this.checkDailyReminderSchedule();
+    this.reminderIntervalId = setInterval(() => {
+      this.checkDailyReminderSchedule();
+    }, 30000);
   }
 
   ngOnDestroy(): void {
+    if (this.reminderIntervalId !== null) {
+      clearInterval(this.reminderIntervalId);
+      this.reminderIntervalId = null;
+    }
     if (typeof window !== 'undefined') {
       window.removeEventListener('popstate', this.boundPopState);
+      window.removeEventListener('resize', this.boundResize);
     }
     if (typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', this.boundVisibilityChange);
@@ -193,6 +225,7 @@ export class AppComponent implements OnInit, OnDestroy {
   private registerNativeAndBrowserListeners(): void {
     if (typeof window !== 'undefined') {
       window.addEventListener('popstate', this.boundPopState);
+      window.addEventListener('resize', this.boundResize);
     }
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', this.boundVisibilityChange);
@@ -257,6 +290,10 @@ export class AppComponent implements OnInit, OnDestroy {
     }
     if (this.showProtoSyncModal()) {
       this.showProtoSyncModal.set(false);
+      return true;
+    }
+    if (this.showReminderModal()) {
+      this.closeReminderModal();
       return true;
     }
     if (this.isDrawerOpen()) {
@@ -446,6 +483,188 @@ export class AppComponent implements OnInit, OnDestroy {
     this.isDrawerOpen.set(false);
     this.showProtoSyncModal.set(true);
     this.pushHistoryEntry('sync-modal');
+  }
+
+  openProtoModalFromDrawer(): void {
+    this.openSyncModal();
+  }
+
+  openReminderModalFromDrawer(): void {
+    this.closeDrawer();
+    this.showReminderModal.set(true);
+    this.pushHistoryEntry('reminder-modal');
+  }
+
+  closeReminderModal(): void {
+    this.showReminderModal.set(false);
+  }
+
+  private loadReminderSettings(): void {
+    if (typeof localStorage === 'undefined') {
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(DAILY_REMINDER_STORAGE_KEY);
+      if (!raw) {
+        return;
+      }
+      const parsed = JSON.parse(raw) as Partial<SelahDailyReminderV1>;
+      this.reminderSettings.set({
+        enabled: Boolean(parsed.enabled),
+        time: typeof parsed.time === 'string' && /^\d{2}:\d{2}$/.test(parsed.time) ? parsed.time : '08:00',
+        onlyWhenDue: parsed.onlyWhenDue !== undefined ? Boolean(parsed.onlyWhenDue) : true,
+        lastTriggeredDate: parsed.lastTriggeredDate,
+      });
+    } catch {
+      // Ignore malformed JSON
+    }
+  }
+
+  private saveReminderSettings(next: SelahDailyReminderV1): void {
+    this.reminderSettings.set(next);
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(DAILY_REMINDER_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // Ignore storage errors
+      }
+    }
+  }
+
+  toggleDailyReminder(): void {
+    const curr = this.reminderSettings();
+    const nextEnabled = !curr.enabled;
+    this.saveReminderSettings({
+      ...curr,
+      enabled: nextEnabled,
+    });
+    if (
+      nextEnabled &&
+      typeof window !== 'undefined' &&
+      'Notification' in window &&
+      Notification.permission === 'default'
+    ) {
+      Notification.requestPermission().catch(() => {});
+    }
+  }
+
+  onReminderTimeChange(event: Event): void {
+    const input = event.target as HTMLInputElement | null;
+    const val = input?.value?.trim();
+    if (!val) {
+      return;
+    }
+    const curr = this.reminderSettings();
+    this.saveReminderSettings({
+      ...curr,
+      time: val,
+    });
+  }
+
+  onReminderOnlyWhenDueChange(event: Event): void {
+    const input = event.target as HTMLInputElement | null;
+    if (!input) {
+      return;
+    }
+    const curr = this.reminderSettings();
+    this.saveReminderSettings({
+      ...curr,
+      onlyWhenDue: Boolean(input.checked),
+    });
+  }
+
+  formatReminderTimeDisplay(timeStr: string): string {
+    const match = (timeStr || '08:00').match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) {
+      return timeStr || '08:00';
+    }
+    const hours24 = Number(match[1]);
+    const mins = match[2];
+    const period = hours24 >= 12 ? 'PM' : 'AM';
+    const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
+    return `${hours12}:${mins} ${period}`;
+  }
+
+  private updateIsMobileView(): void {
+    try {
+      if (Capacitor.isNativePlatform()) {
+        this.isMobileView.set(true);
+        return;
+      }
+    } catch {
+      // Ignore outside Capacitor
+    }
+    if (typeof window !== 'undefined') {
+      this.isMobileView.set(window.innerWidth <= 768);
+    }
+  }
+
+  checkDailyReminderSchedule(): void {
+    if (!this.isMobileView()) {
+      return;
+    }
+    const settings = this.reminderSettings();
+    if (!settings.enabled) {
+      return;
+    }
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const todayDateStr = `${yyyy}-${mm}-${dd}`;
+    if (settings.lastTriggeredDate === todayDateStr) {
+      return;
+    }
+
+    const hh = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    const currentHHMM = `${hh}:${min}`;
+    if (currentHHMM < settings.time) {
+      return;
+    }
+
+    this.saveReminderSettings({
+      ...settings,
+      lastTriggeredDate: todayDateStr,
+    });
+
+    const dueCount = this.storageService.dueDeckItems().length;
+    if (!settings.onlyWhenDue || dueCount > 0) {
+      this.fireReminderNotification();
+    }
+  }
+
+  private fireReminderNotification(): void {
+    const dueItems = this.storageService.dueDeckItems();
+    let message = 'Time for your daily Scripture meditation!';
+    if (dueItems.length > 0) {
+      const totalWords = dueItems.reduce(
+        (sum, item) =>
+          sum +
+          item.passage.verses.reduce(
+            (vSum, v) => vSum + (v.text.trim() ? v.text.trim().split(/\s+/).length : 0),
+            0
+          ),
+        0
+      );
+      const estMin = Math.max(1, Math.round(totalWords / 130));
+      message = `You have ${dueItems.length} ${dueItems.length === 1 ? 'passage' : 'passages'} due today (~${estMin}m).`;
+    }
+
+    if (
+      typeof window !== 'undefined' &&
+      'Notification' in window &&
+      Notification.permission === 'granted'
+    ) {
+      try {
+        new Notification('Selah Memory', {
+          body: message,
+          icon: 'favicon-32x32.png',
+        });
+      } catch {
+        // Ignore notification errors in headless/restricted environments
+      }
+    }
   }
 
   async onDrawerOpenFile(): Promise<void> {

@@ -1,7 +1,10 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
 import {
   CardState,
+  checkPassagesContiguity,
   Flashcard,
+  isEndOfChapter,
+  normalizeBookKey,
   Passage,
   ProtoJsonCodec,
   ReviewLog,
@@ -89,6 +92,12 @@ export class StorageService {
   readonly lastFileSaveError = signal<string | null>(null);
   readonly fileSyncError = signal<string | null>(null);
 
+  // Undo state for the most recent multi-boundary passage split
+  readonly lastSplitUndoState = signal<{
+    createdPassageIds: string[];
+    originalLabel: string;
+  } | null>(null);
+
   readonly fileConnectionStatus = computed<FileConnectionStatus>(() => {
     const name = this.activeFileName();
     const status = this.activeFileStatus();
@@ -126,13 +135,16 @@ export class StorageService {
     const now = new Date();
     const items: DeckItem[] = [];
 
-    // Include all flashcards (both main passage flashcards and any active temporary repair flashcards)
+    // Include all flashcards (both main passage flashcards and any active temporary repair/patch flashcards)
     for (const card of cardList) {
       const passage = passageById.get(card.passageId);
       if (passage) {
         const isActive = card.state !== CardState.CARD_STATE_NEW || Boolean(card.isRepairCard);
+        const displayPassage = card.isRepairCard
+          ? this.formatPatchPassage(passage, card)
+          : passage;
         items.push({
-          passage,
+          passage: displayPassage,
           card,
           isDue: isActive && this.srs.isDue(card, now),
         });
@@ -585,7 +597,7 @@ export class StorageService {
       );
       this.persistToStorage();
       return {
-        passage,
+        passage: this.formatPatchPassage(passage, refreshed),
         card: refreshed,
         isDue: true,
       };
@@ -621,9 +633,60 @@ export class StorageService {
     this.persistToStorage();
 
     return {
-      passage,
+      passage: this.formatPatchPassage(passage, repairCard),
       card: repairCard,
       isDue: true,
+    };
+  }
+
+  private formatPatchPassage(passage: Passage, card: Flashcard): Passage {
+    const cleanBaseRef = (passage.reference ?? '').replace(/\s*\((?:Patch|Repair)\)\s*$/i, '').trim();
+    const verses = passage.verses ?? [];
+    if (verses.length === 0 || !card.repairVerseNumber) {
+      return {
+        ...passage,
+        reference: `${cleanBaseRef || passage.reference} (Patch)`,
+      };
+    }
+
+    const startNum = card.repairVerseNumber;
+    const startChap = card.repairChapterNumber;
+    let startIdx = verses.findIndex(
+      (v) =>
+        v.verseNumber === startNum &&
+        (!startChap || !v.chapterNumber || v.chapterNumber === startChap)
+    );
+    if (startIdx < 0) {
+      startIdx = verses.findIndex((v) => v.verseNumber === startNum);
+    }
+
+    if (startIdx < 0) {
+      return {
+        ...passage,
+        reference: `${cleanBaseRef} (Patch)`,
+      };
+    }
+
+    const endNum = card.repairEndVerseNumber ?? startNum;
+    const endChap = card.repairEndChapterNumber ?? startChap;
+    let endIdx = verses.findIndex(
+      (v, idx) =>
+        idx >= startIdx &&
+        v.verseNumber === endNum &&
+        (!endChap || !v.chapterNumber || v.chapterNumber === endChap)
+    );
+    if (endIdx < 0) {
+      endIdx = verses.findIndex((v, idx) => idx >= startIdx && v.verseNumber === endNum);
+    }
+    if (endIdx < startIdx) {
+      endIdx = startIdx;
+    }
+
+    const targetSlice = verses.slice(startIdx, endIdx + 1);
+    const subRef = this.computeSubReference(cleanBaseRef, targetSlice);
+    return {
+      ...passage,
+      reference: `${subRef} (Patch)`,
     };
   }
 
@@ -1105,6 +1168,216 @@ export class StorageService {
   }
 
   /**
+   * Splits a passage at one or more 0-based verse indices (`0 <= idx < verses.length - 1`),
+   * preserving learned progress on completed prefix segments, setting the first unlearned segment
+   * as `activeNextItem`, and saving undo metadata (`lastSplitUndoState`) so `undoLastSplit()` can recombine them.
+   */
+  splitPassageAtBoundaries(
+    cardOrPassageId: string,
+    splitAfterVerseIndices: number[],
+    customLabelsBySegment?: Record<number, string> | string
+  ):
+    | {
+        segments: DeckItem[];
+        createdItems: DeckItem[];
+        chunks: DeckItem[];
+        activeNextItem: DeckItem;
+        activeItem: DeckItem;
+        remainingPassage: DeckItem;
+        undoPassageIds: string[];
+      }
+    | undefined {
+    const cards = this.flashcards();
+    const targetCard =
+      cards.find((c) => c.id === cardOrPassageId && !c.isRepairCard) ??
+      cards.find((c) => c.passageId === cardOrPassageId && !c.isRepairCard);
+    if (!targetCard) {
+      return undefined;
+    }
+
+    const passage = this.passages().find((p) => p.id === targetCard.passageId);
+    if (!passage || passage.verses.length < 2) {
+      return undefined;
+    }
+
+    const validIndices = Array.from(
+      new Set(
+        (splitAfterVerseIndices ?? [])
+          .map((n) => Math.round(n))
+          .filter((n) => Number.isFinite(n) && n >= 0 && n < passage.verses.length - 1)
+      )
+    ).sort((a, b) => a - b);
+
+    if (validIndices.length === 0) {
+      return undefined;
+    }
+
+    const normalizedLabels: Record<number, string> =
+      typeof customLabelsBySegment === 'string'
+        ? customLabelsBySegment.trim()
+          ? { 0: customLabelsBySegment.trim() }
+          : {}
+        : customLabelsBySegment ?? {};
+
+    const now = new Date();
+    const isoNow = now.toISOString();
+    const wasNew = targetCard.state === CardState.CARD_STATE_NEW;
+    const rawLearnedCount = wasNew
+      ? 0
+      : targetCard.state === CardState.CARD_STATE_REVIEW
+        ? passage.verses.length
+        : Math.max(1, Math.min(targetCard.learningStep || 1, passage.verses.length));
+
+    // When splitting an active passage, treat at least the first split boundary as completed prefix
+    const effectiveLearnedCount = wasNew
+      ? 0
+      : rawLearnedCount < passage.verses.length
+        ? Math.max(rawLearnedCount, validIndices[0] + 1)
+        : validIndices[0] + 1;
+
+    const cutPoints = [...validIndices, passage.verses.length - 1];
+    const createdPassages: Passage[] = [];
+    const createdCards: Flashcard[] = [];
+    const segmentItems: DeckItem[] = [];
+    let activeNextItem: DeckItem | undefined;
+
+    for (let segIdx = 0; segIdx < cutPoints.length; segIdx++) {
+      const segStartIdx = segIdx === 0 ? 0 : cutPoints[segIdx - 1] + 1;
+      const segEndIdx = cutPoints[segIdx];
+      const segVerses = passage.verses.slice(segStartIdx, segEndIdx + 1);
+      const segRef = this.computeSubReference(passage.reference, segVerses);
+      const explicitLabel = normalizedLabels[segIdx]?.trim();
+
+      // Reuse the original passage/card ID for the final segment so existing references remain stable
+      const isFinalSegment = segIdx === cutPoints.length - 1;
+      const segPassageId = isFinalSegment ? passage.id : this.generateId('psg');
+      const segCardId = isFinalSegment ? targetCard.id : this.generateId('card');
+
+      const segPassage: Passage = {
+        id: segPassageId,
+        reference: segRef,
+        verses: segVerses,
+        createdAt: isFinalSegment ? passage.createdAt : isoNow,
+        updatedAt: isoNow,
+        ...(explicitLabel ? { label: explicitLabel } : {}),
+      };
+
+      let segCard: Flashcard;
+      if (!wasNew && segEndIdx < effectiveLearnedCount) {
+        // Completed prefix segment
+        segCard = {
+          ...targetCard,
+          id: segCardId,
+          passageId: segPassageId,
+          state: CardState.CARD_STATE_REVIEW,
+          learningStep: segVerses.length,
+          repetitions: Math.max(1, targetCard.repetitions || 0),
+          intervalDays: Math.max(1, targetCard.intervalDays || 1),
+          dueAt: targetCard.dueAt || isoNow,
+          updatedAt: isoNow,
+          isRepairCard: false,
+          isStitchedPassageCard: false,
+        };
+        delete segCard.stitchedPassageIds;
+      } else if (!activeNextItem) {
+        // First segment containing unlearned verses -> activeNextItem
+        const remainingLearnedInSeg = Math.max(
+          1,
+          Math.min(segVerses.length, rawLearnedCount - segStartIdx)
+        );
+        segCard = {
+          ...targetCard,
+          id: segCardId,
+          passageId: segPassageId,
+          state: wasNew ? CardState.CARD_STATE_NEW : CardState.CARD_STATE_LEARNING,
+          learningStep: wasNew ? 1 : remainingLearnedInSeg,
+          dueAt: isoNow,
+          updatedAt: isoNow,
+          isRepairCard: false,
+          isStitchedPassageCard: false,
+        };
+        delete segCard.stitchedPassageIds;
+      } else {
+        // Subsequent unlearned segment after activeNextItem
+        segCard = {
+          ...this.srs.createInitialFlashcard(segPassageId, now),
+          id: segCardId,
+          state: CardState.CARD_STATE_NEW,
+          learningStep: 1,
+          dueAt: isoNow,
+          updatedAt: isoNow,
+        };
+      }
+
+      const item: DeckItem = {
+        passage: segPassage,
+        card: segCard,
+        isDue: segCard.state !== CardState.CARD_STATE_NEW && this.srs.isDue(segCard, now),
+      };
+      if (!activeNextItem && (wasNew || segEndIdx >= effectiveLearnedCount)) {
+        activeNextItem = item;
+      }
+
+      createdPassages.push(segPassage);
+      createdCards.push(segCard);
+      segmentItems.push(item);
+    }
+
+    const resolvedActiveNext = activeNextItem ?? segmentItems[segmentItems.length - 1];
+    const undoPassageIds = createdPassages.map((p) => p.id);
+
+    this.lastSplitUndoState.set({
+      createdPassageIds: undoPassageIds,
+      originalLabel: passage.label?.trim() ?? '',
+    });
+
+    this.passages.update((prev) => {
+      const idx = prev.findIndex((p) => p.id === passage.id);
+      if (idx === -1) {
+        return [...createdPassages, ...prev];
+      }
+      const next = [...prev];
+      next.splice(idx, 1, ...createdPassages);
+      return next;
+    });
+
+    this.flashcards.update((prev) => {
+      const idx = prev.findIndex((c) => c.id === targetCard.id);
+      if (idx === -1) {
+        return [...createdCards, ...prev];
+      }
+      const next = [...prev];
+      next.splice(idx, 1, ...createdCards);
+      return next;
+    });
+
+    this.syncContiguousStitchedCards();
+    this.persistToStorage();
+
+    return {
+      segments: segmentItems,
+      createdItems: segmentItems,
+      chunks: segmentItems,
+      activeNextItem: resolvedActiveNext,
+      activeItem: resolvedActiveNext,
+      remainingPassage: resolvedActiveNext,
+      undoPassageIds,
+    };
+  }
+
+  /**
+   * Undoes the most recent `splitPassageAtBoundaries` operation by recombining the created segments.
+   */
+  undoLastSplit(): DeckItem | undefined {
+    const state = this.lastSplitUndoState();
+    if (!state || state.createdPassageIds.length < 2) {
+      return undefined;
+    }
+    this.lastSplitUndoState.set(null);
+    return this.combinePassages(state.createdPassageIds, state.originalLabel || undefined);
+  }
+
+  /**
    * Incremental Chunking while memorizing a longer passage:
    * Carves off the first `prefixVerseCount` verses (`1 <= prefixVerseCount < passage.verses.length`)
    * as a completed, memorized passage + card (`CARD_STATE_REVIEW`, `learningStep: prefixVerseCount`),
@@ -1119,112 +1392,75 @@ export class StorageService {
     const targetCard =
       cards.find((c) => c.id === cardOrPassageId && !c.isRepairCard) ??
       cards.find((c) => c.passageId === cardOrPassageId && !c.isRepairCard);
-    if (!targetCard) {
-      return undefined;
-    }
-
-    const passage = this.passages().find((p) => p.id === targetCard.passageId);
-    if (!passage || passage.verses.length < 2) {
-      return undefined;
-    }
-
+    const passage = targetCard
+      ? this.passages().find((p) => p.id === targetCard.passageId)
+      : undefined;
     const count = Math.round(prefixVerseCount);
-    if (count < 1 || count >= passage.verses.length) {
+    if (!passage || count < 1 || count >= passage.verses.length) {
       return undefined;
     }
 
-    const now = new Date();
-    const isoNow = now.toISOString();
-    const prefixVerses = passage.verses.slice(0, count);
-    const tailVerses = passage.verses.slice(count);
-
-    const completedRef = this.computeSubReference(passage.reference, prefixVerses);
-    const remainingRef = this.computeSubReference(passage.reference, tailVerses);
     const resolvedChunkLabel = chunkLabel?.trim() || passage.label?.trim() || undefined;
-
-    const completedPassage: Passage = {
-      id: this.generateId('psg'),
-      reference: completedRef,
-      verses: prefixVerses,
-      createdAt: isoNow,
-      updatedAt: isoNow,
-      ...(resolvedChunkLabel ? { label: resolvedChunkLabel } : {}),
-    };
-
-    const completedCard: Flashcard = {
-      ...targetCard,
-      id: this.generateId('card'),
-      passageId: completedPassage.id,
-      state: CardState.CARD_STATE_REVIEW,
-      learningStep: prefixVerses.length,
-      repetitions: Math.max(1, targetCard.repetitions || 0),
-      intervalDays: Math.max(1, targetCard.intervalDays || 1),
-      dueAt: targetCard.dueAt || isoNow,
-      updatedAt: isoNow,
-      isRepairCard: false,
-      isStitchedPassageCard: false,
-    };
-    delete completedCard.stitchedPassageIds;
-
-    const updatedRemainingPassage: Passage = {
-      ...passage,
-      reference: remainingRef,
-      verses: tailVerses,
-      updatedAt: isoNow,
-    };
-    if (!chunkLabel?.trim()) {
-      delete updatedRemainingPassage.label;
+    const labels: Record<number, string> = {};
+    if (resolvedChunkLabel) {
+      labels[0] = resolvedChunkLabel;
+    }
+    if (chunkLabel?.trim() && passage.label?.trim()) {
+      labels[1] = passage.label.trim();
     }
 
-    const updatedRemainingCard: Flashcard = {
-      ...targetCard,
-      state: CardState.CARD_STATE_LEARNING,
-      learningStep: 1,
-      dueAt: isoNow,
-      updatedAt: isoNow,
-    };
-
-    this.passages.update((prev) => {
-      const idx = prev.findIndex((p) => p.id === passage.id);
-      if (idx === -1) {
-        return [completedPassage, updatedRemainingPassage, ...prev];
-      }
-      const next = [...prev];
-      next.splice(idx, 1, completedPassage, updatedRemainingPassage);
-      return next;
-    });
-
-    this.flashcards.update((prev) => {
-      const idx = prev.findIndex((c) => c.id === targetCard.id);
-      if (idx === -1) {
-        return [completedCard, updatedRemainingCard, ...prev];
-      }
-      const next = [...prev];
-      next.splice(idx, 1, completedCard, updatedRemainingCard);
-      return next;
-    });
-
-    this.syncContiguousStitchedCards();
-    this.persistToStorage();
+    const result = this.splitPassageAtBoundaries(cardOrPassageId, [count - 1], labels);
+    if (!result || result.segments.length < 2) {
+      return undefined;
+    }
 
     return {
-      completedChunk: {
-        passage: completedPassage,
-        card: completedCard,
-        isDue: this.srs.isDue(completedCard, now),
-      },
-      remainingPassage: {
-        passage: updatedRemainingPassage,
-        card: updatedRemainingCard,
-        isDue: true,
-      },
+      completedChunk: result.segments[0],
+      remainingPassage: result.segments[1],
     };
   }
 
   /**
-   * Merges 2+ passages (sorted in canonical verse order) into a single combined passage
+   * Checks whether 2+ passages (identified by passage ID or card ID) are strictly contiguous
+   * and eligible to be combined.
+   */
+  canCombinePassages(passageIds: string[]): { canCombine: boolean; reason?: string } {
+    if (!passageIds || passageIds.length < 2) {
+      return { canCombine: false, reason: 'Select at least 2 passages to combine.' };
+    }
+
+    const idSet = new Set(passageIds);
+    const allPassages = this.passages();
+    const allCards = this.flashcards();
+    const matchedPassages = new Map<string, Passage>();
+
+    for (const p of allPassages) {
+      if (p.id.startsWith('psg_stitched_') || p.id.startsWith('psg_seam_')) {
+        continue;
+      }
+      const mainCard = allCards.find((c) => c.passageId === p.id && !c.isRepairCard);
+      if (idSet.has(p.id) || (mainCard && idSet.has(mainCard.id))) {
+        matchedPassages.set(p.id, p);
+      }
+    }
+
+    const list = Array.from(matchedPassages.values());
+    if (list.length < 2) {
+      return { canCombine: false, reason: 'Select at least 2 base passages to combine.' };
+    }
+
+    const result = checkPassagesContiguity(list);
+    return {
+      canCombine: result.contiguous,
+      reason: result.reason,
+    };
+  }
+
+  /**
+   * Merges 2+ strictly contiguous passages (sorted in canonical verse order) into a single combined passage
    * with combined reference, combined `verses`, and `learningStep` equal to the sum of learned verses,
    * removing the old separate passages and calling `syncContiguousStitchedCards()`.
+   * Returns `undefined` if the selected passages are not strictly contiguous.
    */
   combinePassages(passageIds: string[], combinedLabel?: string): DeckItem | undefined {
     if (!passageIds || passageIds.length < 2) {
@@ -1251,6 +1487,11 @@ export class StorageService {
 
     const items = Array.from(matchedPassages.values());
     if (items.length < 2) {
+      return undefined;
+    }
+
+    const contiguity = checkPassagesContiguity(items.map((i) => i.passage));
+    if (!contiguity.contiguous) {
       return undefined;
     }
 
@@ -1921,7 +2162,7 @@ export class StorageService {
       }
 
       const bookDisplay = bookMatch[1].trim();
-      const bookKey = bookDisplay.toLowerCase().replace(/\s+/g, ' ');
+      const bookKey = normalizeBookKey(bookDisplay);
       const refChapter = parseInt(bookMatch[2], 10) || 1;
 
       const firstVerse = passage.verses[0];
@@ -1983,7 +2224,9 @@ export class StorageService {
         const isSameChapAdjacent =
           span.startChapter === prev.endChapter && span.startVerse === prev.endVerse + 1;
         const isNextChapStart =
-          span.startChapter === prev.endChapter + 1 && span.startVerse === 1;
+          span.startChapter === prev.endChapter + 1 &&
+          span.startVerse === 1 &&
+          isEndOfChapter(prev.bookDisplay, prev.endChapter, prev.endVerse);
 
         if (isSameChapAdjacent || isNextChapStart) {
           currentRun.push(span);

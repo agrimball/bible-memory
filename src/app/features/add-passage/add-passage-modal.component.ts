@@ -397,20 +397,31 @@ function computeRecitationEstimate(verses: Verse[]): RecitationTimeEstimate {
 
                   <div class="bg-rendered-html" [innerHTML]="result.rawHtml"></div>
                 </div>
+              }
+            </div>
 
-                <!-- Floating Bottom-Right 1-Click Import Action Button -->
+            @if (bgLookupResult(); as result) {
+              <!-- Sticky Modal Footer Bar Inside the BibleGateway Modal Card -->
+              <footer class="bg-overlay-footer" data-testid="bg-overlay-footer">
+                <span class="bg-footer-status">
+                  ✓ {{ result.verses.length }}
+                  {{ result.verses.length === 1 ? 'verse' : 'verses' }} ready ({{
+                    result.canonicalReference || reference().trim() || 'Passage'
+                  }})
+                </span>
+
                 <button
                   id="btn-bg-copy-import"
                   type="button"
-                  class="bg-fab-copy-import"
+                  class="bg-fab-copy-import bg-floating-copy-fab"
                   (click)="copyAndImportFromBibleGateway()"
                   data-testid="btn-bg-copy-import"
                 >
-                  📋 Import Passage ({{ result.verses.length }}
-                  {{ result.verses.length === 1 ? 'verse' : 'verses' }})
+                  📥 Import {{ result.verses.length }}
+                  {{ result.verses.length === 1 ? 'Verse' : 'Verses' }}
                 </button>
-              }
-            </div>
+              </footer>
+            }
           </section>
         }
       </div>
@@ -970,10 +981,33 @@ function computeRecitationEstimate(verses: Verse[]): RecitationTimeEstimate {
         position: relative;
         flex: 1;
         overflow-y: auto;
-        padding: 1rem 1.25rem 5rem;
+        padding: 1rem 1.25rem 1.25rem;
         display: flex;
         flex-direction: column;
         gap: 0.85rem;
+      }
+
+      .bg-overlay-footer {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        padding: 0.7rem 1.15rem;
+        border-top: 1px solid var(--border-color);
+        background: var(--modal-header-bg);
+      }
+
+      .bg-footer-status {
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: #2dd4bf;
+      }
+
+      :host-context(.light-theme) .bg-footer-status,
+      :host-context(html:not(.dark-theme)) .bg-footer-status {
+        color: #0f766e;
       }
 
       .bg-state-card {
@@ -1096,25 +1130,25 @@ function computeRecitationEstimate(verses: Verse[]): RecitationTimeEstimate {
       }
 
       .bg-fab-copy-import {
-        position: fixed;
-        right: 2rem;
-        bottom: 2rem;
-        z-index: 60;
-        padding: 0.78rem 1.25rem;
-        border-radius: 999px;
-        border: 1px solid #14b8a6;
-        background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%);
-        color: #ffffff;
-        font-size: 0.88rem;
-        font-weight: 700;
+        position: relative;
+        margin-left: auto;
+        padding: 0.58rem 1.15rem;
+        border-radius: 0.55rem;
+        border: 1px solid #f59e0b;
+        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        color: #0f172a;
+        font-size: 0.86rem;
+        font-weight: 800;
         cursor: pointer;
-        box-shadow: 0 12px 28px rgba(13, 148, 136, 0.45);
-        transition: transform 0.15s ease, box-shadow 0.15s ease;
+        box-shadow: 0 6px 18px rgba(245, 158, 11, 0.32);
+        transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
+        white-space: nowrap;
       }
 
       .bg-fab-copy-import:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 16px 32px rgba(13, 148, 136, 0.58);
+        transform: translateY(-1px);
+        filter: brightness(1.06);
+        box-shadow: 0 10px 22px rgba(245, 158, 11, 0.45);
       }
     `,
   ],
@@ -1146,6 +1180,7 @@ export class AddPassageModalComponent implements OnInit, OnChanges {
   readonly bgIsLoading = signal<boolean>(false);
   readonly bgError = signal<string | null>(null);
   readonly bgLookupResult = signal<BibleGatewayLookupResult | null>(null);
+  readonly bgFetchedVerses = computed<Verse[]>(() => this.bgLookupResult()?.verses ?? []);
 
   ngOnInit(): void {
     this.syncModalMode();

@@ -61,6 +61,7 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   @Output() chunkCarved = new EventEmitter<DeckItem>();
   @Output() backToDeck = new EventEmitter<void>();
   @Output() openStudyPage = new EventEmitter<DeckItem>();
+  @Output() studyScopeChange = new EventEmitter<'new-verse' | 'stitched' | 'full'>();
   @Output() openRepairCard = new EventEmitter<DeckItem>();
   @Output() stitchedVerseCountChange = new EventEmitter<number>();
 
@@ -68,13 +69,20 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   readonly showHint = signal<boolean>(false);
   readonly localTargetVerseCount = signal<number>(1);
   readonly stitchPhase = signal<StitchPracticePhase>('new-verse-only');
+  readonly isStitchWalkthroughActive = signal<boolean>(false);
   readonly stitchToastMessage = signal<string | null>(null);
   readonly repairSpawnedMessage = signal<string | null>(null);
   readonly spawnedRepairItem = signal<DeckItem | null>(null);
   readonly showCarveChunkSheet = signal<boolean>(false);
   readonly showScopeSheet = signal<boolean>(false);
-  readonly showRemainingVerses = signal<boolean>(true);
+  readonly showRemainingVerses = signal<boolean>(false);
+  readonly showMoreScopeOptions = signal<boolean>(false);
   readonly chunkLabel = signal<string>('');
+  readonly selectedSplitAfterIndices = signal<number[]>([]);
+  readonly splitHistoryStack = signal<number[][]>([]);
+  readonly splitUndoBannerMessage = signal<string | null>(null);
+  private lastSplitPassageIds: string[] = [];
+  private lastSplitOriginalLabel?: string;
 
   /** Start-to-End Repair Range Highlighting & Resume Recitation state */
   readonly draftRepairRange = signal<VerseIndexRange | null>(null);
@@ -322,20 +330,45 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   });
 
   readonly showStitchStrip = computed<boolean>(() => {
-    const current = this.currentItemSignal() ?? this.item;
-    if (!current || this.isRepairCard() || current.passage.verses.length <= 1) {
+    if (this.isRepairCard()) {
       return false;
     }
-    const total = current.passage.verses.length;
-    const savedStep = current.card.learningStep || 1;
+    const current = this.currentItemSignal() ?? this.item;
+    if (!current || current.card.state === CardState.CARD_STATE_NEW) {
+      return false;
+    }
+    const total = this.totalVerses();
+    if (total <= 1 || this.activeStitchedCount() <= 1) {
+      return false;
+    }
     if (
       current.card.state === CardState.CARD_STATE_REVIEW &&
-      savedStep >= total &&
+      (current.card.learningStep || 1) >= total &&
       this.activeStitchedCount() >= total
     ) {
       return false;
     }
-    return true;
+    return this.isStitchWalkthroughActive();
+  });
+
+  readonly frontPromptBadge = computed<string>(() => {
+    if (this.isRepairCard()) {
+      return `Memory Repair · ${this.repairTargetLabel()}`;
+    }
+    if (
+      this.currentCardState() === CardState.CARD_STATE_NEW ||
+      this.totalVerses() <= 1 ||
+      this.stitchPhase() === 'full-passage'
+    ) {
+      return 'ESV';
+    }
+    if (this.isStitchWalkthroughActive()) {
+      if (this.stitchPhase() === 'new-verse-only') {
+        return `Step 1 · Learn New Verse (${this.targetVerseLabel()})`;
+      }
+      return `Step 2 · Stitch Together (${this.stitchedVerseRangeLabel()})`;
+    }
+    return `Recite ${this.recitedVersesScopeLabel()}`;
   });
 
   /**
@@ -400,7 +433,7 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
    */
   readonly topbarScopeLabel = computed<string>(() => {
     if (this.isRepairCard()) {
-      return `🔧 ${this.repairTargetLabel()}`;
+      return `🩹 ${this.repairTargetLabel()}`;
     }
     const total = this.totalVerses();
     if (total <= 1) {
@@ -444,7 +477,7 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   readonly showLongChunkWarning = computed<boolean>(() => {
     return (
       this.canCarvePrefixChunk() &&
-      (this.activeStitchedCount() >= 8 || this.recitationTime().seconds >= 45)
+      (this.activeStitchedCount() >= 10 || this.recitationTime().seconds >= 60)
     );
   });
 
@@ -572,6 +605,14 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     return this.formatIndexRange(draft);
   });
 
+  readonly draftVerseCount = computed<number>(() => {
+    const draft = this.draftRepairRange();
+    if (!draft) {
+      return 0;
+    }
+    return Math.max(1, draft.endIdx - draft.startIdx + 1);
+  });
+
   readonly draftStartVerseLabel = computed<string>(() => {
     const draft = this.draftRepairRange();
     const verses = this.activeVerses();
@@ -683,12 +724,16 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   private initializeForCurrentCard(): void {
     this.isFlipped.set(false);
     this.showHint.set(false);
+    this.isStitchWalkthroughActive.set(false);
     this.stitchToastMessage.set(null);
     this.repairSpawnedMessage.set(null);
     this.spawnedRepairItem.set(null);
     this.showCarveChunkSheet.set(false);
     this.showScopeSheet.set(false);
+    this.showMoreScopeOptions.set(false);
     this.chunkLabel.set('');
+    this.selectedSplitAfterIndices.set([]);
+    this.splitHistoryStack.set([]);
     this.draftRepairRange.set(null);
     this.queuedRepairs.set([]);
     this.resumeFromVerseIndex.set(null);
@@ -697,7 +742,7 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     this.voiceService.resetForNewCard();
 
     const total = this.item?.passage.verses.length ?? 0;
-    this.showRemainingVerses.set(total <= 6);
+    this.showRemainingVerses.set(false);
     if (total <= 1 || this.item?.card.isRepairCard) {
       this.localTargetVerseCount.set(Math.max(1, total));
       this.stitchPhase.set('full-passage');
@@ -839,14 +884,21 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   }
 
   /**
-   * Tap a verse on the Back of the card to start/extend/cancel a repair highlight range:
-   * - Tapping inside the current draft range cancels it.
-   * - Tapping inside a queued repair range removes that queued range.
-   * - Tapping an unhighlighted verse when no draft is active starts `[idx..idx]`.
-   * - Tapping another verse while a draft `[s..e]` is active extends it to `[min(s,idx)..max(e,idx)]`.
+   * Tap a verse on the Back of the card:
+   * - On NEW cards (`CARD_STATE_NEW`), tapping a verse immediately flips back to the Front
+   *   for rapid Front <-> Back initial memorization without triggering verse-repair highlighting!
+   * - On DUE/REVIEW cards, tapping starts/extends/cancels a repair highlight range:
+   *   - Tapping inside the current draft range cancels it.
+   *   - Tapping inside a queued repair range removes that queued range.
+   *   - Tapping an unhighlighted verse when no draft is active starts `[idx..idx]`.
+   *   - Tapping another verse while a draft `[s..e]` is active extends it to `[min(s,idx)..max(e,idx)]`.
    */
   onVerseTap(idx: number, event?: Event): void {
     event?.stopPropagation();
+    if (this.currentCardState() === CardState.CARD_STATE_NEW) {
+      this.flipToFront();
+      return;
+    }
     if (!this.item || this.isRepairCard() || this.totalVerses() <= 1) {
       return;
     }
@@ -873,6 +925,28 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
         startIdx: Math.min(currentDraft.startIdx, idx),
         endIdx: Math.max(currentDraft.endIdx, idx),
       });
+    }
+  }
+
+  /**
+   * Tapping the Back card surface outside interactive controls flips back to the Front
+   * (and on NEW cards, tapping anywhere on the Back text or surface flips to the Front).
+   */
+  onBackSurfaceClick(event: Event): void {
+    const target = event.target as HTMLElement | null;
+    if (
+      target?.closest(
+        'button, input, .back-inline-scope-boundary, .incremental-chunk-sheet, .back-voice-strip'
+      )
+    ) {
+      return;
+    }
+    if (this.currentCardState() === CardState.CARD_STATE_NEW) {
+      this.flipToFront();
+      return;
+    }
+    if (!target?.closest('.verse-line')) {
+      this.flipToFront();
     }
   }
 
@@ -959,7 +1033,7 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
           : this.getVerseBadge(verseOrNumber);
       this.spawnedRepairItem.set(repairItem);
       this.repairSpawnedMessage.set(
-        `🔧 Created Temporary Repair Card for ${badge} (heals after 3 Good/Easy reviews)!`
+        `🩹 Created Temporary Patch Card for ${badge} (heals after 3 Good/Easy reviews)!`
       );
     }
   }
@@ -1025,6 +1099,9 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   expandOneVerse(event?: Event): void {
     event?.stopPropagation();
     this.stitchNextVerse();
+    if (this.isFlipped()) {
+      this.flipToFront();
+    }
   }
 
   setStitchPhase(phase: StitchPracticePhase): void {
@@ -1033,6 +1110,8 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
       const total = this.totalVerses();
       this.localTargetVerseCount.set(total);
       this.stitchedVerseCountChange.emit(total);
+    } else if (this.activeStitchedCount() >= 2) {
+      this.isStitchWalkthroughActive.set(true);
     }
     this.stitchPhase.set(phase);
   }
@@ -1045,6 +1124,9 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     const clamped = Math.max(1, Math.min(count, total));
     this.localTargetVerseCount.set(clamped);
     this.stitchToastMessage.set(null);
+    if (clamped <= 1) {
+      this.isStitchWalkthroughActive.set(false);
+    }
     if (this.stitchPhase() === 'full-passage' && clamped < total) {
       this.stitchPhase.set('stitch-block');
     }
@@ -1063,6 +1145,10 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     const next = Math.min(this.totalVerses(), this.activeStitchedCount() + 1);
     this.setTargetVerseCount(next);
     this.stitchPhase.set('new-verse-only');
+    if (next >= 2) {
+      this.isStitchWalkthroughActive.set(true);
+    }
+    this.showScopeSheet.set(false);
   }
 
   unstitchOneVerse(): void {
@@ -1091,6 +1177,7 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
       this.currentItemSignal.set(updated);
       const nextStep = updated.card.learningStep || 1;
       this.localTargetVerseCount.set(nextStep);
+      this.isStitchWalkthroughActive.set(false);
       this.stitchPhase.set(nextStep >= total ? 'full-passage' : 'stitch-block');
       this.stitchedVerseCountChange.emit(nextStep);
     }
@@ -1126,6 +1213,7 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
       this.currentItemSignal.set(updated);
     }
     this.localTargetVerseCount.set(total);
+    this.isStitchWalkthroughActive.set(false);
     this.stitchPhase.set('full-passage');
     this.stitchedVerseCountChange.emit(total);
   }
@@ -1163,6 +1251,21 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
       return;
     }
     this.voiceService.pausePlayback();
+    const count = this.activeStitchedCount();
+    this.stitchedVerseCountChange.emit(count);
+
+    let targetScope: 'new-verse' | 'stitched' | 'full' = 'full';
+    if (
+      this.currentCardState() === CardState.CARD_STATE_NEW ||
+      this.stitchPhase() === 'full-passage'
+    ) {
+      targetScope = 'full';
+    } else if (this.stitchPhase() === 'new-verse-only' || count <= 1) {
+      targetScope = 'new-verse';
+    } else {
+      targetScope = 'stitched';
+    }
+    this.studyScopeChange.emit(targetScope);
     this.openStudyPage.emit(this.item);
   }
 
@@ -1204,15 +1307,64 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     return this.showRemainingVerses();
   }
 
+  toggleMoreScopeOptions(event?: Event): void {
+    event?.stopPropagation();
+    this.showMoreScopeOptions.update((v) => !v);
+  }
+
   toggleCarveChunkSheet(event?: Event): void {
     event?.stopPropagation();
     this.showScopeSheet.set(false);
     const next = !this.showCarveChunkSheet();
     this.showCarveChunkSheet.set(next);
-    if (next && !this.chunkLabel()) {
-      const current = this.currentItemSignal() ?? this.item;
-      this.chunkLabel.set(current?.passage.label ?? '');
+    if (next) {
+      const total = this.totalVerses();
+      const activeCount = this.activeStitchedCount();
+      if (total > 1 && activeCount >= 1 && activeCount < total) {
+        this.selectedSplitAfterIndices.set([activeCount - 1]);
+        this.splitHistoryStack.set([[]]);
+      } else if (total > 1) {
+        this.selectedSplitAfterIndices.set([0]);
+        this.splitHistoryStack.set([[]]);
+      } else {
+        this.selectedSplitAfterIndices.set([]);
+        this.splitHistoryStack.set([]);
+      }
+      this.chunkLabel.set('');
     }
+  }
+
+  isSplitBoundarySelected(idx: number): boolean {
+    return this.selectedSplitAfterIndices().includes(idx);
+  }
+
+  toggleSplitBoundary(idx: number, event?: Event): void {
+    event?.stopPropagation();
+    const total = this.totalVerses();
+    if (idx < 0 || idx >= total - 1) {
+      return;
+    }
+    const curr = this.selectedSplitAfterIndices();
+    this.splitHistoryStack.update((stack) => [...stack, [...curr]]);
+    const next = curr.includes(idx)
+      ? curr.filter((i) => i !== idx)
+      : [...curr, idx].sort((a, b) => a - b);
+    this.selectedSplitAfterIndices.set(next);
+  }
+
+  undoSplitBoundaryChange(event?: Event): void {
+    event?.stopPropagation();
+    const stack = this.splitHistoryStack();
+    if (stack.length === 0) {
+      return;
+    }
+    const prev = stack[stack.length - 1];
+    this.splitHistoryStack.set(stack.slice(0, -1));
+    this.selectedSplitAfterIndices.set(prev);
+  }
+
+  cancelCarveChunk(event?: Event): void {
+    this.closeCarveChunkSheet(event);
   }
 
   closeCarveChunkSheet(event?: Event): void {
@@ -1231,32 +1383,124 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     if (!current) {
       return;
     }
-    const prefixCount = this.activeStitchedCount();
     const total = this.totalVerses();
-    if (prefixCount < 1 || prefixCount >= total) {
+    if (total <= 1) {
       return;
     }
+
+    const rawIndices = this.selectedSplitAfterIndices()
+      .filter((i) => i >= 0 && i < total - 1)
+      .sort((a, b) => a - b);
+    const fallbackIdx = Math.max(0, Math.min(this.activeStitchedCount() - 1, total - 2));
+    const splitIndices = rawIndices.length > 0 ? rawIndices : [fallbackIdx];
     const labelText = this.chunkLabel().trim();
-    const res = this.storageService.carveOffPrefixAsNamedChunk(
-      current.card.id,
-      prefixCount,
-      labelText || undefined
-    );
+    this.lastSplitOriginalLabel = current.passage.label;
+
+    const svc = this.storageService as unknown as {
+      splitPassageAtBoundaries?: (
+        cardOrPassageId: string,
+        splitAfterVerseIndices: number[],
+        customLabelsByChunkIndex?: Record<number, string>
+      ) =>
+        | DeckItem[]
+        | {
+            createdItems?: DeckItem[];
+            chunks?: DeckItem[];
+            activeItem?: DeckItem;
+            remainingPassage?: DeckItem;
+          }
+        | undefined;
+    };
+
+    let nextActiveItem: DeckItem | undefined;
+    if (typeof svc.splitPassageAtBoundaries === 'function') {
+      const res = svc.splitPassageAtBoundaries(
+        current.card.id,
+        splitIndices,
+        labelText ? { 0: labelText } : undefined
+      );
+      if (Array.isArray(res)) {
+        if (res.length > 0) {
+          this.lastSplitPassageIds = res.map((d) => d.passage.id);
+          nextActiveItem =
+            res.find((d) => d.card.state !== CardState.CARD_STATE_REVIEW) ??
+            res[res.length - 1] ??
+            res[0];
+        }
+      } else if (res && typeof res === 'object') {
+        const list = res.createdItems ?? res.chunks ?? [];
+        this.lastSplitPassageIds = list.map((d: DeckItem) => d.passage.id);
+        nextActiveItem =
+          res.activeItem ??
+          res.remainingPassage ??
+          list.find((d: DeckItem) => d.card.state !== CardState.CARD_STATE_REVIEW) ??
+          list[list.length - 1];
+      }
+    } else {
+      const prefixCount = splitIndices[0] + 1;
+      const res = this.storageService.carveOffPrefixAsNamedChunk(
+        current.card.id,
+        prefixCount,
+        labelText || undefined
+      );
+      if (res) {
+        this.lastSplitPassageIds = [
+          res.completedChunk.passage.id,
+          res.remainingPassage.passage.id,
+        ];
+        nextActiveItem = res.remainingPassage;
+      }
+    }
+
     this.showCarveChunkSheet.set(false);
     this.chunkLabel.set('');
+    this.selectedSplitAfterIndices.set([]);
+    this.splitHistoryStack.set([]);
+    this.splitUndoBannerMessage.set(`✓ Split into ${splitIndices.length + 1} passages`);
 
-    const remainingItem =
-      res?.remainingPassage ??
-      this.storageService.deckItems().find((d) => d.card.id === current.card.id);
-    if (remainingItem) {
-      this.item = remainingItem;
-      this.currentItemSignal.set(remainingItem);
-      const remTotal = remainingItem.passage.verses.length;
-      const remStep = Math.max(1, Math.min(remainingItem.card.learningStep || 1, remTotal));
+    const resolvedItem =
+      nextActiveItem ??
+      this.storageService.deckItems().find((d) => d.card.id === current.card.id) ??
+      this.storageService.deckItems()[0];
+    if (resolvedItem) {
+      this.item = resolvedItem;
+      this.currentItemSignal.set(resolvedItem);
+      const remTotal = resolvedItem.passage.verses.length;
+      const remStep = Math.max(1, Math.min(resolvedItem.card.learningStep || 1, remTotal));
       this.localTargetVerseCount.set(remStep);
+      this.isStitchWalkthroughActive.set(false);
       this.stitchPhase.set(remStep >= remTotal ? 'full-passage' : 'stitch-block');
       this.stitchedVerseCountChange.emit(remStep);
-      this.chunkCarved.emit(remainingItem);
+      this.chunkCarved.emit(resolvedItem);
+    }
+  }
+
+  undoLastPassageSplit(event?: Event): void {
+    event?.stopPropagation();
+    const svc = this.storageService as unknown as {
+      undoLastSplit?: () => DeckItem | undefined;
+    };
+    let restored: DeckItem | undefined;
+    if (typeof svc.undoLastSplit === 'function') {
+      restored = svc.undoLastSplit();
+    } else if (this.lastSplitPassageIds.length >= 2) {
+      restored = this.storageService.combinePassages(
+        this.lastSplitPassageIds,
+        this.lastSplitOriginalLabel
+      );
+    }
+    this.splitUndoBannerMessage.set(null);
+    this.lastSplitPassageIds = [];
+    if (restored) {
+      this.item = restored;
+      this.currentItemSignal.set(restored);
+      const total = restored.passage.verses.length;
+      const step = Math.max(1, Math.min(restored.card.learningStep || 1, total));
+      this.localTargetVerseCount.set(step);
+      this.isStitchWalkthroughActive.set(false);
+      this.stitchPhase.set(step >= total ? 'full-passage' : 'stitch-block');
+      this.stitchedVerseCountChange.emit(step);
+      this.chunkCarved.emit(restored);
     }
   }
 
@@ -1352,7 +1596,7 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
 
   getCardStateLabel(state: CardState | undefined): string {
     if (this.item?.card.isRepairCard) {
-      return 'REPAIR';
+      return 'PATCH';
     }
     switch (state) {
       case CardState.CARD_STATE_NEW:

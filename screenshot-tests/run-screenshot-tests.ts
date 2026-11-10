@@ -555,15 +555,13 @@ async function runScreenshotSuite(): Promise<void> {
     // =========================================================================
     // 3. 03-card-front-initial.png (Remember-Me Full-Screen Flashcard Front `r4.png`)
     // =========================================================================
-    console.log('Step 3: Clicking Passage on Home Page -> Full-Screen Flashcard Front with 2-Step Stitching & Bottom Dock...');
+    console.log('Step 3: Clicking Passage on Home Page -> Full-Screen Flashcard Front & Bottom Dock...');
     await page.locator('[data-testid="deck-item-0"]').first().click();
 
     await page.locator('[data-testid="card-front-view"]').waitFor({ state: 'visible', timeout: 10000 });
     await page.locator('[data-testid="card-reference"]').waitFor({ state: 'visible', timeout: 10000 });
     await page.locator('[data-testid="btn-enter-study"]').waitFor({ state: 'visible', timeout: 10000 });
-    await page.locator('[data-testid="stitch-mode-toggle"]').waitFor({ state: 'visible', timeout: 10000 });
-    await page.locator('[data-testid="btn-mode-new-verse"]').waitFor({ state: 'visible', timeout: 10000 });
-    await page.locator('[data-testid="btn-mode-stitch-block"]').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('[data-testid="btn-scope-sheet-toggle"]').waitFor({ state: 'visible', timeout: 10000 });
     await page.locator('[data-testid="btn-record-voice"]').waitFor({ state: 'visible', timeout: 10000 });
     await page.locator('[data-testid="btn-flip-card"]').waitFor({ state: 'visible', timeout: 10000 });
 
@@ -580,7 +578,7 @@ async function runScreenshotSuite(): Promise<void> {
       assertions: [
         '[data-testid="card-front-view"] and [data-testid="card-reference"] are visible',
         'Circular [data-testid="btn-enter-study"] (🎓) and [data-testid="btn-flip-card"] (◫) are in the bottom bar',
-        '[data-testid="stitch-mode-toggle"] with [data-testid="btn-mode-new-verse"] and [data-testid="btn-mode-stitch-block"] is visible',
+        '[data-testid="btn-scope-sheet-toggle"] is visible in the compact top bar',
         'Circular [data-testid="btn-record-voice"] (🎤) is centered at the bottom of the card face',
       ],
     });
@@ -591,14 +589,14 @@ async function runScreenshotSuite(): Promise<void> {
     //    - 05-study-mode-plus-1w-and-plus-1v.png
     // =========================================================================
     console.log('Step 4: Opening Separate First-Letter Study Page via Study Button...');
-    const stitchAllBtn = page.locator('[data-testid="btn-stitch-all-verses"]');
-    if ((await stitchAllBtn.count()) > 0 && (await stitchAllBtn.isVisible())) {
-      await stitchAllBtn.click();
-    }
     await page.locator('[data-testid="btn-enter-study"]').click();
 
     const studyPage = page.locator('[data-testid="first-letter-study-page"]');
     await studyPage.waitFor({ state: 'visible', timeout: 10000 });
+    const studyScopeFullBtn = page.locator('[data-testid="btn-study-scope-full"]');
+    if ((await studyScopeFullBtn.count()) > 0 && (await studyScopeFullBtn.isVisible())) {
+      await studyScopeFullBtn.click();
+    }
     const studyPanel = page.locator('[data-testid="first-letter-study-panel"]');
     await studyPanel.waitFor({ state: 'visible', timeout: 10000 });
     await page.locator('[data-testid="btn-reveal-1w"]').waitFor({ state: 'visible', timeout: 10000 });
@@ -749,6 +747,16 @@ async function runScreenshotSuite(): Promise<void> {
     // 7b. 07b-memory-repair-card-front.png (Long Passage Memory Repair Flow)
     // =========================================================================
     console.log('Step 7b: Tapping Verse on Card Back -> Highlighting Repair Range & Practicing Repair Card...');
+    const moreScopeOptionsBtn = page.locator('[data-testid="btn-toggle-more-scope-options"]');
+    if ((await moreScopeOptionsBtn.count()) > 0 && (await moreScopeOptionsBtn.isVisible())) {
+      await moreScopeOptionsBtn.click();
+      await page.waitForTimeout(100);
+    }
+    const toggleRemBtn = page.locator('[data-testid="btn-toggle-remaining-verses"]');
+    if ((await toggleRemBtn.count()) > 0 && (await toggleRemBtn.isVisible())) {
+      await toggleRemBtn.click();
+      await page.waitForTimeout(100);
+    }
     const repairButtons = page.locator('[data-testid^="btn-spawn-repair-"]');
     const repairBtnCount = await repairButtons.count();
     assertCondition(
@@ -873,18 +881,31 @@ async function runScreenshotSuite(): Promise<void> {
     await mobilePage.locator('[data-testid="btn-save-passage"]').click();
     await mobilePage.locator('[data-testid="queue-page-section"]').waitFor({ state: 'visible', timeout: 10000 });
 
-    // Open Romans 8:35-39 from NEW tab, flip to back, click #btn-move-to-review, and expand to 2 verses (v. 35–36)
+    // Open Romans 8:35-39 from NEW tab, flip to back, click #btn-move-to-review, and expand to 2 verses (v. 35–36) via [data-testid="btn-inline-add-verse"]
     await mobilePage.locator('.rm-row', { hasText: 'Romans 8:35-39' }).first().click();
     await mobilePage.locator('[data-testid="card-front-view"]').waitFor({ state: 'visible', timeout: 10000 });
     await mobilePage.locator('[data-testid="btn-flip-card"]').click();
     await mobilePage.locator('#btn-move-to-review').waitFor({ state: 'visible', timeout: 10000 });
     await mobilePage.locator('#btn-move-to-review').click();
     await mobilePage.waitForTimeout(150);
-    // Flip back to front and expand +1v so it is at 2/5 verses (v. 35–36) in DUE
-    await mobilePage.locator('[data-testid="btn-flip-to-front"]').click();
-    await mobilePage.locator('[data-testid="btn-stitch-next-verse"]').click();
+    // Click [data-testid="btn-inline-add-verse"] on the Back to stitch v. 36 (+1v -> 2/5 verses) and verify .compact-stitch-strip appears
+    await mobilePage.locator('[data-testid="btn-inline-add-verse"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="btn-inline-add-verse"]').click();
+    await mobilePage.locator('[data-testid="verse-stitching-bar"]').waitFor({ state: 'visible', timeout: 10000 });
     await mobilePage.locator('[data-testid="btn-mode-stitch-block"]').click();
     await mobilePage.locator('[data-testid="btn-back-to-deck"]').click();
+
+    // Verify Consolidated ☰ Side Drawer on mobile (📂 Memory File, 🔔 Daily Reminder -> modal, Aa Text Size)
+    await mobilePage.locator('[data-testid="btn-open-drawer"]').click();
+    await mobilePage.locator('[data-testid="nav-drawer"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="drawer-open-proto-sync"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="drawer-open-reminder-modal"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="slider-text-size"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="drawer-open-reminder-modal"]').click();
+    await mobilePage.locator('[data-testid="daily-reminder-modal"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="toggle-daily-reminder"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('.reminder-modal-close').click();
+    await mobilePage.locator('[data-testid="daily-reminder-modal"]').waitFor({ state: 'hidden', timeout: 10000 });
 
     // 9a. mobile-01-home.png: Home screen on DUE tab showing pinned NEW | DUE | KNOWN | 📖 OUTLINE bar,
     // custom label ("More Than Conquerors"), overall due time prediction, and left-square checkboxes (.rm-left-square)
@@ -912,6 +933,7 @@ async function runScreenshotSuite(): Promise<void> {
         'Pinned 4-tab bar (NEW | DUE | KNOWN | OUTLINE) is visible at top',
         '[data-testid="due-overall-time"] overall due time prediction bar is visible',
         'Custom label "More Than Conquerors", actual verse range tags (v. 35–36, v. 6), and .rm-left-square multi-select squares are visible',
+        'Consolidated ☰ side drawer exposes 📂 Memory File, mobile-only 🔔 Daily Reminder ([data-testid="daily-reminder-modal"]), and Aa Text Size',
       ],
     });
 
@@ -919,24 +941,23 @@ async function runScreenshotSuite(): Promise<void> {
     const romansDueRow = mobilePage.locator('.rm-row', { hasText: 'Romans 8:35-39' }).first();
     await romansDueRow.click();
     await mobilePage.locator('[data-testid="card-front-view"]').waitFor({ state: 'visible', timeout: 10000 });
-    await mobilePage.locator('[data-testid="btn-mode-stitch-block"]').click();
     await mobilePage.waitForTimeout(150);
 
-    // 9b. mobile-03-flashcard-front.png: Flashcard Front showing reference, custom label, scoped recitation time estimate,
-    // -1v/+1v buttons, and 🏷️ Chunk (#btn-carve-chunk)
+    // 9b. mobile-03-flashcard-front.png: Clean default Flashcard Front (without stitch strip until +1v is tapped)
+    // showing reference, custom label, scoped recitation time estimate, and topbar scope pill (v. 35–36 of 5v ▾)
     await mobilePage.locator('[data-testid="card-recitation-time"]').waitFor({ state: 'visible', timeout: 10000 });
-    await mobilePage.locator('#btn-carve-chunk').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="btn-scope-sheet-toggle"]').waitFor({ state: 'visible', timeout: 10000 });
 
     await captureStepScreenshot(mobilePage, 'mobile-03-flashcard-front.png', stepResults, {
       step: '9b',
-      name: 'Mobile Phone (412x915): Full-Screen Flashcard Front with Custom Label, Scoped Recitation Time, -1v/+1v, and Save as Chunk (#btn-carve-chunk)',
+      name: 'Mobile Phone (412x915): Clean Default Full-Screen Flashcard Front with Custom Label, Scoped Recitation Time & Topbar Scope Pill',
       assertions: [
-        'Flashcard Front shows Romans 8:35-39 (More Than Conquerors) and scoped recitation time',
-        '-1v / +1v buttons and #btn-carve-chunk are visible in the single-row stitch strip with zero horizontal clipping',
+        'Flashcard Front shows Romans 8:35-39 (More Than Conquerors) and scoped recitation time (⏱ ~25s (v. 35–36))',
+        '.compact-stitch-strip is hidden by default during normal review so the card front is 100% distraction-free',
       ],
     });
 
-    // 9c. mobile-02-study-first-letter.png: First-Letter Study screen
+    // 9c. mobile-02-study-first-letter.png: First-Letter Study screen (synchronized to v. 35–36 stitched scope)
     await mobilePage.locator('[data-testid="btn-enter-study"]').click();
     await mobilePage.locator('[data-testid="first-letter-study-page"]').waitFor({ state: 'visible', timeout: 10000 });
     await mobilePage.locator('[data-testid="btn-reveal-1w"]').click();
@@ -956,90 +977,135 @@ async function runScreenshotSuite(): Promise<void> {
     // Return to Flashcard Front and flip to Back for mobile-04-verse-review-back.png
     await mobilePage.locator('[data-testid="btn-back-to-card"]').click();
     await mobilePage.locator('[data-testid="card-front-view"]').waitFor({ state: 'visible', timeout: 10000 });
-    await mobilePage.locator('[data-testid="btn-mode-stitch-block"]').click();
     await mobilePage.locator('[data-testid="btn-flip-card"]').click();
     await mobilePage.locator('[data-testid="card-back-view"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="back-thumb-nav-bar"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="btn-back-study-mode"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="btn-flip-back-to-front"]').waitFor({ state: 'visible', timeout: 10000 });
     await mobilePage.locator('[data-testid="anki-grading-bar"]').waitFor({ state: 'visible', timeout: 10000 });
     await mobilePage.waitForTimeout(150);
 
-    // 9d. mobile-04-verse-review-back.png: Flashcard Back showing all memorized verses (simple review without single-verse highlight box) and the 4-button Anki grading bar
+    // 9d. mobile-04-verse-review-back.png: Flashcard Back showing ONLY the memorized verses (35–36) by default
+    // and [data-testid="back-inline-scope-boundary"] with ONLY "🪡 Stitch Next Verse (v. 37)" and "▸ More options" visible by default
     const singleVerseHighlightCount = await mobilePage.locator('.verse-line.target-verse-emphasis').count();
     assertCondition(
       singleVerseHighlightCount === 0,
       'Expected simple review on Back without single-verse highlight box when in Stitch Block / Full-Passage review'
     );
+    const defaultVisibleBackVerses = await mobilePage.locator('[data-testid^="back-verse-"]').count();
+    assertCondition(
+      defaultVisibleBackVerses === 2,
+      `Expected only the 2 memorized verses (35–36) to be visible on Back by default, found ${defaultVisibleBackVerses}`
+    );
+    await mobilePage.locator('[data-testid="back-inline-scope-boundary"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="btn-inline-add-verse"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="btn-toggle-more-scope-options"]').waitFor({ state: 'visible', timeout: 10000 });
+    assertCondition(
+      (await mobilePage.locator('[data-testid="inline-boundary-more-drawer"]').count()) === 0,
+      'Expected [data-testid="inline-boundary-more-drawer"] to be collapsed by default on <10v scope'
+    );
 
     await captureStepScreenshot(mobilePage, 'mobile-04-verse-review-back.png', stepResults, {
       step: '9d',
-      name: 'Mobile Phone (412x915): Flashcard Back / Full-Width Verse Review with 4-Button Anki Grading Bar',
+      name: 'Mobile Phone (412x915): Flashcard Back / Memorized Verses Only with Clean Inline Scope Boundary (🪡 Stitch Next Verse + ▸ More options), Symmetric Thumb Bar & 4-Button Anki Bar',
       assertions: [
-        '412x915 Android phone viewport renders full-width scripture text without single-verse highlight box clutter',
+        '412x915 Android phone viewport renders only the memorized verses (35–36) by default',
+        '[data-testid="back-inline-scope-boundary"] shows ONLY "🪡 Stitch Next Verse (v. 37)" and "▸ More options" ([data-testid="btn-toggle-more-scope-options"]) by default',
+        'Symmetric thumb-zone bar ([data-testid="back-thumb-nav-bar"]) exposes 🎓 Study ([data-testid="btn-back-study-mode"]) and ◫ Flip to Front ([data-testid="btn-flip-back-to-front"])',
         'AnkiDroid-style 4-button grading bar (AGAIN / HARD / GOOD / EASY) spans the bottom edge cleanly',
       ],
     });
 
-    // 9e. mobile-05-verse-repair-highlight.png: Multi-Verse Range Repair (3+ verses selected on the back of the card)
-    // Expand to All (5v) so all 5 verses (35..39) are visible on the Back, then tap verse 35 (idx 0) and verse 37 (idx 2)
-    await mobilePage.locator('[data-testid="btn-stitch-all-verses"]').click();
-    await mobilePage.waitForTimeout(100);
+    // 9e. mobile-05-verse-repair-highlight.png: Multi-Verse Range Mend (3+ verses selected on the back of the card)
+    // Click [data-testid="btn-toggle-more-scope-options"] ("▸ More options") and then [data-testid="btn-toggle-remaining-verses"] ("▸ Peek remaining 3 verses") so verses 35..39 are visible, then tap verse 35 (idx 0) and verse 37 (idx 2)
+    await mobilePage.locator('[data-testid="btn-toggle-more-scope-options"]').click();
+    await mobilePage.locator('[data-testid="inline-boundary-more-drawer"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="btn-toggle-remaining-verses"]').click();
+    await mobilePage.waitForTimeout(150);
     await mobilePage.locator('[data-testid^="back-verse-"]').nth(0).click();
-    await mobilePage.locator('[data-testid^="back-verse-"]').nth(2).click();
     await mobilePage.locator('[data-testid="repair-action-sheet"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.waitForTimeout(150);
+    await mobilePage.locator('[data-testid^="back-verse-"]').nth(2).click();
+    await mobilePage.waitForTimeout(150);
     const draftSelectedCount = await mobilePage.locator('.verse-line.repair-draft-selected').count();
     assertCondition(
       draftSelectedCount === 3,
-      `Expected 3 verses highlighted for multi-verse range repair, found ${draftSelectedCount}`
+      `Expected 3 verses highlighted for multi-verse range mend, found ${draftSelectedCount}`
+    );
+    const repairSheetText = await mobilePage.locator('[data-testid="repair-action-sheet"]').innerText();
+    assertCondition(
+      repairSheetText.includes('Mend v. 35–37'),
+      `Expected [data-testid="repair-action-sheet"] to show "🩹 Mend v. 35–37", got "${repairSheetText}"`
     );
 
     await captureStepScreenshot(mobilePage, 'mobile-05-verse-repair-highlight.png', stepResults, {
       step: '9e',
-      name: 'Mobile Phone (412x915): Multi-Verse Range Repair (3 Verses Highlighted) with Repair Action Bar',
+      name: 'Mobile Phone (412x915): Multi-Verse Range Mend (3 Verses Highlighted) with 🩹 Mend Action Bar',
       assertions: [
+        'Expanding "▸ More options" ([data-testid="btn-toggle-more-scope-options"]) and "▸ Peek remaining 3 verses" ([data-testid="btn-toggle-remaining-verses"]) reveals verses 35–39',
         'Selecting start verse (35) and end verse (37) highlights all 3 verses (v. 35–37) in warm amber',
-        '[data-testid="repair-action-sheet"] displays 🔧 Repair v. 35–37 with Queue & Resume and Forgot Rest buttons above the 4-button Anki bar without duplicate queued strip',
+        '[data-testid="repair-action-sheet"] displays 🩹 Mend v. 35–37 with Mend & Resume (v. 38) ↩ and Forgot Rest buttons above the 4-button Anki bar',
       ],
     });
 
-    // Cancel the draft repair selection and set stitched prefix back to 2 verses (v. 35–36) in stitch-block mode on the Back
+    // Cancel the draft repair selection and hide the remaining 3 unmemorized verses again for mobile-06-incremental-chunk.png
     await mobilePage.locator('.repair-cancel-link').click();
-    await mobilePage.locator('[data-testid="btn-stitch-prev-verse"]').click();
-    await mobilePage.locator('[data-testid="btn-stitch-prev-verse"]').click();
-    await mobilePage.locator('[data-testid="btn-stitch-prev-verse"]').click();
-    await mobilePage.locator('[data-testid="btn-mode-stitch-block"]').click();
+    await mobilePage.locator('[data-testid="btn-toggle-remaining-verses"]').click();
     await mobilePage.waitForTimeout(100);
 
-    // 9f. mobile-06-incremental-chunk.png: Cleaned-up Flashcard Back with [data-testid="back-inline-scope-boundary"]
-    // and [data-testid="incremental-chunk-sheet"] open showing #input-carve-chunk-label ("Suffering & Victory") and #btn-confirm-carve-chunk
+    // 9f. mobile-06-incremental-chunk.png: Centered Tap-to-Split Modal ([data-testid="incremental-chunk-sheet"]) with interactive boundary lines,
+    // Undo button ([data-testid="btn-undo-split-boundary"]), zero naming friction, and single full-width #btn-confirm-carve-chunk ("✂️ Split into 2 Passages")
     const backInlineBoundary = mobilePage.locator('[data-testid="back-inline-scope-boundary"]');
     await backInlineBoundary.waitFor({ state: 'visible', timeout: 10000 });
-    await mobilePage.locator('[data-testid="btn-inline-carve-chunk"], #btn-carve-chunk').first().click();
+    await mobilePage.locator('[data-testid="btn-inline-carve-chunk"]').click();
     const chunkSheet = mobilePage.locator('[data-testid="incremental-chunk-sheet"]');
     await chunkSheet.waitFor({ state: 'visible', timeout: 10000 });
-    const chunkLabelInput = mobilePage.locator('#input-carve-chunk-label');
-    await chunkLabelInput.waitFor({ state: 'visible', timeout: 10000 });
-    await chunkLabelInput.fill('Suffering & Victory');
-    await mobilePage.locator('#btn-confirm-carve-chunk').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="tap-to-split-verse-list"]').waitFor({ state: 'visible', timeout: 10000 });
+    const splitBoundary1 = mobilePage.locator('[data-testid="btn-split-boundary-1"]');
+    await splitBoundary1.waitFor({ state: 'visible', timeout: 10000 });
+    const splitBoundary1Text = await splitBoundary1.innerText();
+    assertCondition(
+      splitBoundary1Text.includes('SPLIT HERE (after v. 36)'),
+      `Expected [data-testid="btn-split-boundary-1"] to show "SPLIT HERE (after v. 36)", got "${splitBoundary1Text}"`
+    );
+    await mobilePage.locator('[data-testid="btn-undo-split-boundary"]').waitFor({ state: 'visible', timeout: 10000 });
+
+    // Ensure hidden #input-carve-chunk-label is empty so split passages default to opening words on Outline
+    await mobilePage.locator('#input-carve-chunk-label').evaluate((el: HTMLInputElement) => {
+      el.value = '';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const confirmSplitBtn = mobilePage.locator('#btn-confirm-carve-chunk');
+    await confirmSplitBtn.waitFor({ state: 'visible', timeout: 10000 });
+    const confirmSplitText = await confirmSplitBtn.innerText();
+    assertCondition(
+      confirmSplitText.includes('Split into 2 Passages'),
+      `Expected #btn-confirm-carve-chunk to show "✂️ Split into 2 Passages", got "${confirmSplitText}"`
+    );
     await mobilePage.waitForTimeout(150);
 
     await captureStepScreenshot(mobilePage, 'mobile-06-incremental-chunk.png', stepResults, {
       step: '9f',
-      name: 'Mobile Phone (412x915): Cleaned-Up Flashcard Back with Inline Scope Boundary & Incremental Chunking Sheet Open',
+      name: 'Mobile Phone (412x915): Centered Interactive Tap-to-Split Passage Modal with Split Boundary Dividers, Undo Button & Single Split CTA',
       assertions: [
-        'Flashcard Back displays [data-testid="back-inline-scope-boundary"] after active scope (v. 35–36)',
-        '[data-testid="incremental-chunk-sheet"] is open with #input-carve-chunk-label filled with "Suffering & Victory" and #btn-confirm-carve-chunk visible',
+        '[data-testid="incremental-chunk-sheet"] displays centered Tap-to-Split modal with interactive verse lines ([data-testid="tap-to-split-verse-list"])',
+        '[data-testid="btn-split-boundary-1"] ("✂️ ═══ SPLIT HERE (after v. 36) · Tap to remove ═══") and [data-testid="btn-undo-split-boundary"] ("↩ Undo") are visible',
+        'No custom label prompt is required and single full-width #btn-confirm-carve-chunk shows "✂️ Split into 2 Passages"',
       ],
     });
 
-    // Click #btn-confirm-carve-chunk so Romans 8:35-36 ("Suffering & Victory") is carved off and Romans 8:37-39 ("More Than Conquerors") continues!
+    // Click #btn-confirm-carve-chunk so Romans 8:35-36 is split off and Romans 8:37-39 continues!
     await mobilePage.locator('#btn-confirm-carve-chunk').click();
     await mobilePage.waitForTimeout(200);
     const remainingRefText = await mobilePage.locator('[data-testid="card-reference"]').innerText();
     assertCondition(
-      remainingRefText.includes('Romans 8:37-39') && remainingRefText.includes('More Than Conquerors'),
-      `Expected remaining passage after carving chunk to be "Romans 8:37-39 (More Than Conquerors)", got "${remainingRefText}"`
+      remainingRefText.includes('Romans 8:37-39'),
+      `Expected remaining passage after splitting passage to include "Romans 8:37-39", got "${remainingRefText}"`
     );
 
-    // 9g. mobile-07-chunks-outline.png: Return to Deck Dashboard, click OUTLINE tab, and expand inline verse preview on 8:35–36 ("Suffering & Victory")
+    // 9g. mobile-07-chunks-outline.png: Return to Deck Dashboard, click OUTLINE tab, verify hierarchical multi-select, contiguous-only "🪡 Sew",
+    // "passages" vocabulary, first-words default on unlabeled passages ("The LORD is my shepherd…", "Who shall separate us…", "No, in all these things…"), and expand inline verse preview on 8:35–36
     await mobilePage.locator('[data-testid="btn-back-to-deck"]').click();
     const outlineTabBtn = mobilePage.locator('[data-testid="tab-filter-outline"], [data-testid="tab-outline"]').first();
     await outlineTabBtn.waitFor({ state: 'visible', timeout: 10000 });
@@ -1048,14 +1114,49 @@ async function runScreenshotSuite(): Promise<void> {
     const outlineSection = mobilePage.locator('[data-testid="outline-page-section"]');
     await outlineSection.waitFor({ state: 'visible', timeout: 10000 });
     await mobilePage.locator('[data-testid="btn-outline-collapse-all"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="outline-group-select-0"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="outline-group-select-2"]').waitFor({ state: 'visible', timeout: 10000 });
+
+    // Verify group 2 (Romans 8 with 8:1-4, 8:35-36, 8:37-39) has group-level "🪡 Sew" disabled due to the gap v. 5–34,
+    // while selecting the two contiguous passages (8:35-36 and 8:37-39) shows partial group selection (aria-checked="mixed") and enables batch Sew!
+    const group2SewBtn = mobilePage.locator('[data-testid="btn-outline-combine-2"]');
+    const group2CombineDisabled = await group2SewBtn.isDisabled();
+    assertCondition(
+      group2CombineDisabled === true,
+      'Expected group-level 🪡 Sew on Romans 8 (with gap v. 5–34) to be disabled'
+    );
+    const group2SewText = await group2SewBtn.innerText();
+    assertCondition(
+      group2SewText.includes('Sew'),
+      `Expected [data-testid="btn-outline-combine-2"] to show "🪡 Sew", got "${group2SewText}"`
+    );
+    await mobilePage.locator('[data-testid="outline-chunk-range-2-1"]').click();
+    await mobilePage.locator('[data-testid="outline-chunk-range-2-2"]').click();
+    const group2CheckedAttr = await mobilePage.locator('[data-testid="outline-group-select-2"]').getAttribute('aria-checked');
+    assertCondition(
+      group2CheckedAttr === 'mixed',
+      `Expected [data-testid="outline-group-select-2"] to have aria-checked="mixed" when 2 of 3 passages are selected, got "${group2CheckedAttr}"`
+    );
+    await mobilePage.locator('[data-testid="btn-clear-selection"]').click();
+
     await mobilePage.locator('[data-testid="btn-outline-peek-verses-2-1"]').click();
     await mobilePage.locator('[data-testid="outline-chunk-verses-2-1"]').waitFor({ state: 'visible', timeout: 10000 });
     await mobilePage.waitForTimeout(200);
 
     const outlineText = await outlineSection.innerText();
     assertCondition(
-      outlineText.includes('Suffering & Victory') && outlineText.includes('More Than Conquerors'),
-      `Expected Outline tab to display both carved contiguous chunks ("Suffering & Victory" and "More Than Conquerors"), got: ${outlineText}`
+      outlineText.includes('passages') && !outlineText.toLowerCase().includes('chunks'),
+      `Expected Outline tab header text to use "passages" vocabulary instead of "chunks", got: ${outlineText}`
+    );
+    assertCondition(
+      outlineText.toLowerCase().includes('the lord is my shepherd'),
+      `Expected unlabeled passage (Psalm 23:1–3) on Outline tab to display opening words ("The LORD is my shepherd…"), got: ${outlineText}`
+    );
+    assertCondition(
+      outlineText.includes('No Condemnation') &&
+        outlineText.includes('Who shall separate us') &&
+        outlineText.includes('No, in all these things'),
+      `Expected Outline tab to display "No Condemnation" on 8:1–4 and opening words on split passages ("Who shall separate us…" and "No, in all these things…"), got: ${outlineText}`
     );
     assertCondition(
       outlineText.includes('Gap: v. 5–34 not in deck') && outlineText.includes('Auto-Seam (v. 36 → v. 37)'),
@@ -1063,17 +1164,17 @@ async function runScreenshotSuite(): Promise<void> {
     );
     assertCondition(
       outlineText.includes('[35] Who shall separate us'),
-      `Expected expanded inline verse preview under "Suffering & Victory" to show "[35] Who shall separate us", got: ${outlineText}`
+      `Expected expanded inline verse preview under 8:35–36 to show "[35] Who shall separate us", got: ${outlineText}`
     );
 
     await captureStepScreenshot(mobilePage, 'mobile-07-chunks-outline.png', stepResults, {
       step: '9g',
-      name: 'Mobile Phone (412x915): Chunks Outline View (📖 OUTLINE Tab with Gap & Auto-Seam Connectors, Full Labels & Expanded Inline Verse Preview)',
+      name: 'Mobile Phone (412x915): Passages Outline View (📖 OUTLINE Tab with First-Words Default, Group Multi-Select, Gap & Auto-Seam Connectors, Contiguous 🪡 Sew & Inline Verse Preview)',
       assertions: [
-        'Single-line group headers with ▾ expand/collapse chevron and Collapse All button',
-        'Full-width, non-truncated section labels (The Word Made Flesh, No Condemnation, Suffering & Victory, More Than Conquerors)',
-        'Honest ⋮ Gap: v. 5–34 not in deck and 🪡 Auto-Seam (v. 36 → v. 37) connectors',
-        'Expanded inline verse preview ([35] Who shall separate us...) under 8:35–36 Suffering & Victory',
+        'Single-line group headers ("Romans 8 · 3 passages") with top-level checkbox ([data-testid="outline-group-select-0"]), ▾ expand/collapse chevron, and Collapse All button',
+        'Unlabeled passages (Psalm 23:1–3, Romans 8:35–36, Romans 8:37–39) display their opening words while labeled passages display their titles',
+        'Honest ⋮ Gap: v. 5–34 not in deck and 🪡 Auto-Seam (v. 36 → v. 37) connectors with contiguous-only 🪡 Sew validation',
+        'Expanded inline verse preview ([35] Who shall separate us...) under 8:35–36',
       ],
     });
 

@@ -142,33 +142,30 @@
         <nav class="drawer-menu">
           <button
             type="button"
+            id="drawer-btn-proto-sync"
             class="drawer-item"
-            (click)="onDrawerOpenFile()"
-            data-testid="drawer-btn-open-file"
+            (click)="openProtoModalFromDrawer()"
+            data-testid="drawer-open-proto-sync"
           >
             <span class="drawer-icon" aria-hidden="true">📂</span>
-            <span class="drawer-label">Open .selahmemory File</span>
+            <span class="drawer-label">Memory File</span>
           </button>
 
-          <button
-            type="button"
-            class="drawer-item"
-            (click)="onDrawerCreateFile()"
-            data-testid="drawer-btn-create-file"
-          >
-            <span class="drawer-icon" aria-hidden="true">✨</span>
-            <span class="drawer-label">New .selahmemory File</span>
-          </button>
-
-          <button
-            type="button"
-            class="drawer-item"
-            (click)="openSyncModal()"
-            data-testid="drawer-btn-file-settings"
-          >
-            <span class="drawer-icon" aria-hidden="true">☁</span>
-            <span class="drawer-label">Memory File Settings</span>
-          </button>
+          @if (isMobileView()) {
+            <button
+              type="button"
+              id="drawer-btn-daily-reminder"
+              class="drawer-item mobile-only-drawer-item"
+              (click)="openReminderModalFromDrawer()"
+              data-testid="drawer-open-reminder-modal"
+            >
+              <span class="drawer-icon" aria-hidden="true">🔔</span>
+              <span class="drawer-label">Daily Reminder</span>
+              <span class="drawer-count">
+                {{ reminderSettings().enabled ? formatReminderTimeDisplay(reminderSettings().time) : 'Off' }}
+              </span>
+            </button>
+          }
 
           <div class="drawer-divider"></div>
 
@@ -223,6 +220,7 @@
       <app-first-letter-study-page
         [item]="currentStudyItem()"
         [stitchedVerseCount]="currentStitchedVerseCount()"
+        [initialStudyScope]="currentStudyScope()"
         (backToCard)="returnFromStudyPageToCard()"
         (backToDeck)="returnToDashboard()"
       />
@@ -234,6 +232,7 @@
           [queueTotal]="studyQueueIds().length"
           [stitchedVerseCount]="currentStitchedVerseCount()"
           (stitchedVerseCountChange)="onStitchedVerseCountChange($event)"
+          (studyScopeChange)="currentStudyScope.set($event)"
           (rated)="onCardRated($event)"
           (skipCard)="onSkipCard()"
           (editPassage)="openEditPassageModal()"
@@ -266,5 +265,88 @@
 
   @if (showProtoSyncModal()) {
     <app-proto-sync-modal (closed)="showProtoSyncModal.set(false)" />
+  }
+
+  @if (showReminderModal()) {
+    <div
+      class="modal-backdrop"
+      data-testid="daily-reminder-backdrop"
+      (click)="closeReminderModal()"
+    >
+      <section
+        class="reminder-modal"
+        data-testid="daily-reminder-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reminder-modal-title"
+        (click)="$event.stopPropagation()"
+      >
+        <header class="reminder-modal-header">
+          <h2 id="reminder-modal-title" class="reminder-modal-title">🔔 Daily Reminder</h2>
+          <button
+            type="button"
+            class="reminder-modal-close"
+            (click)="closeReminderModal()"
+            aria-label="Close Daily Reminder modal"
+          >
+            ✕
+          </button>
+        </header>
+
+        <div class="reminder-modal-body">
+          <div class="reminder-row">
+            <span class="reminder-row-label">Enable daily reminder</span>
+            <button
+              type="button"
+              id="toggle-daily-reminder"
+              class="reminder-switch"
+              [class.active]="reminderSettings().enabled"
+              data-testid="toggle-daily-reminder"
+              role="switch"
+              [attr.aria-checked]="reminderSettings().enabled"
+              (click)="toggleDailyReminder()"
+            >
+              <span class="reminder-switch-thumb"></span>
+            </button>
+          </div>
+
+          <div class="reminder-row" [class.disabled]="!reminderSettings().enabled">
+            <label for="input-reminder-time" class="reminder-row-label">Reminder time</label>
+            <input
+              type="time"
+              id="input-reminder-time"
+              class="reminder-time-input"
+              data-testid="input-reminder-time"
+              [value]="reminderSettings().time"
+              [disabled]="!reminderSettings().enabled"
+              (change)="onReminderTimeChange($event)"
+            />
+          </div>
+
+          <label class="reminder-checkbox-row" [class.disabled]="!reminderSettings().enabled">
+            <input
+              type="checkbox"
+              id="checkbox-reminder-only-due"
+              data-testid="checkbox-reminder-only-due"
+              [checked]="reminderSettings().onlyWhenDue"
+              [disabled]="!reminderSettings().enabled"
+              (change)="onReminderOnlyWhenDueChange($event)"
+            />
+            <span>Only remind me when passages are due</span>
+          </label>
+        </div>
+
+        <footer class="reminder-modal-footer">
+          <button
+            type="button"
+            class="btn-reminder-done"
+            data-testid="btn-close-reminder-modal"
+            (click)="closeReminderModal()"
+          >
+            Done
+          </button>
+        </footer>
+      </section>
+    </div>
   }
 </div>

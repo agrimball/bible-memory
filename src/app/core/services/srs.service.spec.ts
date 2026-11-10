@@ -215,7 +215,151 @@ function runSrsServiceTests(): void {
   assertEqual(appended?.passage.verses.length, 7, 'appendVersesToPassage has 7 total verses');
   assertEqual(appended?.card.learningStep, 4, 'appendVersesToPassage preserves existing learningStep (4)');
 
-  console.log('✓ srs.service.spec.ts: All SM-2 scheduling, interval, deck management, incremental chunking, and contiguous stitched/seam card assertions passed.');
+  // 10. Strict Contiguous-Only Combining & Canonical 1,189-Chapter Verse-Count Verification
+  const { getChapterVerseCount, isEndOfChapter, checkPassagesContiguity } = require('../proto/bible_memory.pb') as typeof import('../proto/bible_memory.pb');
+  assertEqual(getChapterVerseCount('Genesis', 1), 31, 'Genesis 1 has 31 verses');
+  assertEqual(getChapterVerseCount('Psalm', 119), 176, 'Psalm 119 has 176 verses');
+  assertEqual(getChapterVerseCount('Psalms', 23), 6, 'Psalms 23 alias has 6 verses');
+  assertEqual(getChapterVerseCount('Romans', 7), 25, 'Romans 7 has 25 verses');
+  assertEqual(getChapterVerseCount('Romans', 8), 39, 'Romans 8 has 39 verses');
+  assertEqual(getChapterVerseCount('Revelation', 22), 21, 'Revelation 22 has 21 verses');
+  assertEqual(isEndOfChapter('Romans', 7, 24), false, 'Romans 7:24 is not end of chapter');
+  assertEqual(isEndOfChapter('Romans', 7, 25), true, 'Romans 7:25 is end of chapter');
+
+  storage.clearAllData();
+
+  // Case A: Non-contiguous same-chapter chunks (Romans 8:1-4 + Romans 8:35-36) -> rejected
+  const rom8a = storage.addPassage('Romans 8:1-4', [
+    { chapterNumber: 8, verseNumber: 1, text: 'There is therefore now no condemnation...' },
+    { chapterNumber: 8, verseNumber: 2, text: 'For the law of the Spirit...' },
+    { chapterNumber: 8, verseNumber: 3, text: 'For God has done...' },
+    { chapterNumber: 8, verseNumber: 4, text: 'in order that the righteous requirement...' },
+  ]);
+  const rom8b = storage.addPassage('Romans 8:35-36', [
+    { chapterNumber: 8, verseNumber: 35, text: 'Who shall separate us from the love of Christ?' },
+    { chapterNumber: 8, verseNumber: 36, text: 'As it is written, For your sake we are being killed...' },
+  ]);
+  assertEqual(
+    storage.canCombinePassages([rom8a.passage.id, rom8b.passage.id]).canCombine,
+    false,
+    'canCombinePassages rejects non-contiguous same-chapter chunks (Romans 8:1-4 + Romans 8:35-36)'
+  );
+  assertEqual(
+    storage.combinePassages([rom8a.passage.id, rom8b.passage.id]),
+    undefined,
+    'combinePassages returns undefined for non-contiguous same-chapter chunks'
+  );
+
+  // Case B: Chunks from different books (John 1:1-5 + Romans 8:1-4) -> rejected
+  const john1 = storage.addPassage('John 1:1-5', [
+    { chapterNumber: 1, verseNumber: 1, text: 'In the beginning was the Word...' },
+    { chapterNumber: 1, verseNumber: 2, text: 'He was in the beginning with God.' },
+    { chapterNumber: 1, verseNumber: 3, text: 'All things were made through him...' },
+    { chapterNumber: 1, verseNumber: 4, text: 'In him was life...' },
+    { chapterNumber: 1, verseNumber: 5, text: 'The light shines in the darkness...' },
+  ]);
+  assertEqual(
+    storage.canCombinePassages([john1.passage.id, rom8a.passage.id]).canCombine,
+    false,
+    'canCombinePassages rejects passages from different books'
+  );
+  assertEqual(
+    storage.combinePassages([john1.passage.id, rom8a.passage.id]),
+    undefined,
+    'combinePassages returns undefined for passages from different books'
+  );
+
+  // Case C: Cross-chapter where first passage does NOT end the chapter (Romans 7:1-10 + Romans 8:1-4, Romans 7 has 25v) -> rejected
+  const rom7Partial = storage.addPassage('Romans 7:1-10', [
+    { chapterNumber: 7, verseNumber: 1, text: 'Or do you not know, brothers...' },
+    { chapterNumber: 7, verseNumber: 10, text: 'The very commandment that promised life proved to be death to me.' },
+  ]);
+  const crossChapInvalid = checkPassagesContiguity([rom7Partial.passage, rom8a.passage]);
+  assertEqual(crossChapInvalid.contiguous, false, 'Romans 7:1-10 + Romans 8:1-4 is not contiguous');
+  assertTrue(
+    Boolean(crossChapInvalid.reason?.includes('ends at verse 25')),
+    'Reason explains Romans 7 ends at verse 25'
+  );
+  assertEqual(
+    storage.combinePassages([rom7Partial.passage.id, rom8a.passage.id]),
+    undefined,
+    'combinePassages rejects incomplete chapter boundary (Romans 7:1-10 + Romans 8:1-4)'
+  );
+
+  // Case D: Cross-chapter where first passage DOES end the chapter (Romans 7:24-25 + Romans 8:1-4) -> succeeds!
+  const rom7End = storage.addPassage('Romans 7:24-25', [
+    { chapterNumber: 7, verseNumber: 24, text: 'Wretched man that I am! Who will deliver me from this body of death?' },
+    { chapterNumber: 7, verseNumber: 25, text: 'Thanks be to God through Jesus Christ our Lord!' },
+  ]);
+  assertEqual(
+    storage.canCombinePassages([rom7End.passage.id, rom8a.passage.id]).canCombine,
+    true,
+    'canCombinePassages accepts Romans 7:24-25 + Romans 8:1-4 across chapter boundary'
+  );
+  const combinedCrossChap = storage.combinePassages(
+    [rom7End.passage.id, rom8a.passage.id],
+    'Delivered into No Condemnation'
+  );
+  assertTrue(Boolean(combinedCrossChap), 'combinePassages succeeds for Romans 7:24-25 + Romans 8:1-4');
+  assertEqual(
+    combinedCrossChap?.passage.reference,
+    'Romans 7:24-8:4',
+    'Cross-chapter combined reference is Romans 7:24-8:4'
+  );
+  assertEqual(
+    combinedCrossChap?.passage.verses.length,
+    6,
+    'Cross-chapter combined passage has 6 verses'
+  );
+
+  // 11. Test multi-boundary splitPassageAtBoundaries, undoLastSplit, and (Patch) reference formatting
+  storage.clearAllData();
+  const rom83539 = storage.addPassage(
+    'Romans 8:35-39',
+    [
+      { chapterNumber: 8, verseNumber: 35, text: 'Who shall separate us from the love of Christ?' },
+      { chapterNumber: 8, verseNumber: 36, text: 'As it is written, For your sake we are being killed all the day long;' },
+      { chapterNumber: 8, verseNumber: 37, text: 'No, in all these things we are more than conquerors through him who loved us.' },
+      { chapterNumber: 8, verseNumber: 38, text: 'For I am sure that neither death nor life, nor angels nor rulers,' },
+      { chapterNumber: 8, verseNumber: 39, text: 'nor height nor depth, nor anything else in all creation, will be able to separate us.' },
+    ],
+    'More Than Conquerors'
+  );
+  storage.updateStitchedVerseStep(rom83539.card.id, 2);
+
+  // Verify Patch card reference ends with (Patch)
+  const patchItem = storage.createRepairCard(rom83539.passage.id, 35, 3, 8, 37, 8);
+  assertTrue(Boolean(patchItem), 'createRepairCard creates a Patch card');
+  assertEqual(
+    patchItem?.passage.reference,
+    'Romans 8:35-37 (Patch)',
+    'Patch card reference is formatted with (Patch) suffix'
+  );
+  storage.deleteCard(patchItem!.card.id);
+
+  // Split 5-verse passage at [1, 3] -> 3 segments: v.35-36 (0..1), v.37-38 (2..3), v.39 (4..4)
+  const splitRes = storage.splitPassageAtBoundaries(rom83539.card.id, [1, 3]);
+  assertTrue(Boolean(splitRes), 'splitPassageAtBoundaries([1, 3]) succeeds');
+  assertEqual(splitRes?.segments.length, 3, 'Creates 3 segments');
+  assertEqual(splitRes?.segments[0].passage.reference, 'Romans 8:35-36', 'Segment 0 reference');
+  assertEqual(splitRes?.segments[0].card.state, CardState.CARD_STATE_REVIEW, 'Segment 0 is REVIEW');
+  assertEqual(splitRes?.segments[0].card.learningStep, 2, 'Segment 0 learningStep is 2');
+  assertEqual(splitRes?.segments[1].passage.reference, 'Romans 8:37-38', 'Segment 1 reference');
+  assertEqual(splitRes?.segments[1].card.state, CardState.CARD_STATE_LEARNING, 'Segment 1 is LEARNING');
+  assertEqual(splitRes?.activeNextItem.passage.reference, 'Romans 8:37-38', 'activeNextItem is Segment 1');
+  assertEqual(splitRes?.segments[2].passage.reference, 'Romans 8:39', 'Segment 2 reference');
+  assertEqual(splitRes?.segments[2].card.state, CardState.CARD_STATE_NEW, 'Segment 2 is NEW');
+  assertEqual(Boolean(storage.lastSplitUndoState()), true, 'lastSplitUndoState is populated');
+
+  // Undo the multi-boundary split -> recombines all 3 segments back into Romans 8:35-39
+  const undone = storage.undoLastSplit();
+  assertTrue(Boolean(undone), 'undoLastSplit recombines the split segments');
+  assertEqual(undone?.passage.reference, 'Romans 8:35-39', 'undoLastSplit restores Romans 8:35-39');
+  assertEqual(undone?.passage.label, 'More Than Conquerors', 'undoLastSplit restores original label');
+  assertEqual(undone?.passage.verses.length, 5, 'undoLastSplit restores all 5 verses');
+  assertEqual(storage.lastSplitUndoState(), null, 'undoLastSplit clears lastSplitUndoState');
+
+  console.log('✓ srs.service.spec.ts: All SM-2 scheduling, interval, deck management, incremental chunking, contiguity, multi-split undo, and contiguous stitched/seam card assertions passed.');
 }
 
 runSrsServiceTests();

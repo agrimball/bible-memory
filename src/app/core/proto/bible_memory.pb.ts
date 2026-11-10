@@ -63,6 +63,16 @@ export {
   Verse,
 };
 
+export {
+  BIBLE_CHAPTER_VERSE_COUNTS,
+  checkPassagesContiguity,
+  getChapterVerseCount,
+  isEndOfChapter,
+  normalizeBookKey,
+  parsePassageBounds,
+} from './bible_chapter_counts';
+export type { ParsedPassageBounds } from './bible_chapter_counts';
+
 // ============================================================================
 // Cross-Chapter Verse Formatting & Recitation Time Helpers
 // ============================================================================

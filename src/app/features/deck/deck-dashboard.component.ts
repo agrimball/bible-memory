@@ -31,6 +31,9 @@ type BatchCapableStorageService = StorageService & {
   moveCardsToNew?: (ids: string[]) => void;
   deletePassages?: (ids: string[]) => void;
   combinePassages?: (ids: string[]) => Passage | DeckItem | undefined;
+  canCombinePassages?: (
+    ids: string[]
+  ) => boolean | { canCombine: boolean; reason?: string };
   updatePassageLabel?: (passageId: string, label: string) => void;
 };
 
@@ -132,6 +135,58 @@ const BIBLE_BOOK_ORDER: Record<string, number> = {
   '3 john': 64,
   jude: 65,
   revelation: 66,
+};
+
+const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
+  'genesis:1': 31,
+  'genesis:2': 25,
+  'psalm:1': 6,
+  'psalms:1': 6,
+  'psalm:23': 6,
+  'psalms:23': 6,
+  'psalm:119': 176,
+  'psalms:119': 176,
+  'proverbs:3': 35,
+  'isaiah:40': 31,
+  'isaiah:53': 12,
+  'matthew:5': 48,
+  'matthew:6': 34,
+  'matthew:7': 29,
+  'john:1': 51,
+  'john:3': 36,
+  'john:14': 31,
+  'john:15': 27,
+  'romans:1': 32,
+  'romans:2': 29,
+  'romans:3': 31,
+  'romans:4': 25,
+  'romans:5': 21,
+  'romans:6': 23,
+  'romans:7': 25,
+  'romans:8': 39,
+  'romans:9': 33,
+  'romans:10': 21,
+  'romans:11': 36,
+  'romans:12': 21,
+  '1 corinthians:13': 13,
+  '2 corinthians:5': 21,
+  'galatians:2': 21,
+  'galatians:5': 26,
+  'ephesians:1': 23,
+  'ephesians:2': 22,
+  'ephesians:6': 24,
+  'philippians:1': 30,
+  'philippians:2': 30,
+  'philippians:3': 21,
+  'philippians:4': 23,
+  'colossians:1': 29,
+  'colossians:3': 25,
+  'hebrews:11': 40,
+  'hebrews:12': 29,
+  'james:1': 27,
+  '1 peter:1': 25,
+  'revelation:21': 27,
+  'revelation:22': 21,
 };
 
 @Component({
@@ -260,10 +315,12 @@ const BIBLE_BOOK_ORDER: Record<string, number> = {
               <button
                 type="button"
                 class="rm-ms-btn rm-ms-combine"
+                [disabled]="!combineSelectionStatus().canCombine"
+                [title]="combineSelectionStatus().reason || 'Sew contiguous passages together'"
                 (click)="combineSelectedPassages()"
                 data-testid="btn-batch-combine"
               >
-                🔗 Combine ({{ selectedCardIds().size }})
+                🪡 Sew ({{ selectedCardIds().size }})
               </button>
             }
 
@@ -448,7 +505,7 @@ const BIBLE_BOOK_ORDER: Record<string, number> = {
                       @if (isCardSelected(item.card.id)) {
                         <span class="square-check" aria-hidden="true">✓</span>
                       } @else {
-                        <span class="square-icon">🔧</span>
+                        <span class="square-icon">🩹</span>
                         <span class="square-sub" data-testid="repair-heal-pill">
                           {{ item.card.repairStreak || 0 }}/{{ item.card.repairTargetStreak || 3 }}
                         </span>
@@ -580,7 +637,7 @@ const BIBLE_BOOK_ORDER: Record<string, number> = {
                       @if (isCardSelected(item.card.id)) {
                         <span class="square-check" aria-hidden="true">✓</span>
                       } @else {
-                        <span class="square-icon">🔧</span>
+                        <span class="square-icon">🩹</span>
                         <span class="square-sub" data-testid="repair-heal-pill">
                           {{ item.card.repairStreak || 0 }}/{{ item.card.repairTargetStreak || 3 }}
                         </span>
@@ -691,7 +748,7 @@ const BIBLE_BOOK_ORDER: Record<string, number> = {
               @if (outlineGroups().length > 1) {
                 <div class="rm-outline-utility-bar">
                   <span class="rm-outline-utility-summary">
-                    {{ outlineGroups().length }} groups · {{ basePassageItems().length }} chunks
+                    {{ outlineGroups().length }} {{ outlineGroups().length === 1 ? 'group' : 'groups' }} · {{ totalOutlineChunksCount() }} {{ totalOutlineChunksCount() === 1 ? 'passage' : 'passages' }}
                   </span>
                   <button
                     type="button"
@@ -722,10 +779,41 @@ const BIBLE_BOOK_ORDER: Record<string, number> = {
                   <div
                     class="rm-outline-group-card"
                     [class.collapsed]="isGroupCollapsed(group.groupKey)"
+                    [class.group-selected]="isOutlineGroupAllSelected(group)"
                     [attr.data-testid]="'outline-group-' + gIdx"
                   >
                     <!-- Compact 42px Single-Line Group Header -->
                     <header class="rm-outline-group-header">
+                      <!-- Top-Level Group Multi-Select Checkbox -->
+                      <span
+                        class="rm-outline-group-checkbox"
+                        [class.selected]="isOutlineGroupAllSelected(group)"
+                        [class.partial]="isOutlineGroupPartiallySelected(group)"
+                        (click)="toggleSelectOutlineGroup(group, $event)"
+                        role="checkbox"
+                        tabindex="0"
+                        (keydown.enter)="toggleSelectOutlineGroup(group, $event)"
+                        (keydown.space)="toggleSelectOutlineGroup(group, $event)"
+                        [attr.aria-checked]="
+                          isOutlineGroupAllSelected(group)
+                            ? 'true'
+                            : isOutlineGroupPartiallySelected(group)
+                              ? 'mixed'
+                              : 'false'
+                        "
+                        aria-label="Select all chunks in group"
+                        title="Select or unselect all chunks in this group"
+                        [attr.data-testid]="'outline-group-select-' + gIdx"
+                      >
+                        @if (isOutlineGroupAllSelected(group)) {
+                          ✓
+                        } @else if (isOutlineGroupPartiallySelected(group)) {
+                          −
+                        } @else {
+                          ▢
+                        }
+                      </span>
+
                       <button
                         type="button"
                         class="rm-outline-group-toggle"
@@ -736,12 +824,11 @@ const BIBLE_BOOK_ORDER: Record<string, number> = {
                         <span class="rm-outline-chevron" aria-hidden="true">
                           {{ isGroupCollapsed(group.groupKey) ? '▸' : '▾' }}
                         </span>
-                        <span class="rm-outline-book-icon" aria-hidden="true">📖</span>
                         <strong class="rm-outline-group-ref" [attr.data-testid]="'outline-group-ref-' + gIdx">
                           {{ group.groupReference }}
                         </strong>
                         <span class="rm-outline-chunk-count">
-                          · {{ group.chunks.length }} {{ group.chunks.length === 1 ? 'chunk' : 'chunks' }}
+                          · {{ group.chunks.length }} {{ group.chunks.length === 1 ? 'passage' : 'passages' }}
                         </span>
                       </button>
 
@@ -750,11 +837,15 @@ const BIBLE_BOOK_ORDER: Record<string, number> = {
                           <button
                             type="button"
                             class="rm-outline-combine-btn"
+                            [disabled]="!getOutlineGroupCombineStatus(group).canCombine"
+                            [title]="
+                              getOutlineGroupCombineStatus(group).reason ||
+                              'Sew contiguous passages together'
+                            "
                             (click)="combineGroupChunks(group, $event)"
-                            title="Combine chunks in this group into a single passage"
                             [attr.data-testid]="'btn-outline-combine-' + gIdx"
                           >
-                            🔗 Combine
+                            🪡 Sew
                           </button>
                         }
 
@@ -857,10 +948,10 @@ const BIBLE_BOOK_ORDER: Record<string, number> = {
                                       </strong>
                                     } @else {
                                       <span
-                                        class="rm-outline-unlabeled"
+                                        class="rm-outline-first-words"
                                         [attr.data-testid]="'outline-chunk-unlabeled-' + gIdx + '-' + cIdx"
                                       >
-                                        Unlabeled — tap to title
+                                        “{{ getOutlineDefaultFirstWords(chunk.item.passage) }}”
                                       </span>
                                     }
                                   </div>
@@ -933,7 +1024,7 @@ const BIBLE_BOOK_ORDER: Record<string, number> = {
                                   [attr.data-testid]="'outline-gap-connector-' + gIdx + '-' + cIdx"
                                 >
                                   <span class="rm-outline-gap-pill">
-                                    ⋮ Gap: v. {{ chunk.endVerse + 1 }}–{{ group.chunks[cIdx + 1].startVerse - 1 }} not in deck
+                                    {{ formatChunkPairGapLabel(chunk, group.chunks[cIdx + 1]) }}
                                   </span>
                                 </div>
                               }
@@ -1620,6 +1711,10 @@ const BIBLE_BOOK_ORDER: Record<string, number> = {
         box-shadow: 0 3px 10px rgba(0, 0, 0, 0.14);
       }
 
+      .rm-outline-group-card.group-selected {
+        border-color: rgba(245, 158, 11, 0.55);
+      }
+
       .rm-outline-group-header {
         display: flex;
         align-items: center;
@@ -1627,9 +1722,50 @@ const BIBLE_BOOK_ORDER: Record<string, number> = {
         gap: 0.35rem;
         flex-wrap: nowrap;
         min-height: 42px;
-        padding: 0.35rem 0.6rem;
+        padding: 0.35rem 0.5rem;
         background: rgba(15, 23, 42, 0.58);
         border-bottom: 1px solid var(--rm-divider);
+      }
+
+      .rm-outline-group-checkbox {
+        width: 20px;
+        height: 20px;
+        border-radius: 0.32rem;
+        border: 1.5px solid rgba(148, 163, 184, 0.5);
+        background: rgba(15, 23, 42, 0.45);
+        color: var(--rm-text-muted);
+        font-size: 0.72rem;
+        font-weight: 800;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        cursor: pointer;
+        user-select: none;
+        transition: all 0.12s ease;
+      }
+
+      :host-context(.light-theme) .rm-outline-group-checkbox,
+      :host-context(html:not(.dark-theme)) .rm-outline-group-checkbox {
+        background: #ffffff;
+        border-color: #94a3b8;
+      }
+
+      .rm-outline-group-checkbox:hover {
+        border-color: #f59e0b;
+        color: #fbbf24;
+      }
+
+      .rm-outline-group-checkbox.partial {
+        border-color: #f59e0b;
+        background: rgba(245, 158, 11, 0.22);
+        color: #fbbf24;
+      }
+
+      .rm-outline-group-checkbox.selected {
+        background: linear-gradient(135deg, #f59e0b 0%, #2563eb 100%);
+        border-color: #fbbf24;
+        color: #ffffff;
       }
 
       .rm-outline-group-card.collapsed .rm-outline-group-header {
@@ -1644,37 +1780,30 @@ const BIBLE_BOOK_ORDER: Record<string, number> = {
       .rm-outline-group-toggle {
         display: inline-flex;
         align-items: center;
-        gap: 0.3rem;
+        gap: 0.28rem;
         min-width: 0;
-        flex: 1 1 0;
+        flex: 1 0 auto;
         padding: 0.15rem 0;
         background: transparent;
         border: none;
         color: inherit;
         text-align: left;
         cursor: pointer;
-        overflow: hidden;
       }
 
       .rm-outline-chevron {
         font-size: 0.78rem;
         color: var(--rm-text-muted);
-        width: 12px;
-        flex-shrink: 0;
-      }
-
-      .rm-outline-book-icon {
-        font-size: 0.88rem;
+        width: 11px;
         flex-shrink: 0;
       }
 
       .rm-outline-group-ref {
-        font-size: 0.86rem;
+        font-size: 0.85rem;
         font-weight: 800;
         color: var(--rm-text-primary);
         white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        flex-shrink: 0;
       }
 
       .rm-outline-chunk-count {
@@ -1686,12 +1815,12 @@ const BIBLE_BOOK_ORDER: Record<string, number> = {
       }
 
       .rm-outline-add-next-btn {
-        padding: 0.22rem 0.46rem;
+        padding: 0.2rem 0.45rem;
         border-radius: 0.4rem;
         border: 1px solid rgba(245, 158, 11, 0.4);
         background: rgba(245, 158, 11, 0.12);
         color: #fbbf24;
-        font-size: 0.68rem;
+        font-size: 0.7rem;
         font-weight: 700;
         cursor: pointer;
         white-space: nowrap;
@@ -1788,6 +1917,12 @@ const BIBLE_BOOK_ORDER: Record<string, number> = {
       :host-context(.light-theme) .rm-outline-custom-label,
       :host-context(html:not(.dark-theme)) .rm-outline-custom-label {
         color: #b45309;
+      }
+
+      .rm-outline-first-words {
+        font-size: 0.84rem;
+        font-weight: 500;
+        color: var(--rm-text-primary);
       }
 
       .rm-outline-unlabeled {
@@ -2073,25 +2208,32 @@ const BIBLE_BOOK_ORDER: Record<string, number> = {
       .rm-outline-header-actions {
         display: flex;
         align-items: center;
-        gap: 0.4rem;
-        flex-wrap: wrap;
+        gap: 0.3rem;
+        flex-shrink: 0;
       }
 
       .rm-outline-combine-btn {
-        padding: 0.26rem 0.58rem;
-        border-radius: 0.45rem;
+        padding: 0.2rem 0.45rem;
+        border-radius: 0.4rem;
         border: 1px solid rgba(129, 140, 248, 0.45);
         background: rgba(79, 70, 229, 0.16);
         color: #a5b4fc;
-        font-size: 0.72rem;
+        font-size: 0.7rem;
         font-weight: 700;
         cursor: pointer;
         white-space: nowrap;
         transition: background 0.12s ease;
       }
 
-      .rm-outline-combine-btn:hover {
+      .rm-outline-combine-btn:hover:not(:disabled) {
         background: rgba(79, 70, 229, 0.28);
+      }
+
+      .rm-outline-combine-btn:disabled,
+      .rm-ms-combine:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        filter: grayscale(0.35);
       }
 
       .rm-outline-range-pill.selected {
@@ -2175,6 +2317,27 @@ export class DeckDashboardComponent implements OnChanges {
           !item.passage.id.startsWith('psg_seam_')
       );
   });
+
+  readonly totalOutlineChunksCount = computed<number>(
+    () => this.basePassageItems().length
+  );
+
+  getOutlineDefaultFirstWords(passage: Passage): string {
+    const firstVerseText = (passage.verses?.[0]?.text || '').trim();
+    if (!firstVerseText) {
+      return passage.reference;
+    }
+    const words = firstVerseText.split(/\s+/);
+    const maxWords = 7;
+    if (words.length <= maxWords) {
+      return firstVerseText;
+    }
+    const snippet = words
+      .slice(0, maxWords)
+      .join(' ')
+      .replace(/[,;:.!?—–-]+$/, '');
+    return `${snippet}…`;
+  }
 
   /**
    * Canonical Passages & Chunks Outline groups sorted in Bible order.
@@ -2280,7 +2443,7 @@ export class DeckDashboardComponent implements OnChanges {
       for (let i = 0; i < cluster.length - 1; i++) {
         const curr = cluster[i];
         const next = cluster[i + 1];
-        if (curr.endChapter === next.startChapter && next.startVerse > curr.endVerse + 1) {
+        if (!this.isChunkPairContiguous(curr, next)) {
           hasDisjointGap = true;
           break;
         }
@@ -2476,15 +2639,250 @@ export class DeckDashboardComponent implements OnChanges {
     this.editingOutlineLabelDraft.set('');
   }
 
+  /**
+   * Evaluates whether the currently selected passages can be combined (requires >= 2 contiguous passages in the same book).
+   */
+  readonly combineSelectionStatus = computed<{ canCombine: boolean; reason?: string }>(() => {
+    const selectedIds = this.selectedCardIds();
+    if (selectedIds.size < 2) {
+      return {
+        canCombine: false,
+        reason: 'Select at least 2 contiguous passages to combine',
+      };
+    }
+
+    const allItems = this.storageService.deckItems();
+    const selectedItems = allItems.filter((item) => selectedIds.has(item.card.id));
+    return this.evaluateChunksContiguity(selectedItems);
+  });
+
   isChunkPairContiguous(prev: OutlineChunkEntry, next: OutlineChunkEntry): boolean {
-    return (
-      (prev.endChapter === next.startChapter && prev.endVerse + 1 === next.startVerse) ||
-      (next.startChapter === prev.endChapter + 1 && next.startVerse === 1)
-    );
+    if (prev.bookDisplay.toLowerCase() !== next.bookDisplay.toLowerCase()) {
+      return false;
+    }
+    if (prev.endChapter === next.startChapter) {
+      return prev.endVerse + 1 === next.startVerse;
+    }
+    if (next.startChapter === prev.endChapter + 1 && next.startVerse === 1) {
+      const maxVerses = this.getChapterMaxVerses(prev.bookDisplay, prev.endChapter);
+      return maxVerses ? prev.endVerse === maxVerses : true;
+    }
+    return false;
   }
 
   hasChunkPairGap(prev: OutlineChunkEntry, next: OutlineChunkEntry): boolean {
-    return prev.endChapter === next.startChapter && next.startVerse > prev.endVerse + 1;
+    if (prev.bookDisplay.toLowerCase() !== next.bookDisplay.toLowerCase()) {
+      return false;
+    }
+    if (this.isChunkPairContiguous(prev, next)) {
+      return false;
+    }
+    if (prev.endChapter === next.startChapter) {
+      return next.startVerse > prev.endVerse + 1;
+    }
+    return next.startChapter > prev.endChapter;
+  }
+
+  formatChunkPairGapLabel(prev: OutlineChunkEntry, next: OutlineChunkEntry): string {
+    if (prev.endChapter === next.startChapter) {
+      const gapStart = prev.endVerse + 1;
+      const gapEnd = next.startVerse - 1;
+      return gapStart === gapEnd
+        ? `⋮ Gap: v. ${gapStart} not in deck`
+        : `⋮ Gap: v. ${gapStart}–${gapEnd} not in deck`;
+    }
+    const maxVerses = this.getChapterMaxVerses(prev.bookDisplay, prev.endChapter);
+    if (
+      next.startChapter === prev.endChapter + 1 &&
+      maxVerses &&
+      prev.endVerse < maxVerses &&
+      next.startVerse === 1
+    ) {
+      const gapStart = prev.endVerse + 1;
+      return gapStart === maxVerses
+        ? `⋮ Gap: ${prev.endChapter}:${gapStart} not in deck`
+        : `⋮ Gap: ${prev.endChapter}:${gapStart}–${maxVerses} not in deck`;
+    }
+    return `⋮ Gap between ${prev.endChapter}:${prev.endVerse} and ${next.startChapter}:${next.startVerse} not in deck`;
+  }
+
+  isOutlineGroupAllSelected(group: OutlinePassageGroup): boolean {
+    return (
+      group.chunks.length > 0 &&
+      group.chunks.every((c) => this.isCardSelected(c.item.card.id))
+    );
+  }
+
+  isOutlineGroupPartiallySelected(group: OutlinePassageGroup): boolean {
+    return (
+      !this.isOutlineGroupAllSelected(group) &&
+      group.chunks.some((c) => this.isCardSelected(c.item.card.id))
+    );
+  }
+
+  toggleSelectOutlineGroup(group: OutlinePassageGroup, event?: Event): void {
+    event?.stopPropagation();
+    this.confirmingDelete.set(false);
+    const next = new Set(this.selectedCardIds());
+    if (this.isOutlineGroupAllSelected(group)) {
+      for (const chunk of group.chunks) {
+        next.delete(chunk.item.card.id);
+      }
+    } else {
+      for (const chunk of group.chunks) {
+        next.add(chunk.item.card.id);
+      }
+    }
+    this.selectedCardIds.set(next);
+  }
+
+  getOutlineGroupCombineStatus(group: OutlinePassageGroup): {
+    canCombine: boolean;
+    targetChunkIds: string[];
+    reason?: string;
+  } {
+    const selectedInGroup = group.chunks.filter((c) =>
+      this.isCardSelected(c.item.card.id)
+    );
+    const targetChunks =
+      selectedInGroup.length >= 2 ? selectedInGroup : group.chunks;
+    const check = this.evaluateChunksContiguity(targetChunks.map((c) => c.item));
+    if (check.canCombine) {
+      return {
+        canCombine: true,
+        targetChunkIds: targetChunks.map((c) => c.item.passage.id),
+      };
+    }
+    return {
+      canCombine: false,
+      targetChunkIds: [],
+      reason:
+        check.reason ||
+        'Select contiguous chunks in this group (with no verse gaps) to combine',
+    };
+  }
+
+  private evaluateChunksContiguity(items: DeckItem[]): {
+    canCombine: boolean;
+    reason?: string;
+  } {
+    if (items.length < 2) {
+      return {
+        canCombine: false,
+        reason: 'Select at least 2 contiguous passages to combine',
+      };
+    }
+
+    if (
+      items.some(
+        (i) =>
+          i.card.isRepairCard ||
+          i.card.isStitchedPassageCard ||
+          i.passage.id.startsWith('psg_stitched_') ||
+          i.passage.id.startsWith('psg_seam_')
+      )
+    ) {
+      return {
+        canCombine: false,
+        reason: 'Cannot combine repair or auto-stitched cards',
+      };
+    }
+
+    const withCoords = items.map((item) => ({
+      item,
+      coords: this.parsePassageCoordinates(item.passage),
+    }));
+
+    const firstBookKey = withCoords[0].coords.bookDisplay.toLowerCase();
+    for (const entry of withCoords) {
+      if (entry.coords.bookDisplay.toLowerCase() !== firstBookKey) {
+        return {
+          canCombine: false,
+          reason: `Cannot combine passages from different books (${withCoords[0].coords.bookDisplay} and ${entry.coords.bookDisplay})`,
+        };
+      }
+    }
+
+    withCoords.sort((a, b) => {
+      if (a.coords.startChapter !== b.coords.startChapter) {
+        return a.coords.startChapter - b.coords.startChapter;
+      }
+      if (a.coords.startVerse !== b.coords.startVerse) {
+        return a.coords.startVerse - b.coords.startVerse;
+      }
+      return a.coords.endVerse - b.coords.endVerse;
+    });
+
+    for (let i = 0; i < withCoords.length - 1; i++) {
+      const prev = withCoords[i].coords;
+      const next = withCoords[i + 1].coords;
+
+      if (prev.endChapter === next.startChapter) {
+        if (next.startVerse <= prev.endVerse) {
+          return {
+            canCombine: false,
+            reason: `Passages overlap at ${prev.bookDisplay} ${prev.endChapter}:${next.startVerse}`,
+          };
+        }
+        if (next.startVerse !== prev.endVerse + 1) {
+          return {
+            canCombine: false,
+            reason: `Non-contiguous: missing v. ${prev.endVerse + 1}–${next.startVerse - 1} in ${prev.bookDisplay} ${prev.endChapter}`,
+          };
+        }
+      } else if (next.startChapter === prev.endChapter + 1) {
+        const maxVerses = this.getChapterMaxVerses(prev.bookDisplay, prev.endChapter);
+        if (
+          next.startVerse !== 1 ||
+          (maxVerses !== undefined && prev.endVerse !== maxVerses)
+        ) {
+          return {
+            canCombine: false,
+            reason: `Non-contiguous across chapter boundary (${prev.bookDisplay} ${prev.endChapter}:${prev.endVerse} → ${next.startChapter}:${next.startVerse})`,
+          };
+        }
+      } else {
+        return {
+          canCombine: false,
+          reason: `Non-contiguous chapters (${prev.bookDisplay} ${prev.endChapter} and ${next.startChapter})`,
+        };
+      }
+    }
+
+    const svc = this.storageService as BatchCapableStorageService;
+    if (typeof svc.canCombinePassages === 'function') {
+      const svcCheck = svc.canCombinePassages(items.map((i) => i.passage.id));
+      if (typeof svcCheck === 'boolean' && !svcCheck) {
+        return {
+          canCombine: false,
+          reason: 'Selected passages are not contiguous',
+        };
+      }
+      if (
+        svcCheck &&
+        typeof svcCheck === 'object' &&
+        'canCombine' in svcCheck &&
+        !svcCheck.canCombine
+      ) {
+        return svcCheck;
+      }
+    }
+
+    return { canCombine: true };
+  }
+
+  private getChapterMaxVerses(bookDisplay: string, chapter: number): number | undefined {
+    const pbHelper = pb as unknown as {
+      getChapterVerseCount?: (bookName: string, chap: number) => number | undefined;
+    };
+    if (typeof pbHelper.getChapterVerseCount === 'function') {
+      const count = pbHelper.getChapterVerseCount(bookDisplay, chapter);
+      if (typeof count === 'number' && count > 0) {
+        return count;
+      }
+    }
+    const key = `${bookDisplay.toLowerCase().replace(/\s+/g, ' ')}:${chapter}`;
+    return FALLBACK_CHAPTER_VERSE_COUNTS[key];
   }
 
   onAddNextVersesClick(nextRef?: string, event?: Event): void {
@@ -2573,7 +2971,7 @@ export class DeckDashboardComponent implements OnChanges {
 
   combineSelectedPassages(): void {
     const ids = Array.from(this.selectedCardIds());
-    if (ids.length < 2) {
+    if (ids.length < 2 || !this.combineSelectionStatus().canCombine) {
       return;
     }
     this.combineByCardOrPassageIds(ids);
@@ -2582,11 +2980,11 @@ export class DeckDashboardComponent implements OnChanges {
 
   combineGroupChunks(group: OutlinePassageGroup, event?: Event): void {
     event?.stopPropagation();
-    const passageIds = group.chunks.map((c) => c.item.passage.id);
-    if (passageIds.length < 2) {
+    const status = this.getOutlineGroupCombineStatus(group);
+    if (!status.canCombine || status.targetChunkIds.length < 2) {
       return;
     }
-    this.combineByCardOrPassageIds(passageIds);
+    this.combineByCardOrPassageIds(status.targetChunkIds);
     this.clearSelection();
   }
 
