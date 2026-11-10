@@ -1,12 +1,14 @@
 :host {
   display: block;
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 .app-shell {
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   background: #0b1120;
@@ -111,49 +113,35 @@
   color: #b45309;
 }
 
-.file-dot-pill {
+.cloud-status-btn {
+  width: auto;
+  min-width: 36px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 0.98rem;
+  font-weight: 800;
+}
+
+.cloud-icon-glyph {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(15, 23, 42, 0.55);
-  color: #cbd5e1;
-  font-size: 0.72rem;
-  font-weight: 600;
-  cursor: pointer;
-  max-width: 140px;
+  gap: 1px;
+  line-height: 1;
 }
 
-.light-theme .file-dot-pill,
-.theme-light .file-dot-pill {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
-  color: #475569;
+.cloud-status-btn.cloud-connected,
+.drawer-cloud-icon.cloud-connected {
+  color: #34d399;
 }
 
-.file-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #94a3b8;
-  flex-shrink: 0;
+.cloud-status-btn.cloud-needs-reconnect,
+.drawer-cloud-icon.cloud-needs-reconnect {
+  color: #fbbf24;
 }
 
-.file-dot-pill.connected .file-dot {
-  background: #34d399;
-  box-shadow: 0 0 6px rgba(52, 211, 153, 0.7);
-}
-
-.file-dot-pill.disconnected .file-dot {
-  background: #f59e0b;
-}
-
-.file-dot-text {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.cloud-status-btn.cloud-disconnected {
+  color: #94a3b8;
+  opacity: 0.85;
 }
 
 /* Slide-Out Navigation Drawer */
@@ -395,11 +383,23 @@
 /* Main Content Area */
 .app-main {
   flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: 960px;
   margin: 0 auto;
-  padding: 8px 10px calc(16px + env(safe-area-inset-bottom, 0px));
+  padding: 0 10px calc(8px + env(safe-area-inset-bottom, 0px));
   box-sizing: border-box;
+}
+
+.app-main > app-deck-dashboard {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .app-main.study-main {

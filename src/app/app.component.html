@@ -28,21 +28,6 @@
         >
           <span class="brand-title">Selah Memory</span>
         </div>
-
-        <button
-          type="button"
-          class="file-dot-pill"
-          [class.connected]="!!storageService.activeFileName()"
-          [class.disconnected]="!storageService.activeFileName()"
-          (click)="openSyncModal()"
-          data-testid="topbar-memory-file-status"
-          [title]="storageService.activeFileName() ? 'Auto-saving to ' + storageService.activeFileName() : 'Select or create a Memory Data File (.proto.json)'"
-        >
-          <span class="file-dot" aria-hidden="true"></span>
-          <span class="file-dot-text">
-            {{ storageService.activeFileName() || 'Select File' }}
-          </span>
-        </button>
       </div>
 
       <nav class="topbar-right" aria-label="Quick actions">
@@ -61,13 +46,24 @@
         <button
           type="button"
           id="btn-open-proto-sync"
-          class="icon-btn"
+          class="icon-btn cloud-status-btn"
+          [class.cloud-connected]="storageService.fileConnectionStatus() === 'connected'"
+          [class.cloud-needs-reconnect]="storageService.fileConnectionStatus() === 'unsaved-disconnected'"
+          [class.cloud-disconnected]="storageService.fileConnectionStatus() === 'disconnected-clean' || storageService.fileConnectionStatus() === 'local-only'"
           (click)="openSyncModal()"
-          data-testid="nav-proto-sync"
-          title="Memory File & ProtoJSON Sync"
-          aria-label="Memory File & ProtoJSON Sync"
+          data-testid="topbar-memory-file-status"
+          [title]="cloudStatusTitle()"
+          [attr.aria-label]="cloudStatusTitle()"
         >
-          <span data-testid="btn-open-proto-sync">☁</span>
+          <span data-testid="btn-open-proto-sync" class="cloud-icon-glyph">
+            @if (storageService.fileConnectionStatus() === 'connected') {
+              ☁✓
+            } @else if (storageService.fileConnectionStatus() === 'unsaved-disconnected') {
+              ☁!
+            } @else {
+              ☁
+            }
+          </span>
         </button>
 
         <button
@@ -85,7 +81,7 @@
     </header>
   }
 
-  <!-- Remember Me Style Slide-Out Navigation Drawer (r1.png) -->
+  <!-- Remember Me Style Slide-Out Navigation Drawer -->
   @if (isDrawerOpen()) {
     <div
       class="drawer-backdrop"
@@ -115,33 +111,31 @@
             <div>
               <h2 class="drawer-title">Selah Memory</h2>
               <p class="drawer-subtitle">
-                @if (storageService.activeFileName()) {
-                  🟢 {{ storageService.activeFileName() }} (Auto-save)
+                @if (storageService.fileConnectionStatus() === 'connected') {
+                  🟢 {{ storageService.activeFileName() }} (Auto-saving)
+                } @else if (storageService.fileConnectionStatus() === 'unsaved-disconnected') {
+                  🟠 {{ storageService.activeFileName() }} (Unsaved changes)
+                } @else if (storageService.fileConnectionStatus() === 'disconnected-clean') {
+                  ☁ {{ storageService.activeFileName() }} (Up to date)
                 } @else {
                   💾 Local Storage · No file linked
                 }
               </p>
             </div>
-            <span class="drawer-cloud-icon" aria-hidden="true">☁</span>
-          </div>
-
-          <div class="drawer-file-actions">
-            <button
-              type="button"
-              class="drawer-file-btn"
-              (click)="onDrawerOpenFile()"
-              data-testid="drawer-btn-open-file"
+            <span
+              class="drawer-cloud-icon"
+              [class.cloud-connected]="storageService.fileConnectionStatus() === 'connected'"
+              [class.cloud-needs-reconnect]="storageService.fileConnectionStatus() === 'unsaved-disconnected'"
+              aria-hidden="true"
             >
-              📂 Open File
-            </button>
-            <button
-              type="button"
-              class="drawer-file-btn"
-              (click)="onDrawerCreateFile()"
-              data-testid="drawer-btn-create-file"
-            >
-              ✨ New File
-            </button>
+              @if (storageService.fileConnectionStatus() === 'connected') {
+                ☁✓
+              } @else if (storageService.fileConnectionStatus() === 'unsaved-disconnected') {
+                ☁!
+              } @else {
+                ☁
+              }
+            </span>
           </div>
         </div>
 
@@ -149,69 +143,34 @@
           <button
             type="button"
             class="drawer-item"
-            [class.active]="activeView() === 'dashboard' && dashboardTab() === 'queue'"
-            (click)="openDashboardTab('queue')"
-            data-testid="nav-queue"
+            (click)="onDrawerOpenFile()"
+            data-testid="drawer-btn-open-file"
           >
-            <span class="drawer-icon" aria-hidden="true">🏠</span>
-            <span class="drawer-label">Verses · New / Memorizing</span>
-            <span class="drawer-count">{{ storageService.stats().learningCount }}</span>
+            <span class="drawer-icon" aria-hidden="true">📂</span>
+            <span class="drawer-label">Open .selahmemory File</span>
           </button>
 
           <button
             type="button"
             class="drawer-item"
-            [class.active]="activeView() === 'dashboard' && dashboardTab() === 'due'"
-            (click)="openDashboardTab('due')"
-            data-testid="nav-due"
+            (click)="onDrawerCreateFile()"
+            data-testid="drawer-btn-create-file"
           >
-            <span class="drawer-icon" aria-hidden="true">📅</span>
-            <span class="drawer-label">Due for Review</span>
-            <span class="drawer-count">{{ storageService.dueDeckItems().length }}</span>
-          </button>
-
-          <button
-            type="button"
-            class="drawer-item"
-            [class.active]="activeView() === 'dashboard' && dashboardTab() === 'active'"
-            (click)="openDashboardTab('active')"
-            data-testid="nav-active"
-          >
-            <span class="drawer-icon" aria-hidden="true">✓</span>
-            <span class="drawer-label">Known / Memorized</span>
-            <span class="drawer-count">{{ storageService.stats().reviewCount }}</span>
-          </button>
-
-          <div class="drawer-divider"></div>
-
-          <button
-            type="button"
-            class="drawer-item"
-            (click)="openAddModal()"
-          >
-            <span class="drawer-icon" aria-hidden="true">➕</span>
-            <span class="drawer-label">Add Passage (Copy-Paste)</span>
+            <span class="drawer-icon" aria-hidden="true">✨</span>
+            <span class="drawer-label">New .selahmemory File</span>
           </button>
 
           <button
             type="button"
             class="drawer-item"
             (click)="openSyncModal()"
+            data-testid="drawer-btn-file-settings"
           >
-            <span class="drawer-icon" aria-hidden="true">🗂</span>
-            <span class="drawer-label">ProtoJSON Data Inspector</span>
+            <span class="drawer-icon" aria-hidden="true">☁</span>
+            <span class="drawer-label">Memory File Settings</span>
           </button>
 
-          <button
-            type="button"
-            class="drawer-item"
-            (click)="toggleTheme()"
-          >
-            <span class="drawer-icon" aria-hidden="true">{{ isDarkMode() ? '☀' : '☾' }}</span>
-            <span class="drawer-label">
-              {{ isDarkMode() ? 'Switch to Light Mode' : 'Switch to Dark Mode' }}
-            </span>
-          </button>
+          <div class="drawer-divider"></div>
 
           <div class="drawer-slider-row">
             <div class="drawer-slider-header">
@@ -258,6 +217,7 @@
         (openAddPassage)="openAddModal()"
         (openProtoSync)="openSyncModal()"
         (editItem)="openEditPassageModal($event)"
+        (appendPassage)="openAppendPassageModal($event)"
       />
     } @else if (activeView() === 'first-letter-page') {
       <app-first-letter-study-page
@@ -277,6 +237,8 @@
           (rated)="onCardRated($event)"
           (skipCard)="onSkipCard()"
           (editPassage)="openEditPassageModal()"
+          (appendPassage)="openAppendPassageModal()"
+          (chunkCarved)="onChunkCarved($event)"
           (backToDeck)="returnToDashboard()"
           (openStudyPage)="openFirstLetterStudyPage($event)"
           (openRepairCard)="practiceSingleItem($event)"
@@ -296,6 +258,7 @@
   @if (showAddPassageModal()) {
     <app-add-passage-modal
       [editingPassage]="editingPassage()"
+      [appendingToPassage]="appendingToPassage()"
       (closed)="closeAddPassageModal()"
       (passageAdded)="onPassageAdded($event)"
     />

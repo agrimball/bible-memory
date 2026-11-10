@@ -1,5 +1,5 @@
 <div class="study-screen" *ngIf="item; else emptyState">
-  <!-- Single Compact 52px Top App Bar (Remember Me r4.png / r5.png) -->
+  <!-- Single Compact 48px Top App Bar (Zero Horizontal Overflow on 412px Mobile) -->
   <header class="study-appbar" data-testid="study-topbar">
     <button
       type="button"
@@ -17,17 +17,11 @@
         {{ passageTitleWithLabel() }}
       </h1>
       <span
-        *ngIf="topbarScopeLabel()"
-        class="appbar-scope-pill"
-        data-testid="stitching-range-label"
-      >
-        {{ topbarScopeLabel() }}
-      </span>
-      <span
-        [class]="getCardStateBadgeClass(item.card.state)"
+        class="sr-only"
+        [class]="getCardStateBadgeClass(currentCardState())"
         data-testid="card-state-pill"
       >
-        {{ getCardStateLabel(item.card.state) }}
+        {{ getCardStateLabel(currentCardState()) }}
       </span>
       <span class="sr-only" data-testid="card-verse-count">
         {{ item.passage.verses.length }} {{ item.passage.verses.length === 1 ? 'verse' : 'verses' }}
@@ -36,25 +30,18 @@
 
     <div class="appbar-actions">
       <button
-        *ngIf="item.card.state === CardState.CARD_STATE_NEW && !isRepairCard()"
         type="button"
-        class="appbar-pill-btn memorize-btn"
-        data-testid="btn-mark-memorizing"
-        (click)="markAsMemorizing()"
+        id="btn-scope-sheet-toggle"
+        class="appbar-scope-pill-btn"
+        [class.active]="showScopeSheet()"
+        data-testid="btn-scope-sheet-toggle"
+        (click)="toggleScopeSheet($event)"
+        title="Scope, chunking &amp; passage options"
       >
-        + Memorize
-      </button>
-
-      <button
-        *ngIf="!isRepairCard() && activeStitchedCount() < totalVerses()"
-        type="button"
-        id="btn-expand-verse"
-        class="appbar-pill-btn expand-btn"
-        data-testid="btn-expand-verse"
-        (click)="expandOneVerse($event)"
-        title="Expand memorized prefix by 1 verse"
-      >
-        <span data-testid="btn-stitch-next-verse">➕ +1v ({{ nextExpandVerseLabel() }})</span>
+        <span data-testid="stitching-range-label">
+          {{ topbarScopeLabel() || (totalVerses() + 'v') }}
+        </span>
+        <span class="scope-caret">▾</span>
       </button>
 
       <button
@@ -96,9 +83,109 @@
     </div>
   </header>
 
-  <!-- Compact Multi-Verse Step Strip (only when multi-verse & not repair card) -->
+  <!-- Tap-to-Open Scope & Chunk Sheet -->
   <div
-    *ngIf="item.passage.verses.length > 1 && !isRepairCard()"
+    *ngIf="showScopeSheet()"
+    class="scope-bottom-sheet"
+    data-testid="scope-bottom-sheet"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="scope-sheet-header">
+      <span class="scope-sheet-title">Passage Scope &amp; Actions</span>
+      <button
+        type="button"
+        class="scope-sheet-close"
+        (click)="closeScopeSheet($event)"
+        aria-label="Close scope menu"
+      >
+        ✕
+      </button>
+    </div>
+
+    <div
+      *ngIf="totalVerses() > 1 && !isRepairCard()"
+      class="scope-sheet-stepper-row"
+    >
+      <span class="scope-stepper-label">Active Scope:</span>
+      <div class="scope-stepper-controls">
+        <button
+          type="button"
+          class="scope-step-btn"
+          [disabled]="activeStitchedCount() <= 1"
+          (click)="unstitchOneVerse()"
+        >
+          −1v
+        </button>
+        <span class="scope-step-current">
+          {{ stitchedVerseRangeLabel() }} of {{ totalVerses() }}v
+        </span>
+        <button
+          type="button"
+          class="scope-step-btn"
+          [disabled]="activeStitchedCount() >= totalVerses()"
+          (click)="expandOneVerse($event)"
+        >
+          +1v
+        </button>
+      </div>
+    </div>
+
+    <div
+      *ngIf="showLongChunkWarning()"
+      class="scope-sheet-hint"
+      data-testid="warning-incremental-chunk"
+    >
+      💡 {{ activeStitchedCount() }}v ({{ recitationTime().label }}) — ready to save as a chunk?
+    </div>
+
+    <div class="scope-sheet-actions">
+      <button
+        *ngIf="canCarvePrefixChunk()"
+        type="button"
+        class="scope-action-btn primary-chunk"
+        (click)="toggleCarveChunkSheet($event)"
+      >
+        🏷️ Save {{ stitchedVerseRangeLabel() }} as Chunk
+      </button>
+
+      <button
+        *ngIf="totalVerses() > 1 && !isRepairCard()"
+        type="button"
+        id="btn-know-whole-passage"
+        class="scope-action-btn know-all"
+        data-testid="btn-know-whole-passage"
+        (click)="markEntirePassageKnown($event)"
+      >
+        ✓ I Know Entire Passage ({{ totalVerses() }}v)
+      </button>
+
+      <button
+        *ngIf="!isRepairCard()"
+        type="button"
+        id="btn-append-card-passage"
+        class="scope-action-btn append"
+        data-testid="btn-append-card-passage"
+        (click)="onAppendPassage($event)"
+      >
+        ➕ Append Verses to Passage
+      </button>
+
+      <button
+        *ngIf="currentCardState() !== CardState.CARD_STATE_NEW && !isRepairCard()"
+        type="button"
+        id="btn-move-card-to-new"
+        class="scope-action-btn move-new"
+        data-testid="btn-move-card-to-new"
+        (click)="moveCardToNew($event)"
+      >
+        ↩ Move Card Back to New
+      </button>
+    </div>
+  </div>
+
+  <!-- Ultra-Slim Single-Row Stitch Strip (< 390px wide on 412px mobile) -->
+  <div
+    *ngIf="showStitchStrip()"
     class="compact-stitch-strip"
     data-testid="verse-stitching-bar"
   >
@@ -135,6 +222,7 @@
     <div class="stitch-step-Adjust">
       <button
         type="button"
+        id="btn-unstitch-verse"
         class="stitch-adj-btn"
         data-testid="btn-stitch-prev-verse"
         [disabled]="activeStitchedCount() <= 1"
@@ -144,13 +232,82 @@
         −1v
       </button>
       <button
-        *ngIf="activeStitchedCount() >= totalVerses()"
         type="button"
+        id="btn-stitch-next"
         class="stitch-adj-btn"
         data-testid="btn-stitch-next-verse"
-        disabled
+        [disabled]="activeStitchedCount() >= totalVerses()"
+        (click)="expandOneVerse($event)"
+        title="Next target verse"
       >
         +1v
+      </button>
+      <button
+        *ngIf="canCarvePrefixChunk()"
+        type="button"
+        id="btn-carve-chunk"
+        class="stitch-carve-chunk-btn"
+        data-testid="btn-carve-chunk"
+        (click)="toggleCarveChunkSheet($event)"
+        title="Save memorized prefix as a named chunk and continue with remaining verses"
+      >
+        🏷️ Chunk
+      </button>
+    </div>
+  </div>
+
+  <!-- Contiguous Prior Chunk Breadcrumb (Option C Cross-Chunk Handoff) -->
+  <div
+    *ngIf="precedingChunkInfo() as prevInfo"
+    class="prior-chunk-breadcrumb"
+    data-testid="prior-chunk-breadcrumb"
+  >
+    <span class="breadcrumb-done">
+      ✓ {{ prevInfo.passage.reference }}{{ prevInfo.passage.label ? ' (' + prevInfo.passage.label + ')' : '' }}
+    </span>
+    <span class="breadcrumb-sep">›</span>
+    <span class="breadcrumb-active">
+      ● {{ item.passage.reference }}
+    </span>
+  </div>
+
+  <!-- Inline Incremental Chunk Naming Sheet -->
+  <div
+    *ngIf="showCarveChunkSheet() && canCarvePrefixChunk()"
+    class="incremental-chunk-sheet"
+    data-testid="incremental-chunk-sheet"
+  >
+    <div class="chunk-sheet-title">
+      Save <strong>{{ stitchedVerseRangeLabel() }}</strong> as a memorized chunk (continuing <strong>{{ nextExpandVerseLabel() }}–{{ lastVerseLabel() }}</strong> as next passage)
+    </div>
+    <div class="chunk-sheet-controls">
+      <input
+        type="text"
+        id="input-carve-chunk-label"
+        class="chunk-label-input"
+        data-testid="input-carve-chunk-label"
+        placeholder="Chunk label (e.g. Beatitudes)..."
+        [value]="chunkLabel()"
+        (input)="onChunkLabelInput($event)"
+        (keydown.enter)="confirmCarveChunk($event)"
+      />
+      <button
+        type="button"
+        id="btn-confirm-carve-chunk"
+        class="btn-confirm-carve"
+        data-testid="btn-confirm-carve-chunk"
+        (click)="confirmCarveChunk($event)"
+      >
+        ✓ Save Chunk &amp; Continue at {{ nextExpandVerseLabel() }}
+      </button>
+      <button
+        type="button"
+        id="btn-cancel-carve-chunk"
+        class="btn-cancel-carve"
+        data-testid="btn-cancel-carve-chunk"
+        (click)="closeCarveChunkSheet($event)"
+      >
+        ✕ Cancel
       </button>
     </div>
   </div>
@@ -232,7 +389,7 @@
         </h2>
 
         <span class="front-recitation-time" data-testid="card-recitation-time">
-          ⏱ {{ recitationTime().label }}
+          ⏱ {{ recitationTime().label }} ({{ recitedVersesScopeLabel() }})
         </span>
 
         <!-- Resume Recitation Banner after queueing a repair on the Back -->
@@ -376,22 +533,83 @@
         </ng-container>
 
         <ng-template #normalBackVerses>
-          <p
-            *ngFor="let verse of activeVerses(); let idx = index"
-            class="verse-line"
-            [class.target-verse-emphasis]="item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only' && isTargetNewVerse(verse)"
-            [class.repair-draft-selected]="isVerseInDraftRepair(idx)"
-            [class.repair-queued-selected]="isVerseInQueuedRepair(idx)"
-            [class.beyond-stitched-scope]="stitchPhase() !== 'full-passage' && idx >= activeStitchedCount()"
-            [attr.data-testid]="'back-verse-' + verse.verseNumber"
-            (click)="onVerseTap(idx, $event)"
-          >
-            <span
-              class="verse-inline-num"
-              [attr.data-testid]="'btn-spawn-repair-' + verse.verseNumber"
-            >{{ getVerseInlineNumber(verse) }}</span>
-            <span class="verse-inline-text">{{ verse.text }}</span>
-          </p>
+          <ng-container *ngFor="let verse of activeVerses(); let idx = index">
+            <p
+              *ngIf="stitchPhase() === 'full-passage' || idx < activeStitchedCount() || isRemainingVersesExpanded()"
+              class="verse-line"
+              [class.target-verse-emphasis]="stitchPhase() === 'new-verse-only' && isTargetNewVerse(verse)"
+              [class.repair-draft-selected]="isVerseInDraftRepair(idx)"
+              [class.repair-queued-selected]="isVerseInQueuedRepair(idx)"
+              [class.beyond-stitched-scope]="stitchPhase() !== 'full-passage' && idx >= activeStitchedCount()"
+              [attr.data-testid]="'back-verse-' + verse.verseNumber"
+              (click)="onVerseTap(idx, $event)"
+            >
+              <span
+                class="verse-inline-num"
+                [attr.data-testid]="'btn-spawn-repair-' + verse.verseNumber"
+              >{{ getVerseInlineNumber(verse) }}</span>
+              <span class="verse-inline-text">{{ verse.text }}</span>
+            </p>
+
+            <!-- Inline Active Scope Boundary right after the last active verse -->
+            <div
+              *ngIf="stitchPhase() !== 'full-passage' && activeStitchedCount() < totalVerses() && idx === activeStitchedCount() - 1"
+              class="back-inline-scope-boundary"
+              data-testid="back-inline-scope-boundary"
+              (click)="$event.stopPropagation()"
+            >
+              <div class="inline-boundary-divider">
+                ─── End of Active Scope ({{ stitchedVerseRangeLabel() }} · {{ recitationTime().label }}) ───
+              </div>
+
+              <div
+                *ngIf="showLongChunkWarning()"
+                class="inline-boundary-warning"
+                data-testid="warning-incremental-chunk"
+              >
+                💡 {{ activeStitchedCount() }}v ({{ recitationTime().label }}) — ready to save as a chunk?
+              </div>
+
+              <div class="inline-boundary-actions">
+                <button
+                  type="button"
+                  class="btn-inline-boundary add-next"
+                  data-testid="btn-inline-add-verse"
+                  (click)="expandOneVerse($event)"
+                >
+                  ➕ Add {{ nextExpandVerseLabel() }} (+1v)
+                </button>
+
+                <button
+                  *ngIf="canCarvePrefixChunk()"
+                  type="button"
+                  class="btn-inline-boundary carve-chunk"
+                  data-testid="btn-inline-carve-chunk"
+                  (click)="toggleCarveChunkSheet($event)"
+                >
+                  🏷️ Save {{ stitchedVerseRangeLabel() }} as Chunk
+                </button>
+
+                <button
+                  type="button"
+                  class="btn-inline-boundary know-all"
+                  data-testid="btn-inline-know-all"
+                  (click)="markEntirePassageKnown($event)"
+                >
+                  ✓ Know All {{ totalVerses() }}v
+                </button>
+              </div>
+
+              <button
+                type="button"
+                class="btn-toggle-remaining-verses"
+                data-testid="btn-toggle-remaining-verses"
+                (click)="toggleRemainingVerses($event)"
+              >
+                {{ isRemainingVersesExpanded() ? '▾ Hide' : '▸ Peek' }} remaining {{ totalVerses() - activeStitchedCount() }} {{ (totalVerses() - activeStitchedCount()) === 1 ? 'verse' : 'verses' }}
+              </button>
+            </div>
+          </ng-container>
         </ng-template>
       </div>
     </section>
@@ -504,16 +722,16 @@
       </div>
     </div>
 
-    <!-- Compact Badge Strip when repairs are queued or selected -->
+    <!-- Compact Badge Strip when repairs are queued (hidden while draftRepairRange sheet is open for the same range) -->
     <div
-      *ngIf="allPendingRepairRanges().length > 0 || repairSpawnedMessage()"
+      *ngIf="queuedRepairs().length > 0 || (repairSpawnedMessage() && draftRepairRange() === null)"
       class="queued-repair-strip"
       data-testid="repair-spawned-toast"
     >
-      <span *ngIf="allPendingRepairRanges().length > 0">
-        🔧 Repair queued: <strong>{{ pendingRepairsSummary() }}</strong> (filed on grade)
+      <span *ngIf="queuedRepairs().length > 0" data-testid="pending-repairs-strip">
+        🔧 Repair queued: <strong>{{ queuedRepairsSummary() }}</strong> (filed on grade)
       </span>
-      <span *ngIf="allPendingRepairRanges().length === 0 && repairSpawnedMessage() as msg">
+      <span *ngIf="queuedRepairs().length === 0 && repairSpawnedMessage() as msg">
         {{ msg }}
       </span>
       <button
@@ -531,62 +749,92 @@
       {{ isRepairCard() ? 'Repair Streak' : stitchedVerseRangeLabel() }}
     </div>
 
-    <!-- AnkiDroid-Style Full-Width 4-Button Grading Bar at the Bottom Edge -->
-    <div class="anki-grading-bar" data-testid="anki-grading-bar">
+    <!-- NEW Card Action Bar (Remember Me style: Move to Review Deck / Know Entire Passage) -->
+    <div
+      *ngIf="currentCardState() === CardState.CARD_STATE_NEW && !isRepairCard(); else ankiGradingBarTpl"
+      class="new-card-action-bar"
+      data-testid="new-card-action-bar"
+    >
       <button
         type="button"
-        id="btn-rate-again"
-        class="btn-anki-grade grade-again"
-        data-testid="btn-grade-again"
-        (click)="submitRating(ReviewRating.REVIEW_RATING_AGAIN)"
+        id="btn-move-to-review"
+        class="btn-new-card-action primary-move-review"
+        data-testid="btn-move-to-review"
+        (click)="moveToReviewDeck($event)"
       >
-        <span class="grade-interval" data-testid="interval-again">
-          {{ isRepairCard() ? 'Reset' : intervalPreviews()[ReviewRating.REVIEW_RATING_AGAIN] }}
-        </span>
-        <span class="grade-label" data-testid="btn-rate-again">AGAIN</span>
+        📥 Move to Review Deck ({{ activeStitchedCount() < totalVerses() ? stitchedVerseRangeLabel() : (totalVerses() > 1 ? 'Start v. ' + firstVerseNumber() : '1v') }})
       </button>
 
       <button
+        *ngIf="totalVerses() > 1"
         type="button"
-        id="btn-rate-hard"
-        class="btn-anki-grade grade-hard"
-        data-testid="btn-grade-hard"
-        (click)="submitRating(ReviewRating.REVIEW_RATING_HARD)"
+        id="btn-know-entire-passage-bottom"
+        class="btn-new-card-action secondary-know-all"
+        data-testid="btn-know-entire-passage"
+        (click)="markEntirePassageKnown($event)"
       >
-        <span class="grade-interval" data-testid="interval-hard">
-          {{ intervalPreviews()[ReviewRating.REVIEW_RATING_HARD] }}
-        </span>
-        <span class="grade-label" data-testid="btn-rate-hard">HARD</span>
-      </button>
-
-      <button
-        type="button"
-        id="btn-rate-good"
-        class="btn-anki-grade grade-good"
-        data-testid="btn-grade-good"
-        (click)="submitRating(ReviewRating.REVIEW_RATING_GOOD)"
-      >
-        <span class="grade-interval" data-testid="interval-good">
-          {{ isRepairCard() ? '+1 Heal' : intervalPreviews()[ReviewRating.REVIEW_RATING_GOOD] }}
-        </span>
-        <span class="grade-label" data-testid="btn-rate-good">
-          {{ !isRepairCard() && item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only' && activeStitchedCount() > 1 ? 'GOOD → STITCH' : 'GOOD' }}
-        </span>
-      </button>
-
-      <button
-        type="button"
-        id="btn-rate-easy"
-        class="btn-anki-grade grade-easy"
-        data-testid="btn-grade-easy"
-        (click)="submitRating(ReviewRating.REVIEW_RATING_EASY)"
-      >
-        <span class="grade-interval" data-testid="interval-easy">
-          {{ isRepairCard() ? '+1 Heal' : intervalPreviews()[ReviewRating.REVIEW_RATING_EASY] }}
-        </span>
-        <span class="grade-label" data-testid="btn-rate-easy">EASY</span>
+        ✓ I Know Entire Passage ({{ totalVerses() }}v)
       </button>
     </div>
+
+    <!-- AnkiDroid-Style Full-Width 4-Button Grading Bar at the Bottom Edge -->
+    <ng-template #ankiGradingBarTpl>
+      <div class="anki-grading-bar" data-testid="anki-grading-bar">
+        <button
+          type="button"
+          id="btn-rate-again"
+          class="btn-anki-grade grade-again"
+          data-testid="btn-grade-again"
+          (click)="submitRating(ReviewRating.REVIEW_RATING_AGAIN)"
+        >
+          <span class="grade-interval" data-testid="interval-again">
+            {{ isRepairCard() ? 'Reset' : intervalPreviews()[ReviewRating.REVIEW_RATING_AGAIN] }}
+          </span>
+          <span class="grade-label" data-testid="btn-rate-again">AGAIN</span>
+        </button>
+
+        <button
+          type="button"
+          id="btn-rate-hard"
+          class="btn-anki-grade grade-hard"
+          data-testid="btn-grade-hard"
+          (click)="submitRating(ReviewRating.REVIEW_RATING_HARD)"
+        >
+          <span class="grade-interval" data-testid="interval-hard">
+            {{ intervalPreviews()[ReviewRating.REVIEW_RATING_HARD] }}
+          </span>
+          <span class="grade-label" data-testid="btn-rate-hard">HARD</span>
+        </button>
+
+        <button
+          type="button"
+          id="btn-rate-good"
+          class="btn-anki-grade grade-good"
+          data-testid="btn-grade-good"
+          (click)="submitRating(ReviewRating.REVIEW_RATING_GOOD)"
+        >
+          <span class="grade-interval" data-testid="interval-good">
+            {{ isRepairCard() ? '+1 Heal' : intervalPreviews()[ReviewRating.REVIEW_RATING_GOOD] }}
+          </span>
+          <span class="grade-label" data-testid="btn-rate-good">
+            {{ !isRepairCard() && item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only' && activeStitchedCount() > 1 ? 'GOOD → STITCH' : 'GOOD' }}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          id="btn-rate-easy"
+          class="btn-anki-grade grade-easy"
+          data-testid="btn-grade-easy"
+          (click)="submitRating(ReviewRating.REVIEW_RATING_EASY)"
+        >
+          <span class="grade-interval" data-testid="interval-easy">
+            {{ isRepairCard() ? '+1 Heal' : intervalPreviews()[ReviewRating.REVIEW_RATING_EASY] }}
+          </span>
+          <span class="grade-label" data-testid="btn-rate-easy">EASY</span>
+        </button>
+      </div>
+    </ng-template>
   </footer>
 </div>
 

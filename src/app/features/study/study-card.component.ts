@@ -57,6 +57,8 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   @Output() rated = new EventEmitter<{ cardId: string; rating: ReviewRating }>();
   @Output() skipCard = new EventEmitter<void>();
   @Output() editPassage = new EventEmitter<void>();
+  @Output() appendPassage = new EventEmitter<void>();
+  @Output() chunkCarved = new EventEmitter<DeckItem>();
   @Output() backToDeck = new EventEmitter<void>();
   @Output() openStudyPage = new EventEmitter<DeckItem>();
   @Output() openRepairCard = new EventEmitter<DeckItem>();
@@ -69,6 +71,10 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   readonly stitchToastMessage = signal<string | null>(null);
   readonly repairSpawnedMessage = signal<string | null>(null);
   readonly spawnedRepairItem = signal<DeckItem | null>(null);
+  readonly showCarveChunkSheet = signal<boolean>(false);
+  readonly showScopeSheet = signal<boolean>(false);
+  readonly showRemainingVerses = signal<boolean>(true);
+  readonly chunkLabel = signal<string>('');
 
   /** Start-to-End Repair Range Highlighting & Resume Recitation state */
   readonly draftRepairRange = signal<VerseIndexRange | null>(null);
@@ -97,8 +103,45 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     return cleanLabel ? `${p.reference} (${cleanLabel})` : p.reference;
   });
 
-  readonly recitationTime = computed<{ seconds: number; label: string }>(() => {
+  readonly recitedVerses = computed<Verse[]>(() => {
+    if (this.isRepairCard()) {
+      return this.repairTargetVerses();
+    }
     const verses = this.activeVerses();
+    if (verses.length === 0) {
+      return [];
+    }
+    const phase = this.stitchPhase();
+    if (phase === 'new-verse-only') {
+      const nv = this.currentNewVerse();
+      return nv ? [nv] : verses.slice(0, 1);
+    }
+    if (phase === 'stitch-block') {
+      return verses.slice(0, Math.max(1, this.activeStitchedCount()));
+    }
+    return verses;
+  });
+
+  readonly recitedVersesScopeLabel = computed<string>(() => {
+    if (this.isRepairCard()) {
+      return this.repairTargetLabel();
+    }
+    const recited = this.recitedVerses();
+    if (recited.length === 0) {
+      return 'v. 1';
+    }
+    if (recited.length === 1) {
+      return formatVerseBadge(recited[0], this.isMultiChapter());
+    }
+    return formatVerseRange(
+      recited[0],
+      recited[recited.length - 1],
+      this.isMultiChapter()
+    );
+  });
+
+  readonly recitationTime = computed<{ seconds: number; label: string }>(() => {
+    const verses = this.recitedVerses();
     const pbHelper = (
       PbModule as unknown as {
         estimateRecitationTime?: (v: Verse[]) => { seconds: number; label: string };
@@ -274,6 +317,27 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     return this.currentItemSignal()?.passage.verses ?? [];
   });
 
+  readonly currentCardState = computed<CardState>(() => {
+    return this.currentItemSignal()?.card.state ?? this.item?.card.state ?? CardState.CARD_STATE_NEW;
+  });
+
+  readonly showStitchStrip = computed<boolean>(() => {
+    const current = this.currentItemSignal() ?? this.item;
+    if (!current || this.isRepairCard() || current.passage.verses.length <= 1) {
+      return false;
+    }
+    const total = current.passage.verses.length;
+    const savedStep = current.card.learningStep || 1;
+    if (
+      current.card.state === CardState.CARD_STATE_REVIEW &&
+      savedStep >= total &&
+      this.activeStitchedCount() >= total
+    ) {
+      return false;
+    }
+    return true;
+  });
+
   /**
    * The single "New Verse for the Day" (the last verse in the current target block).
    */
@@ -363,12 +427,80 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     return '+1v';
   });
 
+  readonly lastVerseLabel = computed<string>(() => {
+    const verses = this.activeVerses();
+    if (verses.length === 0) {
+      return 'v. 1';
+    }
+    return this.getVerseBadge(verses[verses.length - 1]);
+  });
+
+  readonly canCarvePrefixChunk = computed<boolean>(() => {
+    const count = this.activeStitchedCount();
+    const total = this.totalVerses();
+    return !this.isRepairCard() && total > 1 && count >= 1 && count < total;
+  });
+
+  readonly showLongChunkWarning = computed<boolean>(() => {
+    return (
+      this.canCarvePrefixChunk() &&
+      (this.activeStitchedCount() >= 8 || this.recitationTime().seconds >= 45)
+    );
+  });
+
+  /**
+   * Cross-Chunk Continuity: If the current passage starts at verse > 1 and there is a
+   * preceding contiguous chunk in the same book & chapter in StorageService, return it
+   * so we can show a 1-line breadcrumb and use its last verse as a lead-in cue!
+   */
+  readonly precedingChunkInfo = computed<{ passage: Passage; lastVerse: Verse } | null>(() => {
+    const current = this.currentItemSignal();
+    if (!current || this.isRepairCard() || current.passage.verses.length === 0) {
+      return null;
+    }
+    const firstVerse = current.passage.verses[0];
+    if (firstVerse.verseNumber <= 1) {
+      return null;
+    }
+    const refMatch = current.passage.reference.trim().match(/^(.+?)\s+(\d+)\s*:/);
+    if (!refMatch) {
+      return null;
+    }
+    const bookKey = refMatch[1].trim().toLowerCase();
+    const refChap = Number(refMatch[2]);
+    const targetChap = firstVerse.chapterNumber || refChap;
+    const targetPrevVerseNum = firstVerse.verseNumber - 1;
+
+    const allPassages = this.storageService.passages();
+    for (const p of allPassages) {
+      if (
+        p.id === current.passage.id ||
+        p.id.startsWith('psg_stitched_') ||
+        p.id.startsWith('psg_seam_') ||
+        p.verses.length === 0
+      ) {
+        continue;
+      }
+      const pMatch = p.reference.trim().match(/^(.+?)\s+(\d+)\s*:/);
+      if (!pMatch || pMatch[1].trim().toLowerCase() !== bookKey) {
+        continue;
+      }
+      const pStartChap = Number(pMatch[2]);
+      const lastV = p.verses[p.verses.length - 1];
+      const lastVChap = lastV.chapterNumber || pStartChap;
+      if (lastVChap === targetChap && lastV.verseNumber === targetPrevVerseNum) {
+        return { passage: p, lastVerse: lastV };
+      }
+    }
+    return null;
+  });
+
   /**
    * Returns a preceding lead-in verse ONLY when recitation starts after the 1st verse:
    * - When resuming mid-passage (`resumeFromVerseIndex() > 0`)
    * - When practicing a repair card (`isRepairCard()`)
    * - When in Step 1 (`new-verse-only`) for verse 2+ (`activeStitchedCount() > 1`)
-   * Returns `null` in `All` mode or `Stitch Block` mode (which both start at the 1st verse).
+   * - Or when starting a carved contiguous chunk (`precedingChunkInfo()`) at its 1st verse
    */
   readonly leadInContextVerse = computed<Verse | null>(() => {
     const verses = this.activeVerses();
@@ -384,6 +516,12 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     }
     if (this.stitchPhase() === 'new-verse-only' && this.activeStitchedCount() > 1) {
       return verses[this.activeStitchedCount() - 2] ?? null;
+    }
+    if (this.activeStitchedCount() === 1) {
+      const prevChunk = this.precedingChunkInfo();
+      if (prevChunk) {
+        return prevChunk.lastVerse;
+      }
     }
     return null;
   });
@@ -480,6 +618,14 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     return ranges.map((r) => this.formatIndexRange(r)).join(', ');
   });
 
+  readonly queuedRepairsSummary = computed<string>(() => {
+    const ranges = this.queuedRepairs();
+    if (ranges.length === 0) {
+      return '';
+    }
+    return ranges.map((r) => this.formatIndexRange(r)).join(', ');
+  });
+
   readonly intervalPreviews = computed<Record<ReviewRating, string>>(() => {
     const current = this.currentItemSignal();
     if (!current) {
@@ -495,15 +641,37 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   });
 
   ngOnChanges(changes: SimpleChanges): void {
+    let cardChanged = false;
     if (changes['item']) {
-      const prevCardId = changes['item'].previousValue?.card?.id;
+      const prevItem = changes['item'].previousValue as DeckItem | null | undefined;
+      const prevCardId = prevItem?.card?.id;
       const nextCardId = this.item?.card?.id;
+      const prevLen = prevItem?.passage?.verses?.length ?? 0;
+      const nextLen = this.item?.passage?.verses?.length ?? 0;
+      const prevFirstVerse = prevItem?.passage?.verses?.[0]?.verseNumber;
+      const nextFirstVerse = this.item?.passage?.verses?.[0]?.verseNumber;
       this.currentItemSignal.set(this.item);
-      if (prevCardId !== nextCardId) {
+      if (prevCardId !== nextCardId || prevFirstVerse !== nextFirstVerse) {
+        cardChanged = true;
         this.initializeForCurrentCard();
+      } else if (nextLen !== prevLen && nextLen > 0) {
+        const savedStep = Math.max(1, Math.min(this.item?.card.learningStep || 1, nextLen));
+        this.localTargetVerseCount.set(
+          this.item?.card.state === CardState.CARD_STATE_NEW ? nextLen : savedStep
+        );
+        if (this.item?.card.state === CardState.CARD_STATE_NEW || savedStep >= nextLen) {
+          this.stitchPhase.set('full-passage');
+        } else {
+          this.stitchPhase.set('stitch-block');
+        }
       }
     }
-    if (changes['stitchedVerseCount'] && this.stitchedVerseCount > 0) {
+    if (
+      !cardChanged &&
+      changes['stitchedVerseCount'] &&
+      !changes['stitchedVerseCount'].firstChange &&
+      this.stitchedVerseCount > 0
+    ) {
       this.localTargetVerseCount.set(this.stitchedVerseCount);
     }
   }
@@ -518,6 +686,9 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     this.stitchToastMessage.set(null);
     this.repairSpawnedMessage.set(null);
     this.spawnedRepairItem.set(null);
+    this.showCarveChunkSheet.set(false);
+    this.showScopeSheet.set(false);
+    this.chunkLabel.set('');
     this.draftRepairRange.set(null);
     this.queuedRepairs.set([]);
     this.resumeFromVerseIndex.set(null);
@@ -526,30 +697,40 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     this.voiceService.resetForNewCard();
 
     const total = this.item?.passage.verses.length ?? 0;
+    this.showRemainingVerses.set(total <= 6);
     if (total <= 1 || this.item?.card.isRepairCard) {
       this.localTargetVerseCount.set(Math.max(1, total));
       this.stitchPhase.set('full-passage');
       return;
     }
 
-    if (this.item?.card.state === CardState.CARD_STATE_REVIEW) {
-      this.stitchPhase.set('full-passage');
+    // 1. When opening a NEW card: default to showing all verses ('full-passage', localTargetVerseCount = total)
+    if (this.item?.card.state === CardState.CARD_STATE_NEW) {
       this.localTargetVerseCount.set(total);
+      this.stitchPhase.set('full-passage');
       return;
     }
 
-    const savedStep = this.item?.card.learningStep;
+    const savedStep = this.item?.card.learningStep || 1;
+
+    // 2. When a passage is fully known ((card.learningStep || 1) >= totalVerses && card.state === CardState.CARD_STATE_REVIEW)
+    if (savedStep >= total && this.item?.card.state === CardState.CARD_STATE_REVIEW) {
+      this.localTargetVerseCount.set(total);
+      this.stitchPhase.set('full-passage');
+      return;
+    }
+
+    // 3. When opening a DUE / KNOWN card that is partially memorized (1 <= learningStep < totalVerses):
+    // Default to simple review of the already-memorized verses (stitchPhase = 'stitch-block', reciting v. 1..learningStep)
     const initialCount =
       this.stitchedVerseCount >= 1 && this.stitchedVerseCount <= total
         ? this.stitchedVerseCount
-        : savedStep && savedStep >= 1
-          ? Math.min(savedStep, total)
-          : 1;
+        : Math.max(1, Math.min(savedStep, total));
     this.localTargetVerseCount.set(initialCount);
     if (initialCount >= total) {
       this.stitchPhase.set('full-passage');
     } else {
-      this.stitchPhase.set('new-verse-only');
+      this.stitchPhase.set('stitch-block');
     }
   }
 
@@ -865,11 +1046,13 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     this.localTargetVerseCount.set(clamped);
     this.stitchToastMessage.set(null);
     if (this.stitchPhase() === 'full-passage' && clamped < total) {
-      this.stitchPhase.set('new-verse-only');
+      this.stitchPhase.set('stitch-block');
     }
-    if (this.item && !this.item.card.isRepairCard) {
-      const updated = this.storageService.updateStitchedVerseStep(this.item.card.id, clamped);
+    const current = this.currentItemSignal() ?? this.item;
+    if (current && !current.card.isRepairCard && current.card.state !== CardState.CARD_STATE_NEW) {
+      const updated = this.storageService.updateStitchedVerseStep(current.card.id, clamped);
       if (updated) {
+        this.item = updated;
         this.currentItemSignal.set(updated);
       }
     }
@@ -888,13 +1071,90 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   }
 
   markAsMemorizing(): void {
-    if (!this.item) {
+    this.moveToReviewDeck();
+  }
+
+  moveToReviewDeck(event?: Event): void {
+    event?.stopPropagation();
+    const current = this.currentItemSignal() ?? this.item;
+    if (!current) {
       return;
     }
-    const updated = this.storageService.startMemorizingPassage(this.item.card.id);
+    const total = this.totalVerses();
+    const desiredCount = this.activeStitchedCount();
+    let updated = this.storageService.startMemorizingPassage(current.card.id);
+    if (desiredCount >= 1 && desiredCount < total) {
+      updated = this.storageService.updateStitchedVerseStep(current.card.id, desiredCount) ?? updated;
+    }
     if (updated) {
+      this.item = updated;
+      this.currentItemSignal.set(updated);
+      const nextStep = updated.card.learningStep || 1;
+      this.localTargetVerseCount.set(nextStep);
+      this.stitchPhase.set(nextStep >= total ? 'full-passage' : 'stitch-block');
+      this.stitchedVerseCountChange.emit(nextStep);
+    }
+  }
+
+  markEntirePassageKnown(event?: Event): void {
+    event?.stopPropagation();
+    this.showScopeSheet.set(false);
+    const current = this.currentItemSignal() ?? this.item;
+    if (!current) {
+      return;
+    }
+    const total = Math.max(1, this.totalVerses());
+    const svc = this.storageService as unknown as {
+      markEntirePassageKnown?: (cardOrPassageId: string) => DeckItem | undefined | void;
+    };
+    let updated: DeckItem | undefined;
+    if (typeof svc.markEntirePassageKnown === 'function') {
+      const res = svc.markEntirePassageKnown(current.card.id);
+      updated =
+        (res as DeckItem | undefined) ??
+        this.storageService.deckItems().find((d) => d.card.id === current.card.id);
+    } else {
+      updated = this.storageService.updateStitchedVerseStep(current.card.id, total);
+      if (updated) {
+        updated =
+          this.storageService.recordReview(current.card.id, ReviewRating.REVIEW_RATING_EASY) ??
+          updated;
+      }
+    }
+    if (updated) {
+      this.item = updated;
       this.currentItemSignal.set(updated);
     }
+    this.localTargetVerseCount.set(total);
+    this.stitchPhase.set('full-passage');
+    this.stitchedVerseCountChange.emit(total);
+  }
+
+  moveCardToNew(event?: Event): void {
+    event?.stopPropagation();
+    this.showScopeSheet.set(false);
+    const current = this.currentItemSignal() ?? this.item;
+    if (!current) {
+      return;
+    }
+    this.voiceService.pausePlayback();
+    const svc = this.storageService as unknown as {
+      moveCardToNew?: (cardOrPassageId: string) => DeckItem | undefined | void;
+    };
+    let updated: DeckItem | undefined;
+    if (typeof svc.moveCardToNew === 'function') {
+      const res = svc.moveCardToNew(current.card.id);
+      updated =
+        (res as DeckItem | undefined) ??
+        this.storageService.deckItems().find((d) => d.card.id === current.card.id);
+    } else {
+      updated = this.storageService.truncatePassageProgress(current.card.id, 0);
+    }
+    if (updated) {
+      this.item = updated;
+      this.currentItemSignal.set(updated);
+    }
+    this.backToDeck.emit();
   }
 
   navigateToStudyPage(event?: Event): void {
@@ -916,6 +1176,88 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     event?.stopPropagation();
     this.voiceService.pausePlayback();
     this.editPassage.emit();
+  }
+
+  onAppendPassage(event?: Event): void {
+    event?.stopPropagation();
+    this.showScopeSheet.set(false);
+    this.voiceService.pausePlayback();
+    this.appendPassage.emit();
+  }
+
+  toggleScopeSheet(event?: Event): void {
+    event?.stopPropagation();
+    this.showScopeSheet.update((v) => !v);
+  }
+
+  closeScopeSheet(event?: Event): void {
+    event?.stopPropagation();
+    this.showScopeSheet.set(false);
+  }
+
+  toggleRemainingVerses(event?: Event): void {
+    event?.stopPropagation();
+    this.showRemainingVerses.update((v) => !v);
+  }
+
+  isRemainingVersesExpanded(): boolean {
+    return this.showRemainingVerses();
+  }
+
+  toggleCarveChunkSheet(event?: Event): void {
+    event?.stopPropagation();
+    this.showScopeSheet.set(false);
+    const next = !this.showCarveChunkSheet();
+    this.showCarveChunkSheet.set(next);
+    if (next && !this.chunkLabel()) {
+      const current = this.currentItemSignal() ?? this.item;
+      this.chunkLabel.set(current?.passage.label ?? '');
+    }
+  }
+
+  closeCarveChunkSheet(event?: Event): void {
+    event?.stopPropagation();
+    this.showCarveChunkSheet.set(false);
+  }
+
+  onChunkLabelInput(event: Event): void {
+    const input = event.target as HTMLInputElement | null;
+    this.chunkLabel.set(input?.value ?? '');
+  }
+
+  confirmCarveChunk(event?: Event): void {
+    event?.stopPropagation();
+    const current = this.currentItemSignal() ?? this.item;
+    if (!current) {
+      return;
+    }
+    const prefixCount = this.activeStitchedCount();
+    const total = this.totalVerses();
+    if (prefixCount < 1 || prefixCount >= total) {
+      return;
+    }
+    const labelText = this.chunkLabel().trim();
+    const res = this.storageService.carveOffPrefixAsNamedChunk(
+      current.card.id,
+      prefixCount,
+      labelText || undefined
+    );
+    this.showCarveChunkSheet.set(false);
+    this.chunkLabel.set('');
+
+    const remainingItem =
+      res?.remainingPassage ??
+      this.storageService.deckItems().find((d) => d.card.id === current.card.id);
+    if (remainingItem) {
+      this.item = remainingItem;
+      this.currentItemSignal.set(remainingItem);
+      const remTotal = remainingItem.passage.verses.length;
+      const remStep = Math.max(1, Math.min(remainingItem.card.learningStep || 1, remTotal));
+      this.localTargetVerseCount.set(remStep);
+      this.stitchPhase.set(remStep >= remTotal ? 'full-passage' : 'stitch-block');
+      this.stitchedVerseCountChange.emit(remStep);
+      this.chunkCarved.emit(remainingItem);
+    }
   }
 
   async onMicButtonClick(event: Event): Promise<void> {
@@ -977,8 +1319,7 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     // Step 1: Practicing ONLY the new verse for the day ('new-verse-only').
     if (isMultiVerse && this.stitchPhase() === 'new-verse-only' && isGoodOrEasy) {
       if (currentTarget <= 1) {
-        const nextCount = Math.min(total, 2);
-        this.setTargetVerseCount(nextCount);
+        this.setTargetVerseCount(1);
         this.rated.emit({
           cardId: this.item.card.id,
           rating,
@@ -986,10 +1327,6 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
         return;
       }
 
-      const updated = this.storageService.recordReview(this.item.card.id, rating);
-      if (updated) {
-        this.currentItemSignal.set(updated);
-      }
       const newVerseLabel = this.targetVerseVerboseLabel();
       const rangeLabel = this.stitchedVerseRangeLabel();
 
@@ -1004,10 +1341,7 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
 
     // Step 2: Practicing the stitched block ('stitch-block').
     if (isMultiVerse && this.stitchPhase() === 'stitch-block' && isGoodOrEasy) {
-      if (currentTarget < total) {
-        const nextCount = Math.min(total, currentTarget + 1);
-        this.setTargetVerseCount(nextCount);
-      }
+      this.setTargetVerseCount(currentTarget);
     }
 
     this.rated.emit({

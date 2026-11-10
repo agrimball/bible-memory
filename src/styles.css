@@ -64,26 +64,42 @@ body {
 
 button,
 nav,
+header,
+footer,
+article,
+.app-topbar,
 .topbar-btn,
 .tab-btn,
+.rm-tabs-bar,
+.rm-tab,
+.rm-row,
+.deck-item-card,
 .action-btn,
 .btn-anki-grade,
 .btn-study-reveal,
-.stitch-mode-btn {
-  user-select: none;
+.stitch-mode-btn,
+.compact-stitch-strip,
+.stitch-chip,
+.stitch-adj-btn,
+.flashcard-shell,
+.study-screen,
+.verse-line {
   -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
 
 input,
-textarea,
+textarea {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+}
+
 code,
-pre,
-.back-verse-text,
-.first-verse-snippet,
-.context-text,
-.word-token.revealed {
+pre {
   user-select: text;
   -webkit-user-select: text;
 }

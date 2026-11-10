@@ -13,11 +13,14 @@ import { PassageParserService } from './passage-parser.service';
 import { SrsService } from './srs.service';
 
 export const STORAGE_KEY = 'bible_memory_protojson_v1';
+export const DEFAULT_MEMORY_FILE_NAME = 'verses.selahmemory';
+export const UNSAVED_FILE_CHANGES_KEY = 'selah_unsaved_file_changes_v1';
 export const VIRTUAL_FILE_META_KEY = 'bible_memory_active_virtual_file_v1';
 export const VIRTUAL_FILE_CONTENT_KEY = 'bible_memory_active_virtual_file_content_v1';
 const FILE_HANDLE_DB_NAME = 'bible_memory_file_handle_db';
 const FILE_HANDLE_STORE_NAME = 'handles';
 const FILE_HANDLE_KEY = 'active_memory_file_handle';
+const FILE_SAVE_DEBOUNCE_MS = 600;
 
 export type ActiveFileStatus =
   | 'none'
@@ -26,6 +29,12 @@ export type ActiveFileStatus =
   | 'saved'
   | 'needs-permission'
   | 'error';
+
+export type FileConnectionStatus =
+  | 'connected'
+  | 'unsaved-disconnected'
+  | 'disconnected-clean'
+  | 'local-only';
 
 export interface DeckItem {
   passage: Passage;
@@ -74,14 +83,36 @@ export class StorageService {
   // Active Memory Data File signals
   readonly activeFileName = signal<string | null>(null);
   readonly activeFileStatus = signal<ActiveFileStatus>('none');
+  readonly isSavingToFile = signal<boolean>(false);
+  readonly hasUnsavedFileChanges = signal<boolean>(false);
   readonly lastFileSavedAt = signal<string | null>(null);
+  readonly lastFileSaveError = signal<string | null>(null);
   readonly fileSyncError = signal<string | null>(null);
+
+  readonly fileConnectionStatus = computed<FileConnectionStatus>(() => {
+    const name = this.activeFileName();
+    const status = this.activeFileStatus();
+    if (!name || status === 'none') {
+      return 'local-only';
+    }
+    if (
+      status === 'needs-permission' ||
+      status === 'error' ||
+      Boolean(this.lastFileSaveError())
+    ) {
+      return this.hasUnsavedFileChanges()
+        ? 'unsaved-disconnected'
+        : 'disconnected-clean';
+    }
+    return 'connected';
+  });
 
   private fileHandle: BrowserFileSystemFileHandle | null = null;
   private isSimulatedFile = false;
   private isWritingFile = false;
   private pendingWriteRequested = false;
-  private gestureListenerRegistered = false;
+  private fileSaveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private lifecycleFlushListenersRegistered = false;
 
   readonly deckItems = computed<DeckItem[]>(() => {
     const passageList = this.passages();
@@ -199,6 +230,7 @@ export class StorageService {
 
   constructor() {
     this.loadFromStorage();
+    this.registerLifecycleFlushListeners();
     void this.restoreActiveFileConnection();
   }
 
@@ -214,11 +246,11 @@ export class StorageService {
   }
 
   /**
-   * Opens a file picker to select an existing `.proto.json` / `.json` data file,
+   * Opens a file picker to select an existing `.selahmemory` / `.json` data file,
    * loads its contents into the app, and sets it as the Active Memory Data File for background auto-saving.
    */
   async selectExistingDataFile(): Promise<boolean> {
-    this.fileSyncError.set(null);
+    this.setFileError(null);
 
     const win = typeof window !== 'undefined' ? (window as unknown as Record<string, unknown>) : null;
     if (win && typeof win['showOpenFilePicker'] === 'function') {
@@ -230,9 +262,9 @@ export class StorageService {
           multiple: false,
           types: [
             {
-              description: 'Bible Memory ProtoJSON File',
+              description: 'Selah Memory File',
               accept: {
-                'application/json': ['.json', '.proto.json'],
+                'application/json': ['.selahmemory', '.json', '.proto.json'],
               },
             },
           ],
@@ -255,9 +287,8 @@ export class StorageService {
 
         if (text.trim().length > 0) {
           this.importProtoJson(text, false);
-        } else {
-          await this.writeToActiveFileHandle();
         }
+        await this.writeToActiveFileHandle();
 
         const nowIso = new Date().toISOString();
         this.activeFileStatus.set('saved');
@@ -271,7 +302,7 @@ export class StorageService {
           }
           return false;
         }
-        this.fileSyncError.set(
+        this.setFileError(
           err instanceof Error ? err.message : 'Could not open the selected data file.'
         );
         if (!this.fileHandle && !this.isSimulatedFile) {
@@ -290,10 +321,10 @@ export class StorageService {
 
   /**
    * Prompts the user to create/choose a file location to save the Active Memory Data File,
-   * immediately writes the current ProtoJSON bundle to it, and auto-saves on every change thereafter.
+   * immediately writes the current bundle to it, and auto-saves on every change thereafter.
    */
-  async createNewDataFile(suggestedName = 'bible-memory.proto.json'): Promise<boolean> {
-    this.fileSyncError.set(null);
+  async createNewDataFile(suggestedName = DEFAULT_MEMORY_FILE_NAME): Promise<boolean> {
+    this.setFileError(null);
 
     const win = typeof window !== 'undefined' ? (window as unknown as Record<string, unknown>) : null;
     if (win && typeof win['showSaveFilePicker'] === 'function') {
@@ -305,9 +336,9 @@ export class StorageService {
           suggestedName,
           types: [
             {
-              description: 'Bible Memory ProtoJSON File',
+              description: 'Selah Memory File',
               accept: {
-                'application/json': ['.json', '.proto.json'],
+                'application/json': ['.selahmemory', '.json', '.proto.json'],
               },
             },
           ],
@@ -333,7 +364,7 @@ export class StorageService {
           }
           return false;
         }
-        this.fileSyncError.set(
+        this.setFileError(
           err instanceof Error ? err.message : 'Could not create the data file.'
         );
         if (!this.fileHandle && !this.isSimulatedFile) {
@@ -357,8 +388,8 @@ export class StorageService {
    * native FileSystemFileHandle pickers or for 1-click quick-connect).
    * Every change in the app automatically writes to this active file target and updates `lastFileSavedAt`.
    */
-  async connectSimulatedDataFile(fileName = 'bible-memory.proto.json'): Promise<void> {
-    const cleanName = fileName.trim() || 'bible-memory.proto.json';
+  async connectSimulatedDataFile(fileName = DEFAULT_MEMORY_FILE_NAME): Promise<void> {
+    const cleanName = fileName.trim() || DEFAULT_MEMORY_FILE_NAME;
     this.fileHandle = null;
     this.isSimulatedFile = true;
     await this.clearHandleFromIndexedDb();
@@ -367,48 +398,52 @@ export class StorageService {
     this.activeFileName.set(cleanName);
     this.activeFileStatus.set('saved');
     this.lastFileSavedAt.set(nowIso);
-    this.fileSyncError.set(null);
+    this.setFileError(null);
 
     this.saveSimulatedFileMeta(cleanName, nowIso);
     await this.writeToActiveFileHandle();
   }
 
   /**
-   * Re-requests read/write permission for a previously saved FileSystemFileHandle restored from IndexedDB,
-   * and immediately flushes the current state to the file.
+   * Explicitly requests read/write permission on user click, immediately flushes the current state
+   * to the active file handle, and clears `hasUnsavedFileChanges`.
    */
-  async reconnectSavedFileHandle(): Promise<boolean> {
-    if (!this.fileHandle) {
+  async reconnectAndSyncNow(): Promise<boolean> {
+    if (!this.fileHandle && !this.isSimulatedFile) {
       return false;
     }
 
+    if (this.isSimulatedFile) {
+      await this.writeToActiveFileHandle(false);
+      return this.activeFileStatus() === 'saved';
+    }
+
     try {
-      this.fileSyncError.set(null);
+      this.setFileError(null);
       let perm: PermissionState = 'granted';
-      if (typeof this.fileHandle.queryPermission === 'function') {
+      if (this.fileHandle && typeof this.fileHandle.queryPermission === 'function') {
         perm = await this.fileHandle.queryPermission({ mode: 'readwrite' });
       }
-      if (perm !== 'granted' && typeof this.fileHandle.requestPermission === 'function') {
+      if (
+        perm !== 'granted' &&
+        this.fileHandle &&
+        typeof this.fileHandle.requestPermission === 'function'
+      ) {
         perm = await this.fileHandle.requestPermission({ mode: 'readwrite' });
       }
       if (perm !== 'granted') {
-        this.activeFileStatus.set(perm === 'denied' ? 'needs-permission' : 'connected');
-        if (perm === 'prompt') {
-          this.registerFirstGesturePermissionListener();
-        }
+        this.activeFileStatus.set('needs-permission');
         return false;
       }
 
-      await this.writeToActiveFileHandle();
+      await this.writeToActiveFileHandle(true);
       return this.activeFileStatus() === 'saved';
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === 'SecurityError') {
-        // No user gesture active yet; wait for first click/keydown
-        this.activeFileStatus.set('connected');
-        this.registerFirstGesturePermissionListener();
+        this.activeFileStatus.set('needs-permission');
         return false;
       }
-      this.fileSyncError.set(
+      this.setFileError(
         err instanceof Error ? err.message : 'Failed to reconnect to active data file.'
       );
       this.activeFileStatus.set('error');
@@ -417,15 +452,26 @@ export class StorageService {
   }
 
   /**
+   * Re-requests read/write permission for a previously saved FileSystemFileHandle restored from IndexedDB,
+   * and immediately flushes the current state to the file.
+   */
+  async reconnectSavedFileHandle(): Promise<boolean> {
+    return this.reconnectAndSyncNow();
+  }
+
+  /**
    * Disconnects the active memory data file (stops background file auto-saving, while keeping local state).
    */
   disconnectDataFile(): void {
+    this.clearFileSaveDebounceTimer();
     this.fileHandle = null;
     this.isSimulatedFile = false;
+    this.isSavingToFile.set(false);
+    this.setUnsavedFileChanges(false);
     this.activeFileName.set(null);
     this.activeFileStatus.set('none');
     this.lastFileSavedAt.set(null);
-    this.fileSyncError.set(null);
+    this.setFileError(null);
     this.clearSimulatedFileMeta();
     void this.clearHandleFromIndexedDb();
   }
@@ -437,8 +483,21 @@ export class StorageService {
     if (!this.fileHandle && !this.isSimulatedFile) {
       return false;
     }
-    await this.writeToActiveFileHandle();
+    this.clearFileSaveDebounceTimer();
+    await this.writeToActiveFileHandle(false);
     return this.activeFileStatus() === 'saved';
+  }
+
+  /**
+   * Immediately flushes any pending debounced file write to the active file handle.
+   */
+  async flushPendingFileWrite(): Promise<void> {
+    if (this.fileSaveDebounceTimer !== null) {
+      this.clearFileSaveDebounceTimer();
+    }
+    if (this.fileHandle || this.isSimulatedFile) {
+      await this.writeToActiveFileHandle(false);
+    }
   }
 
   /**
@@ -1046,6 +1105,400 @@ export class StorageService {
   }
 
   /**
+   * Incremental Chunking while memorizing a longer passage:
+   * Carves off the first `prefixVerseCount` verses (`1 <= prefixVerseCount < passage.verses.length`)
+   * as a completed, memorized passage + card (`CARD_STATE_REVIEW`, `learningStep: prefixVerseCount`),
+   * and updates the remaining passage with `verses.slice(prefixVerseCount)` (`CARD_STATE_LEARNING`, `learningStep: 1`).
+   */
+  carveOffPrefixAsNamedChunk(
+    cardOrPassageId: string,
+    prefixVerseCount: number,
+    chunkLabel?: string
+  ): { completedChunk: DeckItem; remainingPassage: DeckItem } | undefined {
+    const cards = this.flashcards();
+    const targetCard =
+      cards.find((c) => c.id === cardOrPassageId && !c.isRepairCard) ??
+      cards.find((c) => c.passageId === cardOrPassageId && !c.isRepairCard);
+    if (!targetCard) {
+      return undefined;
+    }
+
+    const passage = this.passages().find((p) => p.id === targetCard.passageId);
+    if (!passage || passage.verses.length < 2) {
+      return undefined;
+    }
+
+    const count = Math.round(prefixVerseCount);
+    if (count < 1 || count >= passage.verses.length) {
+      return undefined;
+    }
+
+    const now = new Date();
+    const isoNow = now.toISOString();
+    const prefixVerses = passage.verses.slice(0, count);
+    const tailVerses = passage.verses.slice(count);
+
+    const completedRef = this.computeSubReference(passage.reference, prefixVerses);
+    const remainingRef = this.computeSubReference(passage.reference, tailVerses);
+    const resolvedChunkLabel = chunkLabel?.trim() || passage.label?.trim() || undefined;
+
+    const completedPassage: Passage = {
+      id: this.generateId('psg'),
+      reference: completedRef,
+      verses: prefixVerses,
+      createdAt: isoNow,
+      updatedAt: isoNow,
+      ...(resolvedChunkLabel ? { label: resolvedChunkLabel } : {}),
+    };
+
+    const completedCard: Flashcard = {
+      ...targetCard,
+      id: this.generateId('card'),
+      passageId: completedPassage.id,
+      state: CardState.CARD_STATE_REVIEW,
+      learningStep: prefixVerses.length,
+      repetitions: Math.max(1, targetCard.repetitions || 0),
+      intervalDays: Math.max(1, targetCard.intervalDays || 1),
+      dueAt: targetCard.dueAt || isoNow,
+      updatedAt: isoNow,
+      isRepairCard: false,
+      isStitchedPassageCard: false,
+    };
+    delete completedCard.stitchedPassageIds;
+
+    const updatedRemainingPassage: Passage = {
+      ...passage,
+      reference: remainingRef,
+      verses: tailVerses,
+      updatedAt: isoNow,
+    };
+    if (!chunkLabel?.trim()) {
+      delete updatedRemainingPassage.label;
+    }
+
+    const updatedRemainingCard: Flashcard = {
+      ...targetCard,
+      state: CardState.CARD_STATE_LEARNING,
+      learningStep: 1,
+      dueAt: isoNow,
+      updatedAt: isoNow,
+    };
+
+    this.passages.update((prev) => {
+      const idx = prev.findIndex((p) => p.id === passage.id);
+      if (idx === -1) {
+        return [completedPassage, updatedRemainingPassage, ...prev];
+      }
+      const next = [...prev];
+      next.splice(idx, 1, completedPassage, updatedRemainingPassage);
+      return next;
+    });
+
+    this.flashcards.update((prev) => {
+      const idx = prev.findIndex((c) => c.id === targetCard.id);
+      if (idx === -1) {
+        return [completedCard, updatedRemainingCard, ...prev];
+      }
+      const next = [...prev];
+      next.splice(idx, 1, completedCard, updatedRemainingCard);
+      return next;
+    });
+
+    this.syncContiguousStitchedCards();
+    this.persistToStorage();
+
+    return {
+      completedChunk: {
+        passage: completedPassage,
+        card: completedCard,
+        isDue: this.srs.isDue(completedCard, now),
+      },
+      remainingPassage: {
+        passage: updatedRemainingPassage,
+        card: updatedRemainingCard,
+        isDue: true,
+      },
+    };
+  }
+
+  /**
+   * Merges 2+ passages (sorted in canonical verse order) into a single combined passage
+   * with combined reference, combined `verses`, and `learningStep` equal to the sum of learned verses,
+   * removing the old separate passages and calling `syncContiguousStitchedCards()`.
+   */
+  combinePassages(passageIds: string[], combinedLabel?: string): DeckItem | undefined {
+    if (!passageIds || passageIds.length < 2) {
+      return undefined;
+    }
+
+    const idSet = new Set(passageIds);
+    const allPassages = this.passages();
+    const allCards = this.flashcards();
+
+    const matchedPassages = new Map<string, { passage: Passage; card: Flashcard }>();
+    for (const p of allPassages) {
+      if (p.id.startsWith('psg_stitched_') || p.id.startsWith('psg_seam_')) {
+        continue;
+      }
+      const mainCard = allCards.find((c) => c.passageId === p.id && !c.isRepairCard);
+      if (!mainCard) {
+        continue;
+      }
+      if (idSet.has(p.id) || idSet.has(mainCard.id)) {
+        matchedPassages.set(p.id, { passage: p, card: mainCard });
+      }
+    }
+
+    const items = Array.from(matchedPassages.values());
+    if (items.length < 2) {
+      return undefined;
+    }
+
+    // Sort in canonical verse order (by chapter and first verse)
+    items.sort((a, b) => {
+      const aMeta = this.extractBookAndChapterMeta(a.passage);
+      const bMeta = this.extractBookAndChapterMeta(b.passage);
+      if (aMeta.startChapter !== bMeta.startChapter) {
+        return aMeta.startChapter - bMeta.startChapter;
+      }
+      if (aMeta.startVerse !== bMeta.startVerse) {
+        return aMeta.startVerse - bMeta.startVerse;
+      }
+      return aMeta.endVerse - bMeta.endVerse;
+    });
+
+    const combinedVerses: Verse[] = items.flatMap((item) => {
+      const meta = this.extractBookAndChapterMeta(item.passage);
+      return item.passage.verses.map((v) => ({
+        ...v,
+        ...(v.chapterNumber && v.chapterNumber > 0
+          ? { chapterNumber: v.chapterNumber }
+          : meta.startChapter > 0
+            ? { chapterNumber: meta.startChapter }
+            : {}),
+      }));
+    });
+
+    if (combinedVerses.length === 0) {
+      return undefined;
+    }
+
+    const combinedRef = this.computeSubReference(items[0].passage.reference, combinedVerses);
+    const explicitLabel = combinedLabel?.trim();
+    const fallbackLabels = items
+      .map((item) => item.passage.label?.trim())
+      .filter((lbl): lbl is string => Boolean(lbl));
+    const resolvedLabel =
+      explicitLabel || (fallbackLabels.length > 0 ? fallbackLabels.join(' + ') : undefined);
+
+    const learnedVerseSum = items.reduce((sum, item) => {
+      const maxForItem = Math.max(1, item.passage.verses.length);
+      const itemStep = Math.max(1, Math.min(item.card.learningStep || 1, maxForItem));
+      if (item.card.state === CardState.CARD_STATE_NEW && itemStep === 1) {
+        return sum;
+      }
+      return sum + itemStep;
+    }, 0);
+
+    const finalStep = Math.max(1, Math.min(learnedVerseSum || 1, combinedVerses.length));
+    const anyActive = items.some((item) => item.card.state !== CardState.CARD_STATE_NEW);
+    const allReview =
+      items.every((item) => item.card.state === CardState.CARD_STATE_REVIEW) &&
+      finalStep >= combinedVerses.length;
+    const nextState = allReview
+      ? CardState.CARD_STATE_REVIEW
+      : anyActive
+        ? CardState.CARD_STATE_LEARNING
+        : CardState.CARD_STATE_NEW;
+
+    const maxInterval = Math.max(0, ...items.map((i) => i.card.intervalDays || 0));
+    const maxReps = Math.max(0, ...items.map((i) => i.card.repetitions || 0));
+
+    const now = new Date();
+    const isoNow = now.toISOString();
+    const combinedPassage: Passage = {
+      id: this.generateId('psg'),
+      reference: combinedRef,
+      verses: combinedVerses,
+      createdAt: isoNow,
+      updatedAt: isoNow,
+      ...(resolvedLabel ? { label: resolvedLabel } : {}),
+    };
+
+    const combinedCard: Flashcard = {
+      ...this.srs.createInitialFlashcard(combinedPassage.id, now),
+      state: nextState,
+      learningStep: finalStep,
+      intervalDays: maxInterval,
+      repetitions: maxReps,
+      dueAt: isoNow,
+      updatedAt: isoNow,
+    };
+
+    const removedPassageIds = new Set(items.map((i) => i.passage.id));
+    this.passages.update((prev) => {
+      const firstIdx = prev.findIndex((p) => removedPassageIds.has(p.id));
+      const filtered = prev.filter((p) => !removedPassageIds.has(p.id));
+      if (firstIdx === -1) {
+        return [combinedPassage, ...filtered];
+      }
+      const insertAt = Math.min(firstIdx, filtered.length);
+      const next = [...filtered];
+      next.splice(insertAt, 0, combinedPassage);
+      return next;
+    });
+
+    this.flashcards.update((prev) => {
+      const filtered = prev.filter((c) => !removedPassageIds.has(c.passageId));
+      return [combinedCard, ...filtered];
+    });
+
+    this.syncContiguousStitchedCards();
+    this.persistToStorage();
+
+    return {
+      passage: combinedPassage,
+      card: combinedCard,
+      isDue: nextState !== CardState.CARD_STATE_NEW && this.srs.isDue(combinedCard, now),
+    };
+  }
+
+  /**
+   * Appends `newVerses` onto the end of an existing passage's `verses[]` (updating `reference` to
+   * `updatedReference` or auto-computing the new end verse in the reference e.g. `Romans 8:1-4` + `v. 5-8` -> `Romans 8:1-8`)
+   * while preserving the card's existing `learningStep` (`1..oldLength`) and SRS history so the user can incrementally expand!
+   */
+  appendVersesToPassage(
+    passageId: string,
+    newVerses: Verse[],
+    updatedReference?: string
+  ): DeckItem | undefined {
+    if (!newVerses || newVerses.length === 0) {
+      return undefined;
+    }
+
+    const cards = this.flashcards();
+    const targetCard =
+      cards.find((c) => c.passageId === passageId && !c.isRepairCard) ??
+      cards.find((c) => c.id === passageId && !c.isRepairCard);
+    const existing = this.passages().find(
+      (p) => p.id === (targetCard ? targetCard.passageId : passageId)
+    );
+    if (!existing || !targetCard) {
+      return undefined;
+    }
+
+    const oldLength = Math.max(1, existing.verses.length);
+    const lastExistingVerse = existing.verses[existing.verses.length - 1];
+    const baseVerseNum = lastExistingVerse?.verseNumber ?? existing.verses.length;
+    const baseChapterNum = lastExistingVerse?.chapterNumber;
+
+    const cleanAppended: Verse[] = newVerses
+      .map((v, idx) => ({
+        verseNumber: v.verseNumber > 0 ? v.verseNumber : baseVerseNum + idx + 1,
+        text: (v.text ?? '').trim(),
+        ...(v.chapterNumber && v.chapterNumber > 0
+          ? { chapterNumber: v.chapterNumber }
+          : baseChapterNum && baseChapterNum > 0
+            ? { chapterNumber: baseChapterNum }
+            : {}),
+      }))
+      .filter((v) => v.text.length > 0);
+
+    if (cleanAppended.length === 0) {
+      return undefined;
+    }
+
+    const combinedVerses: Verse[] = [...existing.verses, ...cleanAppended];
+    const resolvedRef =
+      updatedReference?.trim() || this.computeSubReference(existing.reference, combinedVerses);
+    const preservedStep = Math.max(1, Math.min(targetCard.learningStep || 1, oldLength));
+
+    const now = new Date();
+    const isoNow = now.toISOString();
+    const updatedPassage: Passage = {
+      ...existing,
+      reference: resolvedRef,
+      verses: combinedVerses,
+      updatedAt: isoNow,
+    };
+
+    const updatedCard: Flashcard = {
+      ...targetCard,
+      learningStep: preservedStep,
+      updatedAt: isoNow,
+    };
+
+    this.passages.update((prev) =>
+      prev.map((p) => (p.id === existing.id ? updatedPassage : p))
+    );
+    this.flashcards.update((prev) =>
+      prev.map((c) => (c.id === targetCard.id ? updatedCard : c))
+    );
+
+    this.syncContiguousStitchedCards();
+    this.persistToStorage();
+
+    return {
+      passage: updatedPassage,
+      card: updatedCard,
+      isDue:
+        updatedCard.state !== CardState.CARD_STATE_NEW && this.srs.isDue(updatedCard, now),
+    };
+  }
+
+  private computeSubReference(baseReference: string, verses: Verse[]): string {
+    if (!verses || verses.length === 0) {
+      return baseReference;
+    }
+    const match = baseReference
+      .trim()
+      .match(/^((?:[1-3]\s+)?[A-Za-z]+(?:\s+of\s+[A-Za-z]+|\s+[A-Za-z]+)?)\s+(\d+)/i);
+    if (!match) {
+      return baseReference;
+    }
+    const bookDisplay = match[1].trim();
+    const fallbackChap = parseInt(match[2], 10) || 1;
+    const first = verses[0];
+    const last = verses[verses.length - 1];
+    const startChap =
+      first.chapterNumber && first.chapterNumber > 0 ? first.chapterNumber : fallbackChap;
+    const endChap =
+      last.chapterNumber && last.chapterNumber > 0 ? last.chapterNumber : startChap;
+
+    if (startChap === endChap) {
+      if (first.verseNumber === last.verseNumber) {
+        return `${bookDisplay} ${startChap}:${first.verseNumber}`;
+      }
+      return `${bookDisplay} ${startChap}:${first.verseNumber}-${last.verseNumber}`;
+    }
+    return `${bookDisplay} ${startChap}:${first.verseNumber}-${endChap}:${last.verseNumber}`;
+  }
+
+  private extractBookAndChapterMeta(passage: Passage): {
+    bookKey: string;
+    startChapter: number;
+    startVerse: number;
+    endChapter: number;
+    endVerse: number;
+  } {
+    const match = passage.reference
+      .trim()
+      .match(/^((?:[1-3]\s+)?[A-Za-z]+(?:\s+of\s+[A-Za-z]+|\s+[A-Za-z]+)?)\s+(\d+)/i);
+    const bookKey = match ? match[1].trim().toLowerCase() : '';
+    const refChap = match ? parseInt(match[2], 10) || 1 : 1;
+    const first = passage.verses[0];
+    const last = passage.verses[passage.verses.length - 1];
+    const startChapter =
+      first?.chapterNumber && first.chapterNumber > 0 ? first.chapterNumber : refChap;
+    const startVerse = first?.verseNumber ?? 1;
+    const endChapter =
+      last?.chapterNumber && last.chapterNumber > 0 ? last.chapterNumber : startChapter;
+    const endVerse = last?.verseNumber ?? startVerse;
+    return { bookKey, startChapter, startVerse, endChapter, endVerse };
+  }
+
+  /**
    * Parses raw pasted text (and optional explicit reference) and adds it to the Memorization Queue.
    */
   addFromRawText(rawText: string, explicitReference?: string, label?: string): DeckItem {
@@ -1057,11 +1510,185 @@ export class StorageService {
    * Deletes a passage along with its flashcards and review logs.
    */
   deletePassage(passageId: string): void {
-    this.passages.update((prev) => prev.filter((p) => p.id !== passageId));
-    this.flashcards.update((prev) => prev.filter((c) => c.passageId !== passageId));
-    this.reviewLogs.update((prev) => prev.filter((r) => r.passageId !== passageId));
+    this.deletePassages([passageId]);
+  }
+
+  /**
+   * Batch deletes multiple passages (accepting either passage IDs or card IDs) along with their flashcards and review logs.
+   */
+  deletePassages(passageIds: string[]): void {
+    if (!passageIds || passageIds.length === 0) {
+      return;
+    }
+
+    const inputSet = new Set(passageIds);
+    const targetPassageIds = new Set<string>(passageIds);
+    for (const card of this.flashcards()) {
+      if (inputSet.has(card.id)) {
+        targetPassageIds.add(card.passageId);
+      }
+    }
+
+    this.passages.update((prev) => prev.filter((p) => !targetPassageIds.has(p.id)));
+    this.flashcards.update((prev) =>
+      prev.filter((c) => !targetPassageIds.has(c.passageId) && !inputSet.has(c.id))
+    );
+    this.reviewLogs.update((prev) => prev.filter((r) => !targetPassageIds.has(r.passageId)));
     this.syncContiguousStitchedCards();
     this.persistToStorage();
+  }
+
+  /**
+   * Resets a card back to `CardState.CARD_STATE_NEW` (`repetitions = 0`, `intervalDays = 0`,
+   * `learningStep = 1`, `isStitchedPassageCard = false`) so the user can move any `DUE` or `KNOWN` card back to `NEW`.
+   */
+  moveCardToNew(cardOrPassageId: string): void {
+    this.moveCardsToNew([cardOrPassageId]);
+  }
+
+  /**
+   * Batch resets one or more cards back to `CardState.CARD_STATE_NEW`.
+   */
+  moveCardsToNew(cardOrPassageIds: string[]): void {
+    if (!cardOrPassageIds || cardOrPassageIds.length === 0) {
+      return;
+    }
+
+    const idSet = new Set(cardOrPassageIds);
+    const cards = this.flashcards();
+    const targetPassageIds = new Set<string>();
+
+    for (const card of cards) {
+      if (idSet.has(card.id) || idSet.has(card.passageId)) {
+        if (card.isStitchedPassageCard && Array.isArray(card.stitchedPassageIds)) {
+          for (const pid of card.stitchedPassageIds) {
+            targetPassageIds.add(pid);
+          }
+        }
+        targetPassageIds.add(card.passageId);
+      }
+    }
+
+    const isoNow = new Date().toISOString();
+    this.flashcards.update((prev) =>
+      prev
+        .filter((c) => !(c.isRepairCard && (idSet.has(c.id) || targetPassageIds.has(c.passageId))))
+        .map((c) => {
+          if (c.isRepairCard || (!idSet.has(c.id) && !targetPassageIds.has(c.passageId))) {
+            return c;
+          }
+          const updated: Flashcard = {
+            ...c,
+            state: CardState.CARD_STATE_NEW,
+            repetitions: 0,
+            intervalDays: 0,
+            learningStep: 1,
+            isStitchedPassageCard: false,
+            dueAt: isoNow,
+            updatedAt: isoNow,
+          };
+          delete updated.stitchedPassageIds;
+          return updated;
+        })
+    );
+
+    this.syncContiguousStitchedCards();
+    this.persistToStorage();
+  }
+
+  /**
+   * Moves `NEW` (or existing) card(s) into the `DUE` / Review deck:
+   * sets `state` to `CardState.CARD_STATE_REVIEW` if `knowEntirePassage` is true (otherwise `CardState.CARD_STATE_LEARNING`),
+   * sets `learningStep = knowEntirePassage ? passage.verses.length : Math.max(1, card.learningStep || 1)`,
+   * and sets `dueAt = new Date().toISOString()`.
+   */
+  moveCardsToReviewDeck(cardOrPassageIds: string[], knowEntirePassage = false): void {
+    if (!cardOrPassageIds || cardOrPassageIds.length === 0) {
+      return;
+    }
+
+    const idSet = new Set(cardOrPassageIds);
+    const passageById = new Map<string, Passage>();
+    for (const p of this.passages()) {
+      passageById.set(p.id, p);
+    }
+
+    const isoNow = new Date().toISOString();
+    this.flashcards.update((prev) =>
+      prev.map((c) => {
+        if (c.isRepairCard || (!idSet.has(c.id) && !idSet.has(c.passageId))) {
+          return c;
+        }
+        const passage = passageById.get(c.passageId);
+        const maxVerses = Math.max(1, passage?.verses.length ?? 1);
+        const nextStep = knowEntirePassage
+          ? maxVerses
+          : Math.max(1, Math.min(c.learningStep || 1, maxVerses));
+        const nextState = knowEntirePassage
+          ? CardState.CARD_STATE_REVIEW
+          : c.state === CardState.CARD_STATE_NEW
+            ? CardState.CARD_STATE_LEARNING
+            : c.state;
+        const nextReps = knowEntirePassage ? Math.max(1, c.repetitions || 0) : c.repetitions || 0;
+
+        return {
+          ...c,
+          state: nextState,
+          learningStep: nextStep,
+          repetitions: nextReps,
+          dueAt: isoNow,
+          updatedAt: isoNow,
+        };
+      })
+    );
+
+    this.syncContiguousStitchedCards();
+    this.persistToStorage();
+  }
+
+  /**
+   * Marks the entire passage as known (`learningStep = passage.verses.length`,
+   * `state = CardState.CARD_STATE_REVIEW`, `repetitions = Math.max(1, card.repetitions)`,
+   * `dueAt = new Date().toISOString()`) so the New/Stitch UI goes away and the full passage enters Review.
+   */
+  markEntirePassageKnown(cardOrPassageId: string): DeckItem | undefined {
+    const cards = this.flashcards();
+    const targetCard =
+      cards.find((c) => c.id === cardOrPassageId && !c.isRepairCard) ??
+      cards.find((c) => c.passageId === cardOrPassageId && !c.isRepairCard);
+    if (!targetCard) {
+      return undefined;
+    }
+
+    const passage = this.passages().find((p) => p.id === targetCard.passageId);
+    if (!passage) {
+      return undefined;
+    }
+
+    const now = new Date();
+    const isoNow = now.toISOString();
+    const maxVerses = Math.max(1, passage.verses.length);
+
+    const updatedCard: Flashcard = {
+      ...targetCard,
+      state: CardState.CARD_STATE_REVIEW,
+      learningStep: maxVerses,
+      repetitions: Math.max(1, targetCard.repetitions || 0),
+      dueAt: isoNow,
+      updatedAt: isoNow,
+    };
+
+    this.flashcards.update((prev) =>
+      prev.map((c) => (c.id === targetCard.id ? updatedCard : c))
+    );
+    this.syncContiguousStitchedCards();
+    this.persistToStorage();
+
+    return {
+      passage,
+      card: updatedCard,
+      isDue: this.srs.isDue(updatedCard, now),
+    };
   }
 
   /**
@@ -1602,7 +2229,15 @@ export class StorageService {
       this.passages.set([]);
       this.flashcards.set([]);
       this.reviewLogs.set([]);
+      this.hasUnsavedFileChanges.set(false);
       return;
+    }
+
+    try {
+      const unsavedFlag = localStorage.getItem(UNSAVED_FILE_CHANGES_KEY) === 'true';
+      this.hasUnsavedFileChanges.set(unsavedFlag);
+    } catch {
+      this.hasUnsavedFileChanges.set(false);
     }
 
     try {
@@ -1644,6 +2279,21 @@ export class StorageService {
     }
   }
 
+  private setUnsavedFileChanges(dirty: boolean): void {
+    this.hasUnsavedFileChanges.set(dirty);
+    if (typeof localStorage !== 'undefined') {
+      try {
+        if (dirty) {
+          localStorage.setItem(UNSAVED_FILE_CHANGES_KEY, 'true');
+        } else {
+          localStorage.removeItem(UNSAVED_FILE_CHANGES_KEY);
+        }
+      } catch {
+        // Ignore storage errors
+      }
+    }
+  }
+
   private persistToStorage(): void {
     if (typeof localStorage !== 'undefined') {
       try {
@@ -1654,16 +2304,75 @@ export class StorageService {
       }
     }
 
-    // Automatically trigger background write to Active Memory Data File if connected
+    // Rate-limit / debounce background writes to the Active Memory Data File by 600ms
     if (this.fileHandle || this.isSimulatedFile) {
-      void this.writeToActiveFileHandle();
+      if (this.isSimulatedFile) {
+        const nowIso = new Date().toISOString();
+        const currentName = this.activeFileName() ?? DEFAULT_MEMORY_FILE_NAME;
+        this.saveSimulatedFileMeta(currentName, nowIso, this.exportProtoJson(true));
+        this.lastFileSavedAt.set(nowIso);
+        this.setUnsavedFileChanges(false);
+        this.activeFileStatus.set('saved');
+      } else {
+        // Mark as having unsaved changes until the background file write succeeds
+        this.setUnsavedFileChanges(true);
+      }
+      this.scheduleDebouncedFileWrite();
     }
   }
 
-  private async writeToActiveFileHandle(): Promise<void> {
+  private scheduleDebouncedFileWrite(): void {
     if (!this.fileHandle && !this.isSimulatedFile) {
       return;
     }
+    this.clearFileSaveDebounceTimer();
+    this.fileSaveDebounceTimer = setTimeout(() => {
+      this.fileSaveDebounceTimer = null;
+      void this.writeToActiveFileHandle(false);
+    }, FILE_SAVE_DEBOUNCE_MS);
+  }
+
+  private clearFileSaveDebounceTimer(): void {
+    if (this.fileSaveDebounceTimer !== null) {
+      clearTimeout(this.fileSaveDebounceTimer);
+      this.fileSaveDebounceTimer = null;
+    }
+  }
+
+  private registerLifecycleFlushListeners(): void {
+    if (this.lifecycleFlushListenersRegistered || typeof window === 'undefined') {
+      return;
+    }
+    this.lifecycleFlushListenersRegistered = true;
+
+    window.addEventListener('beforeunload', () => {
+      if (this.fileSaveDebounceTimer !== null) {
+        this.clearFileSaveDebounceTimer();
+        void this.writeToActiveFileHandle(false);
+      }
+    });
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden' && this.fileSaveDebounceTimer !== null) {
+          this.clearFileSaveDebounceTimer();
+          void this.writeToActiveFileHandle(false);
+        }
+      });
+    }
+  }
+
+  private setFileError(err: string | null): void {
+    this.lastFileSaveError.set(err);
+    this.fileSyncError.set(err);
+  }
+
+  private async writeToActiveFileHandle(requestPermIfNeeded = false): Promise<void> {
+    if (!this.fileHandle && !this.isSimulatedFile) {
+      return;
+    }
+
+    this.clearFileSaveDebounceTimer();
 
     if (this.isWritingFile) {
       this.pendingWriteRequested = true;
@@ -1671,7 +2380,8 @@ export class StorageService {
     }
 
     this.isWritingFile = true;
-    this.fileSyncError.set(null);
+    this.isSavingToFile.set(true);
+    this.setFileError(null);
     this.activeFileStatus.set('saving');
 
     try {
@@ -1681,29 +2391,31 @@ export class StorageService {
 
         if (this.isSimulatedFile) {
           const nowIso = new Date().toISOString();
-          const currentName = this.activeFileName() ?? 'bible-memory.proto.json';
+          const currentName = this.activeFileName() ?? DEFAULT_MEMORY_FILE_NAME;
           this.saveSimulatedFileMeta(currentName, nowIso, prettyPayload);
           this.lastFileSavedAt.set(nowIso);
+          this.setUnsavedFileChanges(false);
           this.activeFileStatus.set('saved');
         } else if (this.fileHandle) {
           if (typeof this.fileHandle.queryPermission === 'function') {
             let perm = await this.fileHandle.queryPermission({ mode: 'readwrite' });
-            if (perm !== 'granted' && typeof this.fileHandle.requestPermission === 'function') {
+            if (
+              perm !== 'granted' &&
+              requestPermIfNeeded &&
+              typeof this.fileHandle.requestPermission === 'function'
+            ) {
               try {
-                // Attempt to request permission right inside the current user gesture (e.g. grading a card, adding a passage)
                 perm = await this.fileHandle.requestPermission({ mode: 'readwrite' });
               } catch {
-                // No active user gesture yet; stay in 'connected' and wait for first click/keydown
-                this.activeFileStatus.set('connected');
-                this.registerFirstGesturePermissionListener();
+                this.setUnsavedFileChanges(true);
+                this.activeFileStatus.set('needs-permission');
                 return;
               }
             }
             if (perm !== 'granted') {
-              this.activeFileStatus.set(perm === 'denied' ? 'needs-permission' : 'connected');
-              if (perm === 'prompt') {
-                this.registerFirstGesturePermissionListener();
-              }
+              // Never call requestPermission in the background! Keep changes safely in localStorage and flag unsaved state.
+              this.setUnsavedFileChanges(true);
+              this.activeFileStatus.set('needs-permission');
               return;
             }
           }
@@ -1714,21 +2426,23 @@ export class StorageService {
 
           const nowIso = new Date().toISOString();
           this.lastFileSavedAt.set(nowIso);
+          this.setUnsavedFileChanges(false);
           this.activeFileStatus.set('saved');
         }
       } while (this.pendingWriteRequested);
     } catch (err: unknown) {
+      this.setUnsavedFileChanges(true);
       if (err instanceof DOMException && err.name === 'SecurityError') {
-        this.activeFileStatus.set('connected');
-        this.registerFirstGesturePermissionListener();
+        this.activeFileStatus.set('needs-permission');
         return;
       }
-      this.fileSyncError.set(
+      this.setFileError(
         err instanceof Error ? err.message : 'Auto-save to active file failed.'
       );
       this.activeFileStatus.set('error');
     } finally {
       this.isWritingFile = false;
+      this.isSavingToFile.set(false);
     }
   }
 
@@ -1754,60 +2468,18 @@ export class StorageService {
         const perm = await savedHandle.queryPermission({ mode: 'readwrite' });
         if (perm === 'granted') {
           this.activeFileStatus.set('saved');
-          await this.writeToActiveFileHandle();
-        } else if (perm === 'prompt') {
-          // Show as connected and seamlessly request write permission on the user's very first interaction
-          this.activeFileStatus.set('connected');
-          this.registerFirstGesturePermissionListener();
+          if (this.hasUnsavedFileChanges()) {
+            await this.writeToActiveFileHandle(false);
+          }
         } else {
+          // Do NOT ambush the user with a permission popup on first click; stay in needs-permission
           this.activeFileStatus.set('needs-permission');
         }
       } else {
         this.activeFileStatus.set('saved');
       }
     } catch {
-      this.activeFileStatus.set('connected');
-      this.registerFirstGesturePermissionListener();
-    }
-  }
-
-  private registerFirstGesturePermissionListener(): void {
-    if (this.gestureListenerRegistered || typeof window === 'undefined') {
-      return;
-    }
-    this.gestureListenerRegistered = true;
-
-    const onFirstGesture = () => {
-      window.removeEventListener('pointerdown', onFirstGesture, true);
-      window.removeEventListener('keydown', onFirstGesture, true);
-      this.gestureListenerRegistered = false;
-      void this.ensurePermissionOnFirstGesture();
-    };
-
-    window.addEventListener('pointerdown', onFirstGesture, { capture: true, passive: true });
-    window.addEventListener('keydown', onFirstGesture, { capture: true, passive: true });
-  }
-
-  private async ensurePermissionOnFirstGesture(): Promise<void> {
-    if (!this.fileHandle) {
-      return;
-    }
-    try {
-      if (typeof this.fileHandle.queryPermission === 'function') {
-        let perm = await this.fileHandle.queryPermission({ mode: 'readwrite' });
-        if (perm !== 'granted' && typeof this.fileHandle.requestPermission === 'function') {
-          perm = await this.fileHandle.requestPermission({ mode: 'readwrite' });
-        }
-        if (perm === 'granted') {
-          await this.writeToActiveFileHandle();
-        } else if (perm === 'denied') {
-          this.activeFileStatus.set('needs-permission');
-        }
-      } else {
-        await this.writeToActiveFileHandle();
-      }
-    } catch {
-      // Keep status as connected so next user action can retry
+      this.activeFileStatus.set('needs-permission');
     }
   }
 
@@ -1839,7 +2511,7 @@ export class StorageService {
     return new Promise<boolean>((resolve) => {
       const input = document.createElement('input');
       input.type = 'file';
-      input.accept = '.json,.proto.json,application/json';
+      input.accept = '.selahmemory,.json,.proto.json,application/json';
       input.style.display = 'none';
 
       input.onchange = async () => {
@@ -1858,8 +2530,8 @@ export class StorageService {
           await this.connectSimulatedDataFile(file.name);
           resolve(true);
         } catch (err: unknown) {
-          this.fileSyncError.set(
-            err instanceof Error ? err.message : 'Invalid ProtoJSON file selected.'
+          this.setFileError(
+            err instanceof Error ? err.message : 'Invalid memory file selected.'
           );
           if (!this.fileHandle && !this.isSimulatedFile) {
             this.activeFileName.set(null);

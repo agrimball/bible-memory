@@ -53,6 +53,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   readonly showAddPassageModal = signal<boolean>(false);
   readonly editingPassage = signal<Passage | null>(null);
+  readonly appendingToPassage = signal<Passage | null>(null);
   readonly showProtoSyncModal = signal<boolean>(false);
 
   /** Computed aliases matching the selah_ui_session_v1 schema */
@@ -88,7 +89,8 @@ export class AppComponent implements OnInit, OnDestroy {
       return 0;
     }
     const total = item.passage.verses.length;
-    if (item.card.state === CardState.CARD_STATE_REVIEW) {
+    const savedStep = item.card.learningStep || 1;
+    if (item.card.state === CardState.CARD_STATE_REVIEW && savedStep >= total) {
       return total;
     }
     const map = this.stitchedCountByPassageId();
@@ -96,12 +98,52 @@ export class AppComponent implements OnInit, OnDestroy {
     if (fromMap && fromMap >= 1 && fromMap <= total) {
       return fromMap;
     }
-    const savedStep = item.card.learningStep;
+    if (item.card.state === CardState.CARD_STATE_NEW) {
+      return total;
+    }
     if (savedStep >= 1 && savedStep <= total) {
       return savedStep;
     }
     return 1;
   });
+
+  hasActiveFileHandle(): boolean {
+    const svc = this.storageService as StorageService & {
+      hasActiveFileHandle?: () => boolean;
+    };
+    if (typeof svc.hasActiveFileHandle === 'function') {
+      return svc.hasActiveFileHandle();
+    }
+    return Boolean(this.storageService.activeFileName());
+  }
+
+  filePermissionState(): string {
+    const svc = this.storageService as StorageService & {
+      filePermissionState?: () => string;
+    };
+    if (typeof svc.filePermissionState === 'function') {
+      return svc.filePermissionState();
+    }
+    const status = this.storageService.activeFileStatus();
+    if (status === 'saved' || status === 'saving') {
+      return 'granted';
+    }
+    if (status === 'needs-permission' || status === 'error') {
+      return 'denied';
+    }
+    return this.storageService.activeFileName() ? 'granted' : 'prompt';
+  }
+
+  cloudStatusTitle(): string {
+    const status = this.storageService.fileConnectionStatus();
+    if (status === 'connected') {
+      return 'Memory File connected & auto-saving';
+    }
+    if (status === 'unsaved-disconnected') {
+      return 'Unsaved changes — tap to reconnect & save to file';
+    }
+    return 'Select or create a .selahmemory file';
+  }
 
   private isHandlingPopState = false;
   private readonly boundPopState = () => {
@@ -362,6 +404,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   openAddModal(): void {
     this.editingPassage.set(null);
+    this.appendingToPassage.set(null);
     this.isDrawerOpen.set(false);
     this.showAddPassageModal.set(true);
     this.pushHistoryEntry('add-modal');
@@ -373,15 +416,30 @@ export class AppComponent implements OnInit, OnDestroy {
       return;
     }
     const passage = 'passage' in target ? target.passage : target;
+    this.appendingToPassage.set(null);
     this.editingPassage.set(passage);
     this.isDrawerOpen.set(false);
     this.showAddPassageModal.set(true);
     this.pushHistoryEntry('edit-modal');
   }
 
+  openAppendPassageModal(itemOrPassage?: DeckItem | Passage | null): void {
+    const target = itemOrPassage ?? this.currentStudyItem();
+    if (!target) {
+      return;
+    }
+    const passage = 'passage' in target ? target.passage : target;
+    this.editingPassage.set(null);
+    this.appendingToPassage.set(passage);
+    this.isDrawerOpen.set(false);
+    this.showAddPassageModal.set(true);
+    this.pushHistoryEntry('append-modal');
+  }
+
   closeAddPassageModal(): void {
     this.showAddPassageModal.set(false);
     this.editingPassage.set(null);
+    this.appendingToPassage.set(null);
   }
 
   openSyncModal(): void {
@@ -391,11 +449,17 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   async onDrawerOpenFile(): Promise<void> {
-    await this.storageService.selectExistingDataFile();
+    const ok = await this.storageService.selectExistingDataFile();
+    if (ok) {
+      this.closeDrawer();
+    }
   }
 
   async onDrawerCreateFile(): Promise<void> {
-    await this.storageService.createNewDataFile();
+    const ok = await this.storageService.createNewDataFile();
+    if (ok) {
+      this.closeDrawer();
+    }
   }
 
   onDeckTabChange(tab: 'queue' | 'due' | 'active'): void {
@@ -454,10 +518,30 @@ export class AppComponent implements OnInit, OnDestroy {
       ...prev,
       [item.passage.id]: count,
     }));
-    const svc = this.storageService as StorageService & {
-      updateStitchedVerseStep?: (cardId: string, step: number) => void;
-    };
-    svc.updateStitchedVerseStep?.(item.card.id, count);
+    if (item.card.state !== CardState.CARD_STATE_NEW) {
+      const svc = this.storageService as StorageService & {
+        updateStitchedVerseStep?: (cardId: string, step: number) => void;
+      };
+      svc.updateStitchedVerseStep?.(item.card.id, count);
+    }
+  }
+
+  onChunkCarved(remainingItem: DeckItem): void {
+    this.stitchedCountByPassageId.update((prev) => {
+      const next = { ...prev };
+      delete next[remainingItem.passage.id];
+      return next;
+    });
+    const queue = [...this.studyQueueIds()];
+    const idx = this.currentQueueIndex();
+    if (idx >= 0 && idx < queue.length) {
+      queue[idx] = remainingItem.card.id;
+      this.studyQueueIds.set(queue);
+    } else {
+      this.studyQueueIds.set([remainingItem.card.id]);
+      this.currentQueueIndex.set(0);
+    }
+    this.saveUiSession();
   }
 
   openFirstLetterStudyPage(item: DeckItem): void {
@@ -515,9 +599,11 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   onPassageAdded(_item: DeckItem): void {
-    const wasEditingInStudy = this.editingPassage() !== null && this.activeView() !== 'dashboard';
+    const wasEditingOrAppendingInStudy =
+      (this.editingPassage() !== null || this.appendingToPassage() !== null) &&
+      this.activeView() !== 'dashboard';
     this.closeAddPassageModal();
-    if (!wasEditingInStudy) {
+    if (!wasEditingOrAppendingInStudy) {
       this.dashboardTab.set('queue');
       this.activeView.set('dashboard');
     }

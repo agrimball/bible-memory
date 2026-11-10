@@ -103,7 +103,119 @@ function runSrsServiceTests(): void {
   assertEqual(stitchedCard?.isStitchedPassageCard, true, 'Stitched card has isStitchedPassageCard = true');
   assertEqual(stitchedCard?.stitchedPassageIds?.length, 2, 'Stitched card tracks both source passage IDs');
 
-  console.log('✓ srs.service.spec.ts: All SM-2 scheduling, interval, and contiguous stitched/seam card assertions passed.');
+  // 8. Test new deck management methods & .selahmemory connection status helpers
+  const { DEFAULT_MEMORY_FILE_NAME } = require('./storage.service') as typeof import('./storage.service');
+  assertEqual(DEFAULT_MEMORY_FILE_NAME, 'verses.selahmemory', 'Default memory file name is verses.selahmemory');
+  assertEqual(storage.fileConnectionStatus(), 'local-only', 'Initial fileConnectionStatus is local-only');
+  assertEqual(storage.isSavingToFile(), false, 'Initial isSavingToFile is false');
+  assertEqual(storage.hasUnsavedFileChanges(), false, 'Initial hasUnsavedFileChanges is false');
+  assertEqual(storage.lastFileSaveError(), null, 'Initial lastFileSaveError is null');
+
+  // Verify disconnected-clean vs unsaved-disconnected state machine
+  storage.activeFileName.set('verses.selahmemory');
+  storage.activeFileStatus.set('needs-permission');
+  storage.hasUnsavedFileChanges.set(false);
+  assertEqual(
+    storage.fileConnectionStatus(),
+    'disconnected-clean',
+    'Disconnected with no unsaved edits reports disconnected-clean'
+  );
+  storage.hasUnsavedFileChanges.set(true);
+  assertEqual(
+    storage.fileConnectionStatus(),
+    'unsaved-disconnected',
+    'Disconnected with unsaved edits reports unsaved-disconnected'
+  );
+  storage.activeFileStatus.set('saved');
+  storage.hasUnsavedFileChanges.set(false);
+  assertEqual(storage.fileConnectionStatus(), 'connected', 'Saved file reports connected');
+  storage.disconnectDataFile();
+  assertEqual(storage.fileConnectionStatus(), 'local-only', 'Disconnected file resets to local-only');
+
+  // Test moveCardToNew / moveCardsToNew
+  storage.moveCardToNew(chunkA.card.id);
+  const resetCardA = storage.flashcards().find((c) => c.id === chunkA.card.id);
+  assertEqual(resetCardA?.state, CardState.CARD_STATE_NEW, 'moveCardToNew resets state to CARD_STATE_NEW');
+  assertEqual(resetCardA?.repetitions, 0, 'moveCardToNew resets repetitions to 0');
+  assertEqual(resetCardA?.intervalDays, 0, 'moveCardToNew resets intervalDays to 0');
+  assertEqual(resetCardA?.learningStep, 1, 'moveCardToNew resets learningStep to 1');
+
+  // Test moveCardsToReviewDeck (knowEntirePassage = false and true)
+  storage.moveCardsToReviewDeck([chunkA.card.id], false);
+  const learningCardA = storage.flashcards().find((c) => c.id === chunkA.card.id);
+  assertEqual(learningCardA?.state, CardState.CARD_STATE_LEARNING, 'moveCardsToReviewDeck(false) sets LEARNING');
+  assertEqual(learningCardA?.learningStep, 1, 'moveCardsToReviewDeck(false) keeps learningStep = 1');
+
+  storage.moveCardsToNew([chunkA.card.id, chunkB.card.id]);
+  assertEqual(storage.queuedDeckItems().length, 2, 'moveCardsToNew moves both cards to NEW');
+
+  storage.moveCardsToReviewDeck([chunkA.card.id], true);
+  const reviewCardA = storage.flashcards().find((c) => c.id === chunkA.card.id);
+  assertEqual(reviewCardA?.state, CardState.CARD_STATE_REVIEW, 'moveCardsToReviewDeck(true) sets REVIEW');
+  assertEqual(reviewCardA?.learningStep, 2, 'moveCardsToReviewDeck(true) sets full verse count');
+
+  // Test markEntirePassageKnown
+  const knownItemB = storage.markEntirePassageKnown(chunkB.card.id);
+  assertEqual(knownItemB?.card.state, CardState.CARD_STATE_REVIEW, 'markEntirePassageKnown sets REVIEW');
+  assertEqual(knownItemB?.card.learningStep, 2, 'markEntirePassageKnown sets full verse count');
+  assertTrue((knownItemB?.card.repetitions ?? 0) >= 1, 'markEntirePassageKnown sets repetitions >= 1');
+
+  // Test deletePassages
+  storage.deletePassages([chunkA.passage.id, chunkB.passage.id]);
+  assertEqual(storage.passages().length, 0, 'deletePassages removes all specified passages');
+  assertEqual(storage.flashcards().length, 0, 'deletePassages removes associated flashcards');
+
+  // Test resetToDefaults / clearAllData resets to ZERO passages
+  storage.addPassage('Psalm 117:1', [{ verseNumber: 1, text: 'Praise the LORD, all nations!' }]);
+  storage.resetToDefaults();
+  assertEqual(storage.passages().length, 0, 'resetToDefaults resets to 0 passages');
+  assertEqual(storage.flashcards().length, 0, 'resetToDefaults resets to 0 flashcards');
+
+  // 9. Test incremental chunking (carveOffPrefixAsNamedChunk), combinePassages, and appendVersesToPassage
+  const sermon = storage.addPassage(
+    'Matthew 5:1-5',
+    [
+      { chapterNumber: 5, verseNumber: 1, text: 'Seeing the crowds, he went up on the mountain,' },
+      { chapterNumber: 5, verseNumber: 2, text: 'And he opened his mouth and taught them, saying:' },
+      { chapterNumber: 5, verseNumber: 3, text: 'Blessed are the poor in spirit, for theirs is the kingdom of heaven.' },
+      { chapterNumber: 5, verseNumber: 4, text: 'Blessed are those who mourn, for they shall be comforted.' },
+      { chapterNumber: 5, verseNumber: 5, text: 'Blessed are the meek, for they shall inherit the earth.' },
+    ],
+    'Sermon on the Mount'
+  );
+  storage.updateStitchedVerseStep(sermon.card.id, 3);
+  const carved = storage.carveOffPrefixAsNamedChunk(sermon.card.id, 3, 'Beatitudes Intro');
+  assertTrue(Boolean(carved), 'carveOffPrefixAsNamedChunk succeeds for prefixVerseCount = 3');
+  assertEqual(carved?.completedChunk.passage.reference, 'Matthew 5:1-3', 'Carved completed chunk reference');
+  assertEqual(carved?.completedChunk.passage.label, 'Beatitudes Intro', 'Carved completed chunk label');
+  assertEqual(carved?.completedChunk.card.state, CardState.CARD_STATE_REVIEW, 'Carved completed chunk state is REVIEW');
+  assertEqual(carved?.completedChunk.card.learningStep, 3, 'Carved completed chunk learningStep is 3');
+  assertEqual(carved?.remainingPassage.passage.reference, 'Matthew 5:4-5', 'Carved remaining passage reference');
+  assertEqual(carved?.remainingPassage.card.state, CardState.CARD_STATE_LEARNING, 'Carved remaining passage state is LEARNING');
+  assertEqual(carved?.remainingPassage.card.learningStep, 1, 'Carved remaining passage starts at learningStep 1');
+
+  // Combine the two carved chunks back into one passage
+  const combined = storage.combinePassages(
+    [carved!.remainingPassage.passage.id, carved!.completedChunk.passage.id],
+    'Combined Beatitudes'
+  );
+  assertTrue(Boolean(combined), 'combinePassages merges 2 passages in canonical order');
+  assertEqual(combined?.passage.reference, 'Matthew 5:1-5', 'combinePassages computes combined reference');
+  assertEqual(combined?.passage.label, 'Combined Beatitudes', 'combinePassages sets combined label');
+  assertEqual(combined?.passage.verses.length, 5, 'combinePassages merges all 5 verses in order');
+  assertEqual(combined?.card.learningStep, 4, 'combinePassages sets learningStep to sum of learned verses (3 + 1 = 4)');
+
+  // Append verses to the existing passage while preserving learningStep
+  const appended = storage.appendVersesToPassage(combined!.passage.id, [
+    { chapterNumber: 5, verseNumber: 6, text: 'Blessed are those who hunger and thirst for righteousness,' },
+    { chapterNumber: 5, verseNumber: 7, text: 'Blessed are the merciful, for they shall receive mercy.' },
+  ]);
+  assertTrue(Boolean(appended), 'appendVersesToPassage appends new verses');
+  assertEqual(appended?.passage.reference, 'Matthew 5:1-7', 'appendVersesToPassage updates end verse in reference');
+  assertEqual(appended?.passage.verses.length, 7, 'appendVersesToPassage has 7 total verses');
+  assertEqual(appended?.card.learningStep, 4, 'appendVersesToPassage preserves existing learningStep (4)');
+
+  console.log('✓ srs.service.spec.ts: All SM-2 scheduling, interval, deck management, incremental chunking, and contiguous stitched/seam card assertions passed.');
 }
 
 runSrsServiceTests();
