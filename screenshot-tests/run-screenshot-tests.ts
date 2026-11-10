@@ -407,6 +407,10 @@ async function runScreenshotSuite(): Promise<void> {
     await page.locator('[data-testid="tab-active"]').waitFor({ state: 'visible', timeout: 15000 });
     await page.locator('[data-testid="tab-outline"]').waitFor({ state: 'visible', timeout: 15000 });
     await page.locator('[data-testid="passage-deck-list"]').waitFor({ state: 'visible', timeout: 15000 });
+    assertCondition(
+      (await page.locator('[data-testid="btn-study-due"]').count()) === 0,
+      'Expected [data-testid="btn-study-due"] (▶) to be hidden on NEW tab (tab-queue)'
+    );
 
     const newQueueText = await page.locator('[data-testid="passage-deck-list"]').innerText();
     assertCondition(
@@ -460,6 +464,11 @@ async function runScreenshotSuite(): Promise<void> {
     await page.locator('[data-testid="due-page-section"]').waitFor({ state: 'visible', timeout: 10000 });
     await page.locator('[data-testid="due-overall-time"]').waitFor({ state: 'visible', timeout: 10000 });
     await page.locator('[data-testid="btn-study-due"]').waitFor({ state: 'visible', timeout: 10000 });
+    assertCondition(
+      (await page.locator('[data-testid="btn-study-due"]').count()) === 1 &&
+        (await page.locator('[data-testid="btn-study-due"]').isVisible()),
+      'Expected [data-testid="btn-study-due"] (▶) to be visible on DUE tab when due cards exist'
+    );
 
     const dueListText = await page.locator('[data-testid="due-page-section"]').innerText();
     assertCondition(
@@ -478,7 +487,13 @@ async function runScreenshotSuite(): Promise<void> {
       ],
     });
 
-    // Switch back to NEW tab (tab-queue)
+    // Verify KNOWN tab (tab-active) hides [data-testid="btn-study-due"] (▶), then switch back to NEW tab (tab-queue)
+    await page.locator('[data-testid="tab-active"]').click();
+    await page.waitForTimeout(100);
+    assertCondition(
+      (await page.locator('[data-testid="btn-study-due"]').count()) === 0,
+      'Expected [data-testid="btn-study-due"] (▶) to be hidden on KNOWN tab (tab-active)'
+    );
     await page.locator('[data-testid="tab-queue"]').click();
     await page.locator('[data-testid="queue-page-section"]').waitFor({ state: 'visible', timeout: 10000 });
 
@@ -1143,6 +1158,10 @@ async function runScreenshotSuite(): Promise<void> {
     assertCondition(
       (await mobilePage.locator('[data-testid="outline-chunk-2-1"]').count()) === 0,
       'Expected sub-passages to be collapsed by default when 📖 OUTLINE opens'
+    );
+    assertCondition(
+      (await mobilePage.locator('[data-testid="btn-study-due"]').count()) === 0,
+      'Expected #btn-study-due (▶) to be hidden on OUTLINE tab so only #btn-fab-add (+) is shown'
     );
 
     // Click [data-testid="btn-outline-toggle-group-2"] ("Romans 8 · 3 passages") to expand ONLY the Romans 8 group

@@ -1045,18 +1045,20 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
 
       <!-- Floating Bottom Circular Action Buttons -->
       <div class="rm-fab-dock" role="toolbar" aria-label="Deck actions">
-        <button
-          id="btn-study-due"
-          type="button"
-          class="rm-fab rm-fab-play"
-          [disabled]="currentTabItems().length === 0"
-          (click)="onPlayFabClick()"
-          aria-label="Study cards"
-          title="Study cards in this tab"
-          data-testid="btn-study-due"
-        >
-          ▶
-        </button>
+        @if (activeTab === 'due' && dueTabItems().length > 0) {
+          <button
+            id="btn-study-due"
+            type="button"
+            class="rm-fab rm-fab-play"
+            [disabled]="dueTabItems().length === 0"
+            (click)="onPlayFabClick()"
+            aria-label="Study due cards"
+            title="Review all due passages"
+            data-testid="btn-study-due"
+          >
+            ▶
+          </button>
+        }
 
         <button
           id="btn-fab-add"
@@ -2282,6 +2284,7 @@ export class DeckDashboardComponent implements OnChanges {
   /** Multi-select state */
   readonly selectedCardIds = signal<Set<string>>(new Set());
   readonly confirmingDelete = signal<boolean>(false);
+  private readonly activeTabState = signal<DashboardTab>('queue');
 
   /** Outline expand/collapse (defaults to all groups collapsed) and fast inline label editing state */
   readonly expandedOutlineGroups = signal<Set<string>>(new Set());
@@ -2290,9 +2293,12 @@ export class DeckDashboardComponent implements OnChanges {
   readonly editingOutlineLabelDraft = signal<string>('');
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['activeTab'] && !changes['activeTab'].firstChange) {
-      this.clearSelection();
-      this.cancelInlineLabelEdit();
+    if (changes['activeTab']) {
+      this.activeTabState.set(this.activeTab);
+      if (!changes['activeTab'].firstChange) {
+        this.clearSelection();
+        this.cancelInlineLabelEdit();
+      }
     }
   }
 
@@ -2520,13 +2526,14 @@ export class DeckDashboardComponent implements OnChanges {
   });
 
   readonly currentTabItems = computed<DeckItem[]>(() => {
-    if (this.activeTab === 'due') {
+    const tab = this.activeTabState();
+    if (tab === 'due') {
       return this.dueTabItems();
     }
-    if (this.activeTab === 'active') {
+    if (tab === 'active') {
       return this.knownTabItems();
     }
-    if (this.activeTab === 'outline') {
+    if (tab === 'outline') {
       return this.basePassageItems();
     }
     return this.newTabItems();
@@ -2546,6 +2553,7 @@ export class DeckDashboardComponent implements OnChanges {
 
   selectTab(tab: DashboardTab): void {
     this.activeTab = tab;
+    this.activeTabState.set(tab);
     this.clearSelection();
     this.cancelInlineLabelEdit();
     if (tab === 'queue' || tab === 'due' || tab === 'active') {
@@ -3148,15 +3156,6 @@ export class DeckDashboardComponent implements OnChanges {
   onPlayFabClick(): void {
     if (this.activeTab === 'due' && this.dueTabItems().length > 0) {
       this.startDueSession.emit();
-      return;
-    }
-    const list = this.currentTabItems();
-    if (list.length > 0) {
-      if (this.startDueSession.observed && this.dueTabItems().length > 0) {
-        this.startDueSession.emit();
-      } else {
-        this.onRowClick(list[0]);
-      }
     }
   }
 
