@@ -948,11 +948,25 @@ async function runScreenshotSuite(): Promise<void> {
     await mobilePage.locator('[data-testid="card-recitation-time"]').waitFor({ state: 'visible', timeout: 10000 });
     await mobilePage.locator('[data-testid="btn-scope-sheet-toggle"]').waitFor({ state: 'visible', timeout: 10000 });
 
+    // Verify 💡 Opening hint shows the first verse being recited (v. 35: "Who shall separate us from"), NOT the last verse (v. 36: "As it is written")
+    await mobilePage.locator('[data-testid="btn-card-hint"]').click();
+    const hintCue = mobilePage.locator('[data-testid="new-verse-context-cue"]');
+    await hintCue.waitFor({ state: 'visible', timeout: 10000 });
+    const hintCueText = await hintCue.innerText();
+    assertCondition(
+      hintCueText.includes('Who shall separate us from') && !hintCueText.includes('As it is written'),
+      `Expected 💡 Opening hint on v. 35–36 stitch-block card to show opening words of v. 35 ("Who shall separate us from"), got "${hintCueText}"`
+    );
+    await mobilePage.locator('[data-testid="btn-card-hint"]').click();
+    await hintCue.waitFor({ state: 'hidden', timeout: 10000 });
+    await mobilePage.waitForTimeout(100);
+
     await captureStepScreenshot(mobilePage, 'mobile-03-flashcard-front.png', stepResults, {
       step: '9b',
       name: 'Mobile Phone (412x915): Clean Default Full-Screen Flashcard Front with Custom Label, Scoped Recitation Time & Topbar Scope Pill',
       assertions: [
         'Flashcard Front shows Romans 8:35-39 (More Than Conquerors) and scoped recitation time (⏱ ~25s (v. 35–36))',
+        '💡 Opening hint ([data-testid="btn-card-hint"]) displays the opening words of the first recited verse (v. 35: "Who shall separate us from") rather than the last stitched verse (v. 36)',
         '.compact-stitch-strip is hidden by default during normal review so the card front is 100% distraction-free',
       ],
     });

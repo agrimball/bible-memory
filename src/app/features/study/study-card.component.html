@@ -511,18 +511,24 @@
 
         <!-- Step 1 Preceding Verse Context Cue (or when 💡 Hint is toggled ON) -->
         <div
-          *ngIf="!isRepairCard() && resumeFromVerseIndex() === null && (showHint() || (stitchPhase() === 'new-verse-only' && leadInContextVerse()))"
+          *ngIf="(!isRepairCard() && resumeFromVerseIndex() === null && (showHint() || (stitchPhase() === 'new-verse-only' && leadInContextVerse()))) || (isRepairCard() && showHint())"
           class="front-context-cue"
           data-testid="new-verse-context-cue"
         >
-          <ng-container *ngIf="leadInContextVerse() as prevVerse; else firstWordsHint">
+          <ng-container *ngIf="!isRepairCard() && leadInContextVerse() as prevVerse; else firstWordsHint">
             <span class="cue-label">Lead-in ({{ getVerseVerboseLabel(prevVerse) }}):</span>
             <p class="cue-text">“{{ prevVerse.text }}”</p>
+            <ng-container *ngIf="showHint()">
+              <span class="cue-label" style="margin-top: 6px;">Opening hint:</span>
+              <p class="cue-text">
+                “{{ openingHintText() }}…”
+              </p>
+            </ng-container>
           </ng-container>
           <ng-template #firstWordsHint>
             <span class="cue-label">Opening hint:</span>
             <p class="cue-text">
-              “{{ (currentNewVerse()?.text || (item.passage.verses.length > 0 ? item.passage.verses[0].text : '') || '').split(' ').slice(0, 5).join(' ') }}…”
+              “{{ openingHintText() }}…”
             </p>
           </ng-template>
         </div>

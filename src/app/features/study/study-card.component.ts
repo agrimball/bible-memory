@@ -130,6 +130,18 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     return verses;
   });
 
+  readonly openingHintText = computed<string>(() => {
+    const firstRecited =
+      this.resumeTargetVerse() ??
+      this.recitedVerses()[0] ??
+      this.currentItemSignal()?.passage.verses[0] ??
+      null;
+    if (!firstRecited || !firstRecited.text) {
+      return '';
+    }
+    return firstRecited.text.trim().split(/\s+/).slice(0, 5).join(' ');
+  });
+
   readonly recitedVersesScopeLabel = computed<string>(() => {
     if (this.isRepairCard()) {
       return this.repairTargetLabel();
