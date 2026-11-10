@@ -1,4 +1,15 @@
-import { Component, EventEmitter, Output, computed, inject, signal } from '@angular/core';
+import {
+  Component,
+  EventEmitter,
+  Input,
+  OnChanges,
+  OnInit,
+  Output,
+  SimpleChanges,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -9,7 +20,9 @@ import {
 } from '../../core/services/bible-gateway.service';
 import { PassageParserService } from '../../core/services/passage-parser.service';
 import { DeckItem, StorageService } from '../../core/services/storage.service';
+import * as pb from '../../core/proto/bible_memory.pb';
 import {
+  Passage,
   Verse,
   formatVerseBadge,
   isMultiChapterPassage,
@@ -23,28 +36,52 @@ const ISAIAH_40_EXAMPLE_RAW = `[28] Have you not known? Have you not heard? The 
 
 const BG_VERSION_STORAGE_KEY = 'selah_bg_version_v1';
 
-const SUPERSCRIPT_DIGIT_MAP: Record<string, string> = {
-  '⁰': '0',
-  '¹': '1',
-  '²': '2',
-  '³': '3',
-  '⁴': '4',
-  '⁵': '5',
-  '⁶': '6',
-  '⁷': '7',
-  '⁸': '8',
-  '⁹': '9',
-};
+const VERSE_MARKER_CHECK_REGEX =
+  /(\[\d{1,3}(?::\d{1,3})?\]|\(\d{1,3}(?::\d{1,3})?\)|[⁰¹²³⁴⁵⁶⁷⁸⁹]+|(?:^|(?<=\s))\d{1,3}(?::\d{1,3})?\s+(?=["'“‘(]*[A-Za-z]))/m;
 
-export interface HighlightSegment {
-  type: 'text' | 'verse-num';
-  value: string;
-  verseNumber?: number;
-  chapterNumber?: number;
+export interface RecitationTimeEstimate {
+  wordCount: number;
+  seconds: number;
+  label: string;
+  isLong: boolean;
 }
 
-const VERSE_NUMBER_TOKEN_REGEX =
-  /(\[\d{1,3}(?::\d{1,3})?\]\s*|\(\d{1,3}(?::\d{1,3})?\)\s*|[⁰¹²³⁴⁵⁶⁷⁸⁹]+\s*|(?:^|(?<=\s))\d{1,3}\s+(?=["'“‘(]*[A-Za-z]))/gm;
+export interface PassageChunkView {
+  index: number;
+  startIdx: number;
+  endIdx: number;
+  reference: string;
+  label: string;
+  verses: Verse[];
+  recitationLabel: string;
+}
+
+function computeRecitationEstimate(verses: Verse[]): RecitationTimeEstimate {
+  const pbWithHelper = pb as unknown as {
+    estimateRecitationTime?: (v: Verse[]) => RecitationTimeEstimate;
+  };
+  if (typeof pbWithHelper.estimateRecitationTime === 'function') {
+    return pbWithHelper.estimateRecitationTime(verses);
+  }
+  const wordCount = (verses ?? []).reduce((sum, v) => {
+    const words = (v.text ?? '')
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.length > 0);
+    return sum + words.length;
+  }, 0);
+  const seconds = wordCount === 0 ? 0 : Math.max(5, Math.round((wordCount / 135) * 60));
+  let label = '~0s';
+  if (seconds > 0 && seconds < 60) {
+    const rounded5 = Math.max(5, Math.round(seconds / 5) * 5);
+    label = `~${rounded5}s`;
+  } else if (seconds >= 60) {
+    const mins = Math.round((seconds / 60) * 2) / 2;
+    label = `~${mins} min`;
+  }
+  const isLong = (verses?.length ?? 0) > 10 || wordCount > 180;
+  return { wordCount, seconds, label, isLong };
+}
 
 @Component({
   selector: 'app-add-passage-modal',
@@ -60,7 +97,9 @@ const VERSE_NUMBER_TOKEN_REGEX =
         <header class="modal-header">
           <div>
             <span class="modal-eyebrow">Simple Copy-Paste &amp; BibleGateway Editor</span>
-            <h2 id="add-passage-title" class="modal-title">Add Passage</h2>
+            <h2 id="add-passage-title" class="modal-title">
+              {{ isEditMode() ? 'Edit Passage' : 'Add Passage' }}
+            </h2>
             <p class="modal-subtitle">
               Look up any passage directly on <strong>BibleGateway</strong> (with 1-click Copy &amp;
               Import) or paste text into the plain text box below.
@@ -124,15 +163,36 @@ const VERSE_NUMBER_TOKEN_REGEX =
                 🌐 Look Up on BibleGateway
               </button>
 
-              <button
-                type="button"
-                class="example-btn"
-                (click)="pasteExample()"
-                data-testid="btn-paste-example"
-              >
-                ✦ Paste Example
-              </button>
+              @if (!isEditMode()) {
+                <button
+                  type="button"
+                  class="example-btn"
+                  (click)="pasteExample()"
+                  data-testid="btn-paste-example"
+                >
+                  ✦ Paste Example
+                </button>
+              }
             </div>
+          </div>
+
+          <!-- Optional Custom Label / Memory Cue Input -->
+          <div class="field-group">
+            <label for="input-passage-label" class="field-label">
+              Label / Memory Cue (optional)
+              <span class="field-hint">
+                Shown in parentheses next to the reference on your deck list
+              </span>
+            </label>
+            <input
+              id="input-passage-label"
+              type="text"
+              class="text-input"
+              placeholder="e.g. Beatitudes, or the one who offers txgvg"
+              [ngModel]="label()"
+              (ngModelChange)="label.set($event)"
+              data-testid="input-passage-label"
+            />
           </div>
 
           <div class="field-group">
@@ -140,45 +200,19 @@ const VERSE_NUMBER_TOKEN_REGEX =
               <label for="passage-raw-textarea" class="field-label">
                 Passage Text
                 <span class="field-hint">
-                  @if (hasRememberedBoundaries()) {
-                    (Verse boundaries remembered — verses separated cleanly)
+                  @if ((lockedVerses()?.length ?? 0) > 0) {
+                    (Clean text with {{ lockedVerses()!.length }} verse boundaries locked)
                   } @else {
-                    (Plain editable text box — verse boundaries detected from verse numbers)
+                    (Plain editable text box — verse boundaries parsed automatically)
                   }
                 </span>
               </label>
 
-              <div class="verse-num-helper-actions">
-                @if (!isHighlightingVerseNumbers()) {
-                  <button
-                    type="button"
-                    class="helper-btn highlight-trigger-btn"
-                    [disabled]="!rawText().trim()"
-                    (click)="startHighlightVerseNumbers()"
-                    data-testid="btn-highlight-verse-numbers"
-                  >
-                    🔍 Highlight Verse Numbers
-                  </button>
-                } @else {
-                  <button
-                    type="button"
-                    class="helper-btn confirm-remove-btn"
-                    [disabled]="highlightedVerseNumberCount() === 0"
-                    (click)="removeHighlightedVerseNumbers()"
-                    data-testid="btn-remove-verse-numbers"
-                  >
-                    ✂ Remove Highlighted Verse Numbers ({{ highlightedVerseNumberCount() }})
-                  </button>
-                  <button
-                    type="button"
-                    class="helper-btn cancel-highlight-btn"
-                    (click)="cancelHighlightVerseNumbers()"
-                    data-testid="btn-cancel-highlight-verse-numbers"
-                  >
-                    Keep / Cancel
-                  </button>
-                }
-              </div>
+              @if (parsedResult().verses.length > 0) {
+                <span class="recitation-time-pill" data-testid="add-passage-recitation-time">
+                  ⏱ {{ recitationTime().label }} ({{ recitationTime().wordCount }} words)
+                </span>
+              }
             </div>
 
             <textarea
@@ -187,13 +221,14 @@ const VERSE_NUMBER_TOKEN_REGEX =
               class="raw-textarea"
               placeholder="Paste or type your passage here (or use 🌐 Look Up on BibleGateway above)...&#10;[28] Have you not known? Have you not heard?...&#10;[29] He gives power to the faint..."
               [ngModel]="rawText()"
-              (ngModelChange)="onRawTextChange($event)"
+              (ngModelChange)="onTextChange($event)"
               data-testid="textarea-passage-raw"
             ></textarea>
           </div>
 
           @if (showMissingVerseNumbersWarning()) {
             <div
+              id="warning-no-verse-numbers"
               class="missing-verse-nums-warning"
               role="alert"
               data-testid="warning-no-verse-numbers"
@@ -203,90 +238,217 @@ const VERSE_NUMBER_TOKEN_REGEX =
                 This text doesn't contain verse numbers (e.g. <code>[1]</code>, <code>2 </code>, or
                 <code>¹²³</code>), so verse boundaries aren't marked for <code>+1v</code> study and
                 accumulative stitching. Tip: Look up the passage via
-                <strong>🌐 Look Up on BibleGateway</strong> or paste text with verse numbers included
-                and click <strong>Highlight Verse Numbers → Remove</strong>.
+                <strong>🌐 Look Up on BibleGateway</strong> or include verse numbers in your pasted text.
               </p>
             </div>
           }
 
-          @if (isHighlightingVerseNumbers()) {
-            <section
-              class="highlight-preview-box"
-              data-testid="verse-number-highlight-preview"
-              aria-live="polite"
+          <!-- >10-Verse / >180-Word Long-Passage Warning & Named Chunk Splitter -->
+          @if (isLongPassage()) {
+            <div
+              id="warning-long-passage"
+              class="long-passage-warning"
+              role="region"
+              aria-label="Long passage chunking recommendation"
+              data-testid="warning-long-passage"
             >
-              <div class="highlight-preview-header">
-                <span class="highlight-badge">
-                  Step 1 of 2 • Confirm Verse Numbers to Delete
-                </span>
-                <span class="highlight-summary">
-                  @if (highlightedVerseNumberCount() > 0) {
-                    <strong>{{ highlightedVerseNumberCount() }}</strong>
-                    {{ highlightedVerseNumberCount() === 1 ? 'verse number' : 'verse numbers' }}
-                    highlighted below will be removed, and their
-                    <strong>exact verse boundaries</strong> will be remembered for
-                    <code>+1v</code> study.
-                  } @else {
-                    No verse numbers were detected in the current text.
-                  }
-                </span>
+              <div class="long-warning-top">
+                <div class="long-warning-copy">
+                  <strong class="warning-title">
+                    ⚠️ Long passage ({{ parsedResult().verses.length }} verses ·
+                    {{ recitationTime().label }} to recite)
+                  </strong>
+                  <p class="warning-body">
+                    Consider splitting into smaller named chunks (~5–10 verses each). Once
+                    memorized, contiguous chunks automatically schedule stitched full-passage
+                    reviews!
+                  </p>
+                </div>
+
+                <button
+                  id="btn-split-into-chunks"
+                  type="button"
+                  class="split-chunks-btn"
+                  (click)="openChunkSplitter()"
+                  data-testid="btn-split-into-chunks"
+                >
+                  {{ isChunkSplitterOpen() ? '▾ Hide Chunk Splitter' : '✂️ Split into Named Chunks' }}
+                </button>
               </div>
 
-              <div class="highlight-preview-content">
-                @for (seg of highlightSegments(); track $index) {
-                  @if (seg.type === 'verse-num') {
-                    <mark
-                      class="highlighted-verse-num"
-                      title="Will be removed (verse boundary remembered)"
-                      data-testid="highlighted-verse-num"
-                    >{{ seg.value }}</mark>
-                  } @else {
-                    <span class="normal-text-seg">{{ seg.value }}</span>
-                  }
-                }
-              </div>
-            </section>
+              @if (isChunkSplitterOpen()) {
+                <div
+                  id="chunk-splitter-editor"
+                  class="chunk-splitter-box"
+                  data-testid="chunk-splitter-editor"
+                >
+                  <div class="chunk-splitter-toolbar">
+                    <span class="chunk-splitter-title">
+                      Named Chunks ({{ chunkViews().length }} chunks · {{ parsedResult().verses.length }} total verses)
+                    </span>
+                    <button
+                      type="button"
+                      class="chunk-helper-btn"
+                      (click)="addAnotherChunkSplit()"
+                      [disabled]="chunkViews().length >= parsedResult().verses.length"
+                      data-testid="btn-add-chunk-split"
+                    >
+                      + Add Split
+                    </button>
+                  </div>
+
+                  <div class="chunk-list">
+                    @for (chunk of chunkViews(); track chunk.index; let idx = $index) {
+                      <div class="chunk-card" [attr.data-testid]="'chunk-card-' + idx">
+                        <div class="chunk-card-header">
+                          <div class="chunk-ref-group">
+                            <span class="chunk-num-badge">Chunk {{ idx + 1 }}</span>
+                            <strong class="chunk-subref" [attr.data-testid]="'chunk-ref-' + idx">
+                              {{ chunk.reference }}
+                            </strong>
+                            <span class="chunk-meta">
+                              ({{ chunk.verses.length }}v · ⏱ {{ chunk.recitationLabel }})
+                            </span>
+                          </div>
+
+                          @if (idx < chunkViews().length - 1) {
+                            <div class="chunk-boundary-controls">
+                              <span class="boundary-hint">End boundary:</span>
+                              <button
+                                type="button"
+                                class="chunk-step-btn"
+                                [disabled]="chunk.verses.length <= 1"
+                                (click)="adjustChunkBoundary(idx, -1)"
+                                [attr.data-testid]="'btn-chunk-shrink-' + idx"
+                              >
+                                -1v
+                              </button>
+                              <button
+                                type="button"
+                                class="chunk-step-btn"
+                                [disabled]="chunkViews()[idx + 1].verses.length <= 1"
+                                (click)="adjustChunkBoundary(idx, 1)"
+                                [attr.data-testid]="'btn-chunk-expand-' + idx"
+                              >
+                                +1v
+                              </button>
+                              @if (chunkViews().length > 2) {
+                                <button
+                                  type="button"
+                                  class="chunk-merge-btn"
+                                  (click)="removeChunkBoundary(idx)"
+                                  title="Merge with next chunk"
+                                  [attr.data-testid]="'btn-chunk-merge-' + idx"
+                                >
+                                  ✕
+                                </button>
+                              }
+                            </div>
+                          }
+                        </div>
+
+                        <div class="chunk-label-row">
+                          <input
+                            [id]="'input-chunk-label-' + idx"
+                            type="text"
+                            class="text-input chunk-label-input"
+                            placeholder="Label this chunk (e.g. The Word Made Flesh)..."
+                            [ngModel]="chunkLabels()[idx] || ''"
+                            (ngModelChange)="updateChunkLabel(idx, $event)"
+                            [attr.data-testid]="'input-chunk-label-' + idx"
+                          />
+                        </div>
+
+                        <p class="chunk-preview-snippet">
+                          <span class="verse-num-pill">[{{ getVerseBadge(chunk.verses[0]) }}]</span>
+                          {{ chunk.verses[0].text }}
+                          @if (chunk.verses.length > 1) {
+                            <span class="chunk-through-hint">
+                              … [{{ getVerseBadge(chunk.verses[chunk.verses.length - 1]) }}]
+                            </span>
+                          }
+                        </p>
+                      </div>
+                    }
+                  </div>
+
+                  <div class="chunk-splitter-footer">
+                    <button
+                      id="btn-save-named-chunks"
+                      type="button"
+                      class="save-chunks-btn"
+                      (click)="saveNamedChunks()"
+                      data-testid="btn-save-named-chunks"
+                    >
+                      Save {{ chunkViews().length }} Named Chunks
+                    </button>
+                  </div>
+                </div>
+              }
+            </div>
           }
 
-          <section class="preview-panel" data-testid="parsed-verses-preview">
-            <div class="preview-header">
-              <div class="preview-title-group">
-                <span class="preview-badge">
-                  Verses ({{ parsedResult().verses.length }})
-                </span>
-                <span class="preview-ref">{{ parsedResult().reference }}</span>
-                @if (hasRememberedBoundaries()) {
-                  <span
-                    class="remembered-boundary-pill"
-                    data-testid="remembered-boundaries-badge"
-                  >
-                    ✓ {{ parsedResult().verses.length }} verse
-                    {{ parsedResult().verses.length === 1 ? 'boundary' : 'boundaries' }} remembered
-                    from stripped verse numbers
-                  </span>
-                }
-              </div>
-              <span class="preview-count">
-                {{ parsedResult().verses.length }}
-                {{ parsedResult().verses.length === 1 ? 'verse' : 'verses' }} for <code>+1v</code> study
+          <!-- Subtle, collapsed-by-default "Peek beneath the covers" disclosure for verse boundaries -->
+          <div class="peek-boundaries-container">
+            <button
+              id="btn-peek-verse-boundaries"
+              type="button"
+              class="peek-boundaries-btn"
+              (click)="toggleVerseBoundaries()"
+              [attr.aria-expanded]="showVerseBoundaries()"
+              data-testid="btn-peek-verse-boundaries"
+            >
+              <span>
+                {{ showVerseBoundaries() ? '▾ Hide verse boundaries' : '▸ Peek verse boundaries' }}
+                ({{ parsedResult().verses.length }}
+                {{ parsedResult().verses.length === 1 ? 'verse' : 'verses' }})
               </span>
-            </div>
+              @if ((lockedVerses()?.length ?? 0) > 0) {
+                <span
+                  class="remembered-boundary-pill"
+                  data-testid="remembered-boundaries-badge"
+                >
+                  ✓ Exact verse boundaries
+                </span>
+              }
+            </button>
 
-            @if (parsedResult().verses.length > 0) {
-              <ul class="parsed-verse-list">
-                @for (verse of parsedResult().verses; track $index) {
-                  <li class="parsed-verse-item" [attr.data-testid]="'preview-verse-' + $index">
-                    <span class="verse-num-pill">[{{ getVerseBadge(verse) }}]</span>
-                    <span class="verse-text-body">{{ verse.text }}</span>
-                  </li>
+            @if (showVerseBoundaries()) {
+              <section
+                id="parsed-verses-preview"
+                class="preview-panel"
+                data-testid="parsed-verses-preview"
+              >
+                <div class="preview-header">
+                  <div class="preview-title-group">
+                    <span class="preview-badge">
+                      Verses ({{ parsedResult().verses.length }})
+                    </span>
+                    <span class="preview-ref">{{ parsedResult().reference }}</span>
+                  </div>
+                  <span class="preview-count">
+                    {{ parsedResult().verses.length }}
+                    {{ parsedResult().verses.length === 1 ? 'verse' : 'verses' }} for <code>+1v</code> study
+                  </span>
+                </div>
+
+                @if (parsedResult().verses.length > 0) {
+                  <ul class="parsed-verse-list">
+                    @for (verse of parsedResult().verses; track $index) {
+                      <li class="parsed-verse-item" [attr.data-testid]="'preview-verse-' + $index">
+                        <span class="verse-num-pill">[{{ getVerseBadge(verse) }}]</span>
+                        <span class="verse-text-body">{{ verse.text }}</span>
+                      </li>
+                    }
+                  </ul>
+                } @else {
+                  <div class="preview-empty">
+                    Enter a reference and click <strong>🌐 Look Up on BibleGateway</strong>, or paste text above.
+                  </div>
                 }
-              </ul>
-            } @else {
-              <div class="preview-empty">
-                Enter a reference and click <strong>🌐 Look Up on BibleGateway</strong>, or paste text above.
-              </div>
+              </section>
             }
-          </section>
+          </div>
         </div>
 
         <footer class="modal-footer">
@@ -298,7 +460,7 @@ const VERSE_NUMBER_TOKEN_REGEX =
             (click)="savePassage()"
             data-testid="btn-save-passage"
           >
-            Save Passage to Deck
+            {{ isEditMode() ? 'Save Changes' : 'Save Passage to Deck' }}
           </button>
         </footer>
 
@@ -544,7 +706,7 @@ const VERSE_NUMBER_TOKEN_REGEX =
         overflow-y: auto;
         display: flex;
         flex-direction: column;
-        gap: 1.1rem;
+        gap: 1rem;
       }
 
       .form-row-top {
@@ -565,7 +727,7 @@ const VERSE_NUMBER_TOKEN_REGEX =
       .field-group {
         display: flex;
         flex-direction: column;
-        gap: 0.45rem;
+        gap: 0.4rem;
       }
 
       .textarea-toolbar {
@@ -592,56 +754,12 @@ const VERSE_NUMBER_TOKEN_REGEX =
         color: var(--text-muted);
       }
 
-      .verse-num-helper-actions {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        flex-wrap: wrap;
-      }
-
-      .helper-btn {
-        padding: 0.42rem 0.8rem;
-        border-radius: 0.5rem;
-        font-size: 0.79rem;
+      .recitation-time-pill {
+        font-size: 0.75rem;
         font-weight: 600;
-        cursor: pointer;
-        transition: all 0.15s ease;
-      }
-
-      .helper-btn:disabled {
-        opacity: 0.45;
-        cursor: not-allowed;
-      }
-
-      .highlight-trigger-btn {
-        background: rgba(245, 158, 11, 0.18);
-        border: 1px solid rgba(245, 158, 11, 0.5);
-        color: #fcd34d;
-      }
-
-      :host-context(.light-theme) .highlight-trigger-btn,
-      :host-context(html:not(.dark-theme)) .highlight-trigger-btn {
-        background: #fef3c7;
-        border-color: #f59e0b;
-        color: #92400e;
-      }
-
-      .highlight-trigger-btn:hover:not(:disabled) {
-        background: rgba(245, 158, 11, 0.28);
-      }
-
-      .confirm-remove-btn {
-        background: #dc2626;
-        border: 1px solid #b91c1c;
-        color: #ffffff;
-      }
-
-      .confirm-remove-btn:hover:not(:disabled) {
-        background: #b91c1c;
-      }
-
-      .cancel-highlight-btn {
-        background: var(--input-bg);
+        padding: 0.16rem 0.55rem;
+        border-radius: 999px;
+        background: var(--modal-header-bg);
         border: 1px solid var(--border-color);
         color: var(--text-secondary);
       }
@@ -651,7 +769,7 @@ const VERSE_NUMBER_TOKEN_REGEX =
       .raw-textarea {
         width: 100%;
         box-sizing: border-box;
-        padding: 0.65rem 0.85rem;
+        padding: 0.62rem 0.85rem;
         border-radius: 0.6rem;
         border: 1px solid var(--border-color);
         background: var(--input-bg);
@@ -729,24 +847,42 @@ const VERSE_NUMBER_TOKEN_REGEX =
         background: rgba(245, 158, 11, 0.28);
       }
 
-      .missing-verse-nums-warning {
+      .missing-verse-nums-warning,
+      .long-passage-warning {
         background: rgba(120, 53, 15, 0.35);
         border: 1px solid rgba(245, 158, 11, 0.5);
         border-left: 4px solid #f59e0b;
         border-radius: 0.65rem;
-        padding: 0.75rem 1rem;
+        padding: 0.8rem 1rem;
         display: flex;
         flex-direction: column;
-        gap: 0.25rem;
+        gap: 0.65rem;
       }
 
       :host-context(.light-theme) .missing-verse-nums-warning,
-      :host-context(html:not(.dark-theme)) .missing-verse-nums-warning {
+      :host-context(html:not(.dark-theme)) .missing-verse-nums-warning,
+      :host-context(.light-theme) .long-passage-warning,
+      :host-context(html:not(.dark-theme)) .long-passage-warning {
         background: #fffbeb;
       }
 
+      .long-warning-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.85rem;
+        flex-wrap: wrap;
+      }
+
+      .long-warning-copy {
+        flex: 1 1 320px;
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+
       .warning-title {
-        font-size: 0.84rem;
+        font-size: 0.85rem;
         color: #fcd34d;
       }
 
@@ -769,83 +905,208 @@ const VERSE_NUMBER_TOKEN_REGEX =
         font-weight: 600;
       }
 
-      .highlight-preview-box {
-        border: 2px solid #f59e0b;
-        border-radius: 0.75rem;
-        background: rgba(120, 53, 15, 0.28);
-        padding: 0.9rem 1.1rem;
+      .split-chunks-btn {
+        padding: 0.5rem 0.9rem;
+        border-radius: 0.55rem;
+        border: 1px solid #f59e0b;
+        background: rgba(245, 158, 11, 0.22);
+        color: #fef3c7;
+        font-size: 0.81rem;
+        font-weight: 700;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      :host-context(.light-theme) .split-chunks-btn,
+      :host-context(html:not(.dark-theme)) .split-chunks-btn {
+        background: #fef3c7;
+        color: #92400e;
+      }
+
+      .chunk-splitter-box {
+        border-top: 1px solid rgba(245, 158, 11, 0.35);
+        padding-top: 0.75rem;
         display: flex;
         flex-direction: column;
         gap: 0.65rem;
       }
 
-      :host-context(.light-theme) .highlight-preview-box,
-      :host-context(html:not(.dark-theme)) .highlight-preview-box {
-        background: #fffbeb;
-      }
-
-      .highlight-preview-header {
+      .chunk-splitter-toolbar {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 0.75rem;
+        gap: 0.5rem;
         flex-wrap: wrap;
-        padding-bottom: 0.5rem;
-        border-bottom: 1px solid rgba(245, 158, 11, 0.35);
       }
 
-      .highlight-badge {
-        font-size: 0.72rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        padding: 0.2rem 0.55rem;
-        border-radius: 999px;
-        background: rgba(245, 158, 11, 0.25);
-        color: #fde68a;
-        border: 1px solid #f59e0b;
-      }
-
-      :host-context(.light-theme) .highlight-badge,
-      :host-context(html:not(.dark-theme)) .highlight-badge {
-        background: #fef3c7;
-        color: #92400e;
-      }
-
-      .highlight-summary {
+      .chunk-splitter-title {
         font-size: 0.8rem;
-        color: var(--text-secondary);
+        font-weight: 700;
+        color: var(--text-primary);
       }
 
-      .highlight-preview-content {
-        background: var(--input-bg);
+      .chunk-helper-btn {
+        padding: 0.3rem 0.65rem;
+        border-radius: 0.45rem;
         border: 1px solid var(--border-color);
-        border-radius: 0.55rem;
-        padding: 0.75rem 0.9rem;
-        font-size: 0.9rem;
-        line-height: 1.65;
-        white-space: pre-wrap;
+        background: var(--input-bg);
         color: var(--text-primary);
-        max-height: 180px;
+        font-size: 0.76rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .chunk-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.55rem;
+        max-height: 260px;
         overflow-y: auto;
       }
 
-      .highlighted-verse-num {
-        background: rgba(239, 68, 68, 0.25);
-        color: #fca5a5;
-        border: 1px solid #f87171;
-        border-radius: 0.3rem;
-        padding: 0.05rem 0.3rem;
-        margin-right: 0.15rem;
-        font-weight: 700;
-        text-decoration: line-through;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      .chunk-card {
+        padding: 0.65rem 0.85rem;
+        border-radius: 0.6rem;
+        background: var(--modal-bg);
+        border: 1px solid var(--border-color);
+        display: flex;
+        flex-direction: column;
+        gap: 0.45rem;
       }
 
-      :host-context(.light-theme) .highlighted-verse-num,
-      :host-context(html:not(.dark-theme)) .highlighted-verse-num {
-        background: #fee2e2;
-        color: #b91c1c;
+      .chunk-card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+
+      .chunk-ref-group {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        flex-wrap: wrap;
+      }
+
+      .chunk-num-badge {
+        font-size: 0.7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        padding: 0.14rem 0.48rem;
+        border-radius: 999px;
+        background: rgba(20, 184, 166, 0.2);
+        color: #5eead4;
+      }
+
+      :host-context(.light-theme) .chunk-num-badge,
+      :host-context(html:not(.dark-theme)) .chunk-num-badge {
+        background: #ccfbf1;
+        color: #115e59;
+      }
+
+      .chunk-subref {
+        font-size: 0.9rem;
+        color: var(--text-primary);
+      }
+
+      .chunk-meta {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+      }
+
+      .chunk-boundary-controls {
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+      }
+
+      .boundary-hint {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+      }
+
+      .chunk-step-btn,
+      .chunk-merge-btn {
+        padding: 0.2rem 0.45rem;
+        border-radius: 0.35rem;
+        border: 1px solid var(--border-color);
+        background: var(--input-bg);
+        color: var(--text-secondary);
+        font-size: 0.74rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .chunk-step-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      .chunk-label-input {
+        padding: 0.45rem 0.7rem;
+        font-size: 0.84rem;
+      }
+
+      .chunk-preview-snippet {
+        margin: 0;
+        font-size: 0.78rem;
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .chunk-through-hint {
+        color: var(--text-muted);
+        margin-left: 0.25rem;
+      }
+
+      .chunk-splitter-footer {
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .save-chunks-btn {
+        padding: 0.58rem 1.1rem;
+        border-radius: 0.55rem;
+        border: none;
+        background: #d97706;
+        color: #ffffff;
+        font-size: 0.85rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .save-chunks-btn:hover {
+        background: #b45309;
+      }
+
+      .peek-boundaries-container {
+        display: flex;
+        flex-direction: column;
+        gap: 0.55rem;
+      }
+
+      .peek-boundaries-btn {
+        align-self: flex-start;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.55rem;
+        padding: 0.38rem 0.75rem;
+        border-radius: 0.5rem;
+        border: 1px solid var(--border-color);
+        background: var(--modal-header-bg);
+        color: var(--text-secondary);
+        font-size: 0.8rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+
+      .peek-boundaries-btn:hover {
+        color: var(--text-primary);
+        border-color: #14b8a6;
       }
 
       .preview-panel {
@@ -891,9 +1152,9 @@ const VERSE_NUMBER_TOKEN_REGEX =
       }
 
       .remembered-boundary-pill {
-        font-size: 0.73rem;
+        font-size: 0.72rem;
         font-weight: 600;
-        padding: 0.18rem 0.6rem;
+        padding: 0.14rem 0.55rem;
         border-radius: 999px;
         background: rgba(34, 197, 94, 0.2);
         color: #86efac;
@@ -1306,10 +1567,13 @@ const VERSE_NUMBER_TOKEN_REGEX =
     `,
   ],
 })
-export class AddPassageModalComponent {
-  private readonly passageParser = inject(PassageParserService);
+export class AddPassageModalComponent implements OnInit, OnChanges {
+  private readonly parserService = inject(PassageParserService);
   private readonly storageService = inject(StorageService);
   private readonly bibleGatewayService = inject(BibleGatewayService);
+
+  @Input() editingPassage: Passage | null = null;
+  @Input() editItem: DeckItem | null = null;
 
   @Output() closed = new EventEmitter<void>();
   @Output() passageAdded = new EventEmitter<DeckItem>();
@@ -1317,86 +1581,73 @@ export class AddPassageModalComponent {
   readonly bibleVersions: BibleVersionOption[] = BIBLE_VERSIONS;
 
   readonly reference = signal<string>('');
+  readonly label = signal<string>('');
   readonly rawText = signal<string>('');
   readonly selectedVersion = signal<string>(this.loadSavedVersion());
 
-  readonly isHighlightingVerseNumbers = signal<boolean>(false);
-  readonly highlightStep = signal<'idle' | 'highlighted' | 'removed'>('idle');
-
   readonly lockedVerses = signal<Verse[] | null>(null);
-  readonly rememberedVerseNumbers = signal<number[]>([]);
-  readonly rememberedChapterNumbers = signal<(number | undefined)[]>([]);
+  readonly showVerseBoundaries = signal<boolean>(false);
+
+  /** Named Chunk Splitter state for >10-verse / >180-word passages */
+  readonly isChunkSplitterOpen = signal<boolean>(false);
+  /** Exclusive end indices for each chunk except the last */
+  readonly chunkSplitIndices = signal<number[]>([]);
+  readonly chunkLabels = signal<Record<number, string>>({});
 
   readonly isBibleGatewayOpen = signal<boolean>(false);
   readonly bgIsLoading = signal<boolean>(false);
   readonly bgError = signal<string | null>(null);
   readonly bgLookupResult = signal<BibleGatewayLookupResult | null>(null);
 
+  ngOnInit(): void {
+    this.syncFromEditingPassage();
+  }
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['editingPassage'] || changes['editItem']) {
+      this.syncFromEditingPassage();
+    }
+  }
+
+  private getTargetEditingPassage(): Passage | null {
+    return this.editingPassage ?? this.editItem?.passage ?? null;
+  }
+
+  isEditMode(): boolean {
+    return this.getTargetEditingPassage() !== null;
+  }
+
+  private syncFromEditingPassage(): void {
+    const p = this.getTargetEditingPassage();
+    if (!p) {
+      return;
+    }
+    this.reference.set(p.reference || '');
+    this.label.set(p.label || '');
+    const verses = p.verses ?? [];
+    this.rawText.set(verses.map((v) => v.text).join('\n\n'));
+    this.lockedVerses.set(verses.map((v) => ({ ...v })));
+    this.chunkSplitIndices.set([]);
+    this.chunkLabels.set({});
+    this.isChunkSplitterOpen.set(false);
+  }
+
   readonly externalBibleGatewayUrl = computed<string>(() =>
-    this.bibleGatewayService.buildSourceUrl(this.reference() || 'Isaiah 40:28-31', this.selectedVersion())
+    this.bibleGatewayService.buildSourceUrl(
+      this.reference() || 'Isaiah 40:28-31',
+      this.selectedVersion()
+    )
   );
-
-  readonly hasRememberedBoundaries = computed<boolean>(
-    () =>
-      this.rememberedVerseNumbers().length > 0 ||
-      (this.lockedVerses()?.length ?? 0) > 0 ||
-      this.highlightStep() === 'removed'
-  );
-
-  readonly highlightSegments = computed<HighlightSegment[]>(() => {
-    const raw = this.rawText();
-    if (!raw) {
-      return [];
-    }
-
-    const segments: HighlightSegment[] = [];
-    let lastIndex = 0;
-    let fallbackNum = this.inferStartVerseNumber();
-
-    for (const match of raw.matchAll(VERSE_NUMBER_TOKEN_REGEX)) {
-      const matchIndex = match.index ?? 0;
-      const matchText = match[0];
-
-      if (matchIndex > lastIndex) {
-        segments.push({
-          type: 'text',
-          value: raw.slice(lastIndex, matchIndex),
-        });
-      }
-
-      const parsedToken = this.parseVerseNumberToken(matchText, fallbackNum);
-      segments.push({
-        type: 'verse-num',
-        value: matchText,
-        verseNumber: parsedToken.verseNumber,
-        chapterNumber: parsedToken.chapterNumber,
-      });
-      fallbackNum = parsedToken.verseNumber + 1;
-
-      lastIndex = matchIndex + matchText.length;
-    }
-
-    if (lastIndex < raw.length) {
-      segments.push({
-        type: 'text',
-        value: raw.slice(lastIndex),
-      });
-    }
-
-    return segments;
-  });
-
-  readonly highlightedVerseNumberCount = computed<number>(() => {
-    return this.highlightSegments().filter((seg) => seg.type === 'verse-num').length;
-  });
 
   readonly showMissingVerseNumbersWarning = computed<boolean>(() => {
     const trimmed = this.rawText().trim();
-    return (
-      trimmed.length > 0 &&
-      this.highlightedVerseNumberCount() === 0 &&
-      !this.hasRememberedBoundaries()
-    );
+    if (!trimmed) {
+      return false;
+    }
+    if ((this.lockedVerses()?.length ?? 0) > 0) {
+      return false;
+    }
+    return !VERSE_MARKER_CHECK_REGEX.test(trimmed);
   });
 
   readonly parsedResult = computed<{ reference: string; verses: Verse[] }>(() => {
@@ -1419,68 +1670,53 @@ export class AddPassageModalComponent {
       };
     }
 
-    const segments = this.highlightSegments();
-    const verseNumCount = segments.filter((s) => s.type === 'verse-num').length;
-    if (verseNumCount > 0) {
-      const versesFromMarkers = this.extractVersesFromSegments(segments);
-      if (versesFromMarkers.length > 0) {
-        return {
-          reference: ref || this.formatDefaultReference(versesFromMarkers),
-          verses: versesFromMarkers,
-        };
+    return this.parserService.parseRawInput(raw, ref || undefined);
+  });
+
+  readonly recitationTime = computed<RecitationTimeEstimate>(() =>
+    computeRecitationEstimate(this.parsedResult().verses)
+  );
+
+  readonly isLongPassage = computed<boolean>(() => {
+    const verses = this.parsedResult().verses;
+    return verses.length > 10 || this.recitationTime().isLong;
+  });
+
+  readonly chunkViews = computed<PassageChunkView[]>(() => {
+    const verses = this.parsedResult().verses;
+    if (verses.length === 0) {
+      return [];
+    }
+    const baseRef = this.parsedResult().reference;
+    const splits = this.chunkSplitIndices()
+      .filter((idx) => idx > 0 && idx < verses.length)
+      .sort((a, b) => a - b);
+
+    const boundaries = [0, ...splits, verses.length];
+    const labelsMap = this.chunkLabels();
+    const views: PassageChunkView[] = [];
+
+    for (let i = 0; i < boundaries.length - 1; i++) {
+      const startIdx = boundaries[i];
+      const endIdx = boundaries[i + 1];
+      const chunkVerses = verses.slice(startIdx, endIdx);
+      if (chunkVerses.length === 0) {
+        continue;
       }
-    }
-
-    const rememberedNums = this.rememberedVerseNumbers();
-    const rememberedChaps = this.rememberedChapterNumbers();
-    if (rememberedNums.length > 0) {
-      const blocksByBlankLine = trimmed
-        .split(/\n\s*\n/)
-        .map((b) => b.trim())
-        .filter((b) => b.length > 0);
-
-      const blocks =
-        blocksByBlankLine.length > 1
-          ? blocksByBlankLine
-          : trimmed
-              .split('\n')
-              .map((b) => b.trim())
-              .filter((b) => b.length > 0);
-
-      const startVerse = rememberedNums[0] ?? this.inferStartVerseNumber();
-      const verses: Verse[] = blocks.map((blockText, idx) => {
-        const chap = rememberedChaps[idx];
-        return {
-          verseNumber: rememberedNums[idx] ?? startVerse + idx,
-          text: blockText.replace(/[ \t]+/g, ' ').trim(),
-          ...(chap && chap > 0 ? { chapterNumber: chap } : {}),
-        };
+      const subRef = this.buildChunkReference(baseRef, chunkVerses);
+      const est = computeRecitationEstimate(chunkVerses);
+      views.push({
+        index: i,
+        startIdx,
+        endIdx,
+        reference: subRef,
+        label: (labelsMap[i] ?? '').trim(),
+        verses: chunkVerses,
+        recitationLabel: est.label,
       });
-
-      return {
-        reference: ref || this.formatDefaultReference(verses),
-        verses,
-      };
     }
 
-    const paragraphBlocks = trimmed
-      .split(/\n\s*\n/)
-      .map((b) => b.trim())
-      .filter((b) => b.length > 0);
-
-    if (paragraphBlocks.length > 1) {
-      const startVerse = this.inferStartVerseNumber();
-      const verses: Verse[] = paragraphBlocks.map((blockText, idx) => ({
-        verseNumber: startVerse + idx,
-        text: blockText.replace(/[ \t]+/g, ' ').trim(),
-      }));
-      return {
-        reference: ref || this.formatDefaultReference(verses),
-        verses,
-      };
-    }
-
-    return this.passageParser.parseRawInput(raw, ref || undefined);
+    return views;
   });
 
   readonly isMultiChapter = computed<boolean>(() =>
@@ -1490,6 +1726,126 @@ export class AddPassageModalComponent {
   readonly canSave = computed<boolean>(() => {
     return this.parsedResult().verses.length > 0;
   });
+
+  toggleVerseBoundaries(): void {
+    this.showVerseBoundaries.update((v) => !v);
+  }
+
+  openChunkSplitter(): void {
+    if (this.isChunkSplitterOpen()) {
+      this.isChunkSplitterOpen.set(false);
+      return;
+    }
+    const total = this.parsedResult().verses.length;
+    if (total > 1 && this.chunkSplitIndices().length === 0) {
+      this.initializeDefaultChunkSplits(total);
+    }
+    this.isChunkSplitterOpen.set(true);
+  }
+
+  private initializeDefaultChunkSplits(totalVerses: number): void {
+    const targetChunkSize = 7;
+    const numChunks = Math.max(2, Math.ceil(totalVerses / targetChunkSize));
+    const baseSize = Math.floor(totalVerses / numChunks);
+    const remainder = totalVerses % numChunks;
+
+    const splits: number[] = [];
+    let cursor = 0;
+    for (let i = 0; i < numChunks - 1; i++) {
+      cursor += baseSize + (i < remainder ? 1 : 0);
+      if (cursor > 0 && cursor < totalVerses) {
+        splits.push(cursor);
+      }
+    }
+    this.chunkSplitIndices.set(splits);
+  }
+
+  adjustChunkBoundary(chunkIdx: number, delta: -1 | 1): void {
+    const total = this.parsedResult().verses.length;
+    const splits = [...this.chunkSplitIndices()];
+    if (chunkIdx < 0 || chunkIdx >= splits.length) {
+      return;
+    }
+    const prevBoundary = chunkIdx === 0 ? 0 : splits[chunkIdx - 1];
+    const nextBoundary = chunkIdx + 1 < splits.length ? splits[chunkIdx + 1] : total;
+    const candidate = splits[chunkIdx] + delta;
+    if (candidate <= prevBoundary || candidate >= nextBoundary) {
+      return;
+    }
+    splits[chunkIdx] = candidate;
+    this.chunkSplitIndices.set(splits);
+  }
+
+  removeChunkBoundary(chunkIdx: number): void {
+    const splits = [...this.chunkSplitIndices()];
+    if (splits.length <= 1 || chunkIdx < 0 || chunkIdx >= splits.length) {
+      return;
+    }
+    splits.splice(chunkIdx, 1);
+    this.chunkSplitIndices.set(splits);
+  }
+
+  addAnotherChunkSplit(): void {
+    const views = this.chunkViews();
+    if (views.length === 0) {
+      return;
+    }
+    let largest = views[0];
+    for (const v of views) {
+      if (v.verses.length > largest.verses.length) {
+        largest = v;
+      }
+    }
+    if (largest.verses.length < 2) {
+      return;
+    }
+    const midIndex = largest.startIdx + Math.floor(largest.verses.length / 2);
+    const nextSplits = [...this.chunkSplitIndices(), midIndex].sort((a, b) => a - b);
+    this.chunkSplitIndices.set(nextSplits);
+  }
+
+  updateChunkLabel(chunkIdx: number, value: string): void {
+    this.chunkLabels.update((prev) => ({
+      ...prev,
+      [chunkIdx]: value,
+    }));
+  }
+
+  saveNamedChunks(): void {
+    const views = this.chunkViews();
+    if (views.length === 0) {
+      return;
+    }
+
+    const baseLabel = this.label().trim();
+    const entries = views.map((c, idx) => ({
+      reference: c.reference,
+      verses: c.verses,
+      label: c.label || (baseLabel ? `${baseLabel} (${idx + 1}/${views.length})` : undefined),
+    }));
+
+    const editingTarget = this.getTargetEditingPassage();
+    if (editingTarget) {
+      this.storageService.splitPassageIntoChunks(editingTarget.id, entries);
+      const firstNew = this.storageService.deckItems()[0];
+      if (firstNew) {
+        this.passageAdded.emit(firstNew);
+      }
+      this.closed.emit();
+      return;
+    }
+
+    const createdPassages = this.storageService.addMultiplePassages(entries);
+    if (createdPassages.length > 0) {
+      const firstItem = this.storageService
+        .deckItems()
+        .find((item) => item.passage.id === createdPassages[0].id);
+      if (firstItem) {
+        this.passageAdded.emit(firstItem);
+      }
+    }
+    this.closed.emit();
+  }
 
   getVerseBadge(verse: Verse): string {
     return formatVerseBadge(verse, this.isMultiChapter());
@@ -1557,69 +1913,40 @@ export class AddPassageModalComponent {
       return;
     }
 
+    const cleanTextWithoutVerseNumbers = result.verses.map((v) => v.text).join('\n\n');
+
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(result.cleanPlainText);
+        await navigator.clipboard.writeText(cleanTextWithoutVerseNumbers);
       }
     } catch {
       // Gracefully ignore clipboard permission errors in headless browsers
     }
 
     this.reference.set(result.canonicalReference || this.reference());
-    this.rawText.set(result.cleanPlainText);
+    this.rawText.set(cleanTextWithoutVerseNumbers);
     this.lockedVerses.set(result.verses);
-    this.rememberedVerseNumbers.set(result.verses.map((v) => v.verseNumber));
-    this.rememberedChapterNumbers.set(result.verses.map((v) => v.chapterNumber));
-    this.highlightStep.set('removed');
-    this.isHighlightingVerseNumbers.set(false);
+    this.chunkSplitIndices.set([]);
+    this.isChunkSplitterOpen.set(false);
     this.isBibleGatewayOpen.set(false);
   }
 
-  onRawTextChange(value: string): void {
+  onTextChange(value: string): void {
     this.rawText.set(value);
     this.lockedVerses.set(null);
-    if (!value.trim()) {
-      this.rememberedVerseNumbers.set([]);
-      this.rememberedChapterNumbers.set([]);
-      this.highlightStep.set('idle');
-    }
+    this.chunkSplitIndices.set([]);
   }
 
-  startHighlightVerseNumbers(): void {
-    this.isHighlightingVerseNumbers.set(true);
-    this.highlightStep.set('highlighted');
-  }
-
-  cancelHighlightVerseNumbers(): void {
-    this.isHighlightingVerseNumbers.set(false);
-    this.highlightStep.set(this.rememberedVerseNumbers().length > 0 ? 'removed' : 'idle');
-  }
-
-  removeHighlightedVerseNumbers(): void {
-    const verses = this.extractVersesFromSegments(this.highlightSegments());
-    if (verses.length === 0) {
-      this.isHighlightingVerseNumbers.set(false);
-      return;
-    }
-
-    this.lockedVerses.set(verses);
-    this.rememberedVerseNumbers.set(verses.map((v) => v.verseNumber));
-    this.rememberedChapterNumbers.set(verses.map((v) => v.chapterNumber));
-    const cleanedTextWithBoundaries = verses.map((v) => v.text).join('\n\n');
-
-    this.rawText.set(cleanedTextWithBoundaries);
-    this.isHighlightingVerseNumbers.set(false);
-    this.highlightStep.set('removed');
+  onRawTextChange(value: string): void {
+    this.onTextChange(value);
   }
 
   pasteExample(): void {
     this.reference.set(ISAIAH_40_EXAMPLE_REF);
     this.rawText.set(ISAIAH_40_EXAMPLE_RAW);
     this.lockedVerses.set(null);
-    this.rememberedVerseNumbers.set([]);
-    this.rememberedChapterNumbers.set([]);
-    this.highlightStep.set('idle');
-    this.isHighlightingVerseNumbers.set(false);
+    this.chunkSplitIndices.set([]);
+    this.isChunkSplitterOpen.set(false);
   }
 
   savePassage(): void {
@@ -1627,7 +1954,31 @@ export class AddPassageModalComponent {
     if (parsed.verses.length === 0) {
       return;
     }
-    const createdItem = this.storageService.addPassage(parsed.reference, parsed.verses);
+    const cleanLabel = this.label().trim() || undefined;
+    const editingTarget = this.getTargetEditingPassage();
+    if (editingTarget) {
+      this.storageService.updatePassage(
+        editingTarget.id,
+        parsed.reference,
+        this.rawText(),
+        parsed.verses,
+        cleanLabel
+      );
+      const updatedItem = this.storageService
+        .deckItems()
+        .find((item) => item.passage.id === editingTarget.id && !item.card.isRepairCard);
+      if (updatedItem) {
+        this.passageAdded.emit(updatedItem);
+      }
+      this.closed.emit();
+      return;
+    }
+
+    const createdItem = this.storageService.addPassage(
+      parsed.reference,
+      parsed.verses,
+      cleanLabel
+    );
     this.passageAdded.emit(createdItem);
     this.closed.emit();
   }
@@ -1636,6 +1987,38 @@ export class AddPassageModalComponent {
     if (event.target === event.currentTarget) {
       this.closed.emit();
     }
+  }
+
+  private buildChunkReference(baseReference: string, chunkVerses: Verse[]): string {
+    if (chunkVerses.length === 0) {
+      return baseReference;
+    }
+    const first = chunkVerses[0];
+    const last = chunkVerses[chunkVerses.length - 1];
+
+    const bookMatch = baseReference
+      .trim()
+      .match(/^((?:[1-3]\s+)?[A-Za-z]+(?:\s+of\s+[A-Za-z]+|\s+[A-Za-z]+)?)\s+(\d+)/);
+    const bookName = bookMatch
+      ? bookMatch[1].trim()
+      : baseReference.replace(/\s*\d+:.*$/, '').trim() || 'Passage';
+    const fallbackChap = bookMatch ? parseInt(bookMatch[2], 10) : undefined;
+
+    const firstChap = first.chapterNumber ?? fallbackChap;
+    const lastChap = last.chapterNumber ?? firstChap;
+
+    if (firstChap && lastChap) {
+      if (firstChap === lastChap) {
+        return first.verseNumber === last.verseNumber
+          ? `${bookName} ${firstChap}:${first.verseNumber}`
+          : `${bookName} ${firstChap}:${first.verseNumber}-${last.verseNumber}`;
+      }
+      return `${bookName} ${firstChap}:${first.verseNumber}-${lastChap}:${last.verseNumber}`;
+    }
+
+    return first.verseNumber === last.verseNumber
+      ? `${bookName} ${first.verseNumber}`
+      : `${bookName} ${first.verseNumber}-${last.verseNumber}`;
   }
 
   private loadSavedVersion(): string {
@@ -1650,108 +2033,6 @@ export class AddPassageModalComponent {
       // Ignore storage access errors
     }
     return 'ESV';
-  }
-
-  private extractVersesFromSegments(segments: HighlightSegment[]): Verse[] {
-    const verses: Verse[] = [];
-    const startVerse = this.inferStartVerseNumber();
-
-    let currentVerseNumber: number | null = null;
-    let currentChapterNumber: number | undefined = undefined;
-    let currentChunks: string[] = [];
-
-    for (const seg of segments) {
-      if (seg.type === 'verse-num') {
-        if (currentVerseNumber !== null) {
-          const text = this.cleanVerseChunk(currentChunks.join(''));
-          if (text) {
-            verses.push({
-              verseNumber: currentVerseNumber,
-              text,
-              ...(currentChapterNumber ? { chapterNumber: currentChapterNumber } : {}),
-            });
-          }
-        } else if (currentChunks.length > 0) {
-          const leadingText = this.cleanVerseChunk(currentChunks.join(''));
-          if (leadingText) {
-            const firstMarkerNum = seg.verseNumber ?? startVerse;
-            const inferredLeadingNum = firstMarkerNum > 1 ? firstMarkerNum - 1 : startVerse;
-            verses.push({
-              verseNumber: inferredLeadingNum,
-              text: leadingText,
-              ...(seg.chapterNumber ? { chapterNumber: seg.chapterNumber } : {}),
-            });
-          }
-        }
-
-        currentVerseNumber = seg.verseNumber ?? startVerse + verses.length;
-        currentChapterNumber = seg.chapterNumber;
-        currentChunks = [];
-      } else {
-        currentChunks.push(seg.value);
-      }
-    }
-
-    if (currentVerseNumber !== null && currentChunks.length > 0) {
-      const text = this.cleanVerseChunk(currentChunks.join(''));
-      if (text) {
-        verses.push({
-          verseNumber: currentVerseNumber,
-          text,
-          ...(currentChapterNumber ? { chapterNumber: currentChapterNumber } : {}),
-        });
-      }
-    }
-
-    return verses;
-  }
-
-  private cleanVerseChunk(rawChunk: string): string {
-    return rawChunk
-      .replace(/\r\n/g, '\n')
-      .split('\n')
-      .map((line) => line.replace(/[ \t]+/g, ' ').trim())
-      .filter((line) => line.length > 0)
-      .join('\n')
-      .trim();
-  }
-
-  private parseVerseNumberToken(
-    token: string,
-    fallback: number
-  ): { verseNumber: number; chapterNumber?: number } {
-    const normalized = token
-      .split('')
-      .map((ch) => SUPERSCRIPT_DIGIT_MAP[ch] ?? ch)
-      .join('');
-
-    const chapVerseMatch = normalized.match(/(\d{1,3}):(\d{1,3})/);
-    if (chapVerseMatch) {
-      const chap = parseInt(chapVerseMatch[1], 10);
-      const vNum = parseInt(chapVerseMatch[2], 10);
-      if (!isNaN(chap) && !isNaN(vNum) && vNum > 0) {
-        return { verseNumber: vNum, chapterNumber: chap };
-      }
-    }
-
-    const match = normalized.match(/\d{1,3}/);
-    if (!match) {
-      return { verseNumber: fallback };
-    }
-    const num = parseInt(match[0], 10);
-    return { verseNumber: !isNaN(num) && num > 0 ? num : fallback };
-  }
-
-  private inferStartVerseNumber(): number {
-    const ref = this.reference().trim();
-    const colonMatch = ref.match(/:\s*(\d+)/);
-    if (colonMatch) {
-      const num = parseInt(colonMatch[1], 10);
-      if (!isNaN(num) && num > 0) {
-        return num;
-      }
-    }
-    return 1;
   }
 
   private formatDefaultReference(verses: Verse[]): string {

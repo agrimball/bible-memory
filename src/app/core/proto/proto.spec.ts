@@ -1,5 +1,6 @@
 import {
   CardState,
+  estimateRecitationTime,
   formatVerseBadge,
   formatVerseRange,
   isMultiChapterPassage,
@@ -30,6 +31,7 @@ function runProtoTests(): void {
       {
         id: 'psg_rom_8_38_9_2',
         reference: 'Romans 8:38-9:2',
+        label: 'Nothing Can Separate Us',
         createdAt: '2026-11-09T20:00:00.000Z',
         updatedAt: '2026-11-09T20:00:00.000Z',
         verses: [
@@ -57,9 +59,13 @@ function runProtoTests(): void {
         isRepairCard: true,
         repairVerseNumber: 1,
         repairChapterNumber: 9,
+        repairEndVerseNumber: 2,
+        repairEndChapterNumber: 9,
         repairStreak: 2,
         repairTargetStreak: 3,
         parentCardId: 'card_main_1',
+        isStitchedPassageCard: true,
+        stitchedPassageIds: ['psg_chunk_1', 'psg_chunk_2'],
       },
     ],
     reviewLogs: [
@@ -86,6 +92,8 @@ function runProtoTests(): void {
   assertEqual(decodedFromWire.passages[0].verses[2].chapterNumber, 9, 'Wire decoded chapterNumber');
   assertEqual(decodedFromWire.passages[0].verses[2].verseNumber, 1, 'Wire decoded verseNumber');
   assertEqual(decodedFromWire.flashcards[0].repairChapterNumber, 9, 'Wire decoded repairChapterNumber');
+  assertEqual(decodedFromWire.flashcards[0].repairEndVerseNumber, 2, 'Wire decoded repairEndVerseNumber');
+  assertEqual(decodedFromWire.flashcards[0].repairEndChapterNumber, 9, 'Wire decoded repairEndChapterNumber');
 
   // ProtoJsonCodec serializeBundle & deserializeBundle round-trip
   const jsonStr = ProtoJsonCodec.serializeBundle(sampleBundle, true);
@@ -95,6 +103,8 @@ function runProtoTests(): void {
   assertEqual(restored.flashcards[0].state, CardState.CARD_STATE_LEARNING, 'ProtoJsonCodec card state');
   assertEqual(restored.flashcards[0].isRepairCard, true, 'ProtoJsonCodec isRepairCard');
   assertEqual(restored.flashcards[0].repairChapterNumber, 9, 'ProtoJsonCodec repairChapterNumber');
+  assertEqual(restored.flashcards[0].repairEndVerseNumber, 2, 'ProtoJsonCodec repairEndVerseNumber');
+  assertEqual(restored.flashcards[0].repairEndChapterNumber, 9, 'ProtoJsonCodec repairEndChapterNumber');
   assertEqual(restored.reviewLogs[0].rating, ReviewRating.REVIEW_RATING_GOOD, 'ProtoJsonCodec rating');
 
   // 2. Test cross-chapter helpers
@@ -121,6 +131,23 @@ function runProtoTests(): void {
     '8:38–9:2',
     'Cross-chapter verse range'
   );
+
+  // 3. Test Passage.label, stitched fields, and estimateRecitationTime
+  assertEqual(restored.passages[0].label, 'Nothing Can Separate Us', 'ProtoJsonCodec passage label');
+  assertEqual(restored.flashcards[0].isStitchedPassageCard, true, 'ProtoJsonCodec isStitchedPassageCard');
+  assertEqual(restored.flashcards[0].stitchedPassageIds?.length, 2, 'ProtoJsonCodec stitchedPassageIds length');
+
+  const shortEst = estimateRecitationTime(multiChapVerses);
+  assertTrue(shortEst.wordCount > 20, 'estimateRecitationTime counts words');
+  assertEqual(shortEst.isLong, false, '4 short verses is not flagged as isLong');
+  assertTrue(shortEst.label.endsWith('s'), 'Short passage recitation time formatted in seconds');
+
+  const longVerses: Verse[] = Array.from({ length: 12 }, (_, idx) => ({
+    verseNumber: idx + 1,
+    text: 'The Lord is my shepherd I shall not want he makes me lie down in green pastures.',
+  }));
+  const longEst = estimateRecitationTime(longVerses);
+  assertEqual(longEst.isLong, true, '12-verse passage is flagged as isLong');
 
   console.log('✓ proto.spec.ts: All protoc wire, ProtoJSON, and cross-chapter helper assertions passed.');
 }

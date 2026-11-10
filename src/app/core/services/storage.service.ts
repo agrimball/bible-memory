@@ -442,9 +442,9 @@ export class StorageService {
   }
 
   /**
-   * Creates (or surfaces) a temporary single-verse Repair Flashcard for a passage.
-   * Accepts `passageId` or `parentCardId` as the first argument, and supports optional `chapterNumber`
-   * (either as the 3rd argument when `chapterNumber` matches a chapter in a multi-chapter passage, or as the 4th argument).
+   * Creates (or surfaces) a temporary single-verse or multi-verse range Repair Flashcard for a passage.
+   * Accepts `passageId` or `parentCardId` as the first argument, and supports optional `chapterNumber`,
+   * `endVerseNumber`, and `endChapterNumber`.
    * Once the user grades Good/Easy `targetStreak` consecutive times (default 3),
    * the repair card is considered healed and automatically retires from the deck.
    */
@@ -452,7 +452,9 @@ export class StorageService {
     passageOrCardId: string,
     verseNumber: number,
     targetStreakOrChapter = 3,
-    explicitChapterNumber?: number
+    explicitChapterNumber?: number,
+    endVerseNumber?: number,
+    endChapterNumber?: number
   ): DeckItem | undefined {
     const cards = this.flashcards();
     const matchedCard = cards.find((c) => c.id === passageOrCardId);
@@ -468,7 +470,6 @@ export class StorageService {
     if (explicitChapterNumber !== undefined) {
       targetStreak = targetStreakOrChapter > 0 ? targetStreakOrChapter : 3;
     } else {
-      // Check if `targetStreakOrChapter` was passed as a chapterNumber for a verse in this passage
       const matchesSpecificChapter = passage.verses.some(
         (v) => v.verseNumber === verseNumber && v.chapterNumber === targetStreakOrChapter
       );
@@ -484,10 +485,15 @@ export class StorageService {
       }
     }
 
+    const resolvedEndVerse =
+      endVerseNumber && endVerseNumber > 0 ? endVerseNumber : undefined;
+    const resolvedEndChapter =
+      endChapterNumber && endChapterNumber > 0 ? endChapterNumber : resolvedChapter;
+
     const now = new Date();
     const isoNow = now.toISOString();
 
-    // Check if an active repair card for (passageId, verseNumber, resolvedChapter) already exists
+    // Check if an active repair card for (passageId, verseNumber, resolvedChapter, resolvedEndVerse) already exists
     const existingRepair = cards.find(
       (c) =>
         Boolean(c.isRepairCard) &&
@@ -495,7 +501,8 @@ export class StorageService {
         c.repairVerseNumber === verseNumber &&
         (resolvedChapter === undefined ||
           !c.repairChapterNumber ||
-          c.repairChapterNumber === resolvedChapter)
+          c.repairChapterNumber === resolvedChapter) &&
+        (resolvedEndVerse ?? verseNumber) === (c.repairEndVerseNumber ?? c.repairVerseNumber)
     );
 
     if (existingRepair) {
@@ -506,6 +513,12 @@ export class StorageService {
         updatedAt: isoNow,
         ...(resolvedChapter && resolvedChapter > 0
           ? { repairChapterNumber: resolvedChapter }
+          : {}),
+        ...(resolvedEndVerse && resolvedEndVerse > 0
+          ? { repairEndVerseNumber: resolvedEndVerse }
+          : {}),
+        ...(resolvedEndChapter && resolvedEndChapter > 0
+          ? { repairEndChapterNumber: resolvedEndChapter }
           : {}),
       };
       this.flashcards.update((prev) =>
@@ -537,6 +550,12 @@ export class StorageService {
       ...(resolvedChapter && resolvedChapter > 0
         ? { repairChapterNumber: resolvedChapter }
         : {}),
+      ...(resolvedEndVerse && resolvedEndVerse > 0
+        ? { repairEndVerseNumber: resolvedEndVerse }
+        : {}),
+      ...(resolvedEndChapter && resolvedEndChapter > 0
+        ? { repairEndChapterNumber: resolvedEndChapter }
+        : {}),
     };
 
     this.flashcards.update((prev) => [repairCard, ...prev]);
@@ -547,6 +566,89 @@ export class StorageService {
       card: repairCard,
       isDue: true,
     };
+  }
+
+  /**
+   * Truncates / rolls back memorized progress on a passage when the user forgot everything
+   * after `keepVerseCount` verses:
+   * - If `keepVerseCount >= 1`: sets `card.learningStep = keepVerseCount`, keeps the card in SRS (`REVIEW`/`LEARNING`),
+   *   so the user maintains `1..keepVerseCount` in spaced repetition and can expand `+1v` again later.
+   * - If `keepVerseCount <= 0`: resets `card.learningStep = 1` and `card.state = CardState.CARD_STATE_NEW`.
+   */
+  truncatePassageProgress(
+    passageOrCardId: string,
+    keepVerseCount: number
+  ): DeckItem | undefined {
+    const cards = this.flashcards();
+    const targetCard =
+      cards.find((c) => c.id === passageOrCardId && !c.isRepairCard) ??
+      cards.find((c) => c.passageId === passageOrCardId && !c.isRepairCard);
+    if (!targetCard) {
+      return undefined;
+    }
+
+    const passage = this.passages().find((p) => p.id === targetCard.passageId);
+    if (!passage) {
+      return undefined;
+    }
+
+    const now = new Date();
+    const isoNow = now.toISOString();
+    const maxVerses = Math.max(1, passage.verses.length);
+
+    let updatedCard: Flashcard;
+    if (keepVerseCount <= 0) {
+      updatedCard = {
+        ...targetCard,
+        state: CardState.CARD_STATE_NEW,
+        learningStep: 1,
+        repetitions: 0,
+        intervalDays: 0,
+        dueAt: isoNow,
+        updatedAt: isoNow,
+      };
+    } else {
+      const clampedKeep = Math.max(1, Math.min(Math.round(keepVerseCount), maxVerses));
+      const nextState =
+        targetCard.state === CardState.CARD_STATE_NEW
+          ? CardState.CARD_STATE_LEARNING
+          : targetCard.state;
+      updatedCard = {
+        ...targetCard,
+        state: nextState,
+        learningStep: clampedKeep,
+        updatedAt: isoNow,
+      };
+    }
+
+    this.flashcards.update((prev) =>
+      prev.map((c) => (c.id === targetCard.id ? updatedCard : c))
+    );
+    this.syncContiguousStitchedCards();
+    this.persistToStorage();
+
+    return {
+      passage,
+      card: updatedCard,
+      isDue:
+        updatedCard.state !== CardState.CARD_STATE_NEW && this.srs.isDue(updatedCard, now),
+    };
+  }
+
+  /**
+   * Expands a partially memorized passage's target verse step by `delta` (default +1 verse),
+   * clamped to `1 .. passage.verses.length`.
+   */
+  expandPassageStep(cardOrPassageId: string, delta = 1): DeckItem | undefined {
+    const cards = this.flashcards();
+    const targetCard =
+      cards.find((c) => c.id === cardOrPassageId && !c.isRepairCard) ??
+      cards.find((c) => c.passageId === cardOrPassageId && !c.isRepairCard);
+    if (!targetCard) {
+      return undefined;
+    }
+    const currentStep = Math.max(1, targetCard.learningStep || 1);
+    return this.updateStitchedVerseStep(targetCard.id, currentStep + delta);
   }
 
   /**
@@ -582,6 +684,7 @@ export class StorageService {
       this.flashcards.update((prev) =>
         prev.map((c) => (c.id === targetCard.id ? updatedCard : c))
       );
+      this.syncContiguousStitchedCards();
       this.persistToStorage();
     }
 
@@ -620,8 +723,11 @@ export class StorageService {
     const now = new Date();
     const isoNow = now.toISOString();
 
+    const wasNew = targetCard.state === CardState.CARD_STATE_NEW;
     const updatedCard: Flashcard = {
       ...targetCard,
+      state: wasNew ? CardState.CARD_STATE_LEARNING : targetCard.state,
+      dueAt: wasNew ? isoNow : targetCard.dueAt,
       learningStep: clampedStep,
       updatedAt: isoNow,
     };
@@ -629,6 +735,7 @@ export class StorageService {
     this.flashcards.update((prev) =>
       prev.map((c) => (c.id === targetCard.id ? updatedCard : c))
     );
+    this.syncContiguousStitchedCards();
     this.persistToStorage();
 
     return {
@@ -642,12 +749,41 @@ export class StorageService {
 
   /**
    * Adds a structured multi-verse passage to the Memorization Queue (CARD_STATE_NEW).
+   * Supports both `addPassage(reference, verses, label?)` and `addPassage(reference, rawText, preParsedVerses?, label?)`.
    */
-  addPassage(reference: string, verses: Verse[]): DeckItem {
+  addPassage(
+    reference: string,
+    rawTextOrVerses: string | Verse[],
+    preParsedVersesOrLabel?: Verse[] | string,
+    label?: string
+  ): DeckItem {
     const now = new Date();
     const isoNow = now.toISOString();
-    const cleanRef = reference.trim() || 'Untitled Passage';
-    const cleanVerses: Verse[] = verses
+
+    let rawVerses: Verse[];
+    let resolvedLabel: string | undefined;
+    let resolvedReference = reference.trim();
+
+    if (Array.isArray(rawTextOrVerses)) {
+      rawVerses = rawTextOrVerses;
+      resolvedLabel =
+        typeof preParsedVersesOrLabel === 'string' ? preParsedVersesOrLabel : label;
+    } else {
+      if (Array.isArray(preParsedVersesOrLabel) && preParsedVersesOrLabel.length > 0) {
+        rawVerses = preParsedVersesOrLabel;
+      } else {
+        const parsed = this.parser.parseRawInput(rawTextOrVerses, resolvedReference || undefined);
+        rawVerses = parsed.verses;
+        if (!resolvedReference) {
+          resolvedReference = parsed.reference;
+        }
+      }
+      resolvedLabel = label;
+    }
+
+    const cleanRef = resolvedReference || 'Untitled Passage';
+    const cleanLabel = resolvedLabel?.trim() || undefined;
+    const cleanVerses: Verse[] = rawVerses
       .map((v, idx) => ({
         verseNumber: v.verseNumber > 0 ? v.verseNumber : idx + 1,
         text: v.text.trim(),
@@ -661,6 +797,7 @@ export class StorageService {
       verses: cleanVerses,
       createdAt: isoNow,
       updatedAt: isoNow,
+      ...(cleanLabel ? { label: cleanLabel } : {}),
     };
 
     const card: Flashcard = {
@@ -680,11 +817,240 @@ export class StorageService {
   }
 
   /**
+   * Updates an existing passage's reference, custom label, and verses, preserving its card and SRS state.
+   */
+  updatePassage(
+    passageId: string,
+    reference: string,
+    rawTextOrVerses: string | Verse[],
+    maybeVerses?: Verse[],
+    label?: string
+  ): Passage | undefined {
+    const existing = this.passages().find((p) => p.id === passageId);
+    if (!existing) {
+      return undefined;
+    }
+
+    const isoNow = new Date().toISOString();
+    const cleanRef = reference.trim() || existing.reference || 'Untitled Passage';
+    const cleanLabel = label?.trim() || undefined;
+
+    let rawVerses: Verse[];
+    if (Array.isArray(rawTextOrVerses)) {
+      rawVerses = rawTextOrVerses;
+    } else if (Array.isArray(maybeVerses) && maybeVerses.length > 0) {
+      rawVerses = maybeVerses;
+    } else {
+      rawVerses = this.parser.parseRawInput(rawTextOrVerses, cleanRef).verses;
+    }
+
+    const cleanVerses: Verse[] = rawVerses
+      .map((v, idx) => ({
+        verseNumber: v.verseNumber > 0 ? v.verseNumber : idx + 1,
+        text: v.text.trim(),
+        ...(v.chapterNumber && v.chapterNumber > 0 ? { chapterNumber: v.chapterNumber } : {}),
+      }))
+      .filter((v) => v.text.length > 0);
+
+    const finalVerses = cleanVerses.length > 0 ? cleanVerses : existing.verses;
+
+    const updatedPassage: Passage = {
+      ...existing,
+      reference: cleanRef,
+      verses: finalVerses,
+      updatedAt: isoNow,
+    };
+    if (cleanLabel) {
+      updatedPassage.label = cleanLabel;
+    } else {
+      delete updatedPassage.label;
+    }
+
+    this.passages.update((prev) =>
+      prev.map((p) => (p.id === passageId ? updatedPassage : p))
+    );
+
+    const maxVerses = Math.max(1, finalVerses.length);
+    this.flashcards.update((prev) =>
+      prev.map((c) => {
+        if (c.passageId !== passageId || c.isRepairCard) {
+          return c;
+        }
+        return {
+          ...c,
+          learningStep: Math.max(1, Math.min(c.learningStep || 1, maxVerses)),
+          updatedAt: isoNow,
+        };
+      })
+    );
+
+    this.syncContiguousStitchedCards();
+    this.persistToStorage();
+    return updatedPassage;
+  }
+
+  /**
+   * Updates the user-defined label on an existing passage.
+   */
+  updatePassageLabel(passageId: string, label: string): void {
+    const cleanLabel = label.trim() || undefined;
+    const isoNow = new Date().toISOString();
+    this.passages.update((prev) =>
+      prev.map((p) => {
+        if (p.id !== passageId) {
+          return p;
+        }
+        const updated: Passage = {
+          ...p,
+          updatedAt: isoNow,
+        };
+        if (cleanLabel) {
+          updated.label = cleanLabel;
+        } else {
+          delete updated.label;
+        }
+        return updated;
+      })
+    );
+    this.syncContiguousStitchedCards();
+    this.persistToStorage();
+  }
+
+  /**
+   * Adds multiple chunked passages in canonical order so chunk 1 appears first in the Queue.
+   */
+  addMultiplePassages(
+    chunks: Array<{ reference: string; rawText?: string; verses: Verse[]; label?: string }>
+  ): Passage[] {
+    if (!chunks || chunks.length === 0) {
+      return [];
+    }
+
+    const now = new Date();
+    const isoNow = now.toISOString();
+    const newPassages: Passage[] = [];
+    const newCards: Flashcard[] = [];
+
+    for (const chunk of chunks) {
+      const cleanRef = chunk.reference.trim() || 'Untitled Passage';
+      const cleanLabel = chunk.label?.trim() || undefined;
+      const sourceVerses =
+        chunk.verses && chunk.verses.length > 0
+          ? chunk.verses
+          : this.parser.parseRawInput(chunk.rawText ?? '', cleanRef).verses;
+      const cleanVerses: Verse[] = sourceVerses
+        .map((v, idx) => ({
+          verseNumber: v.verseNumber > 0 ? v.verseNumber : idx + 1,
+          text: v.text.trim(),
+          ...(v.chapterNumber && v.chapterNumber > 0 ? { chapterNumber: v.chapterNumber } : {}),
+        }))
+        .filter((v) => v.text.length > 0);
+
+      if (cleanVerses.length === 0) {
+        continue;
+      }
+
+      const passage: Passage = {
+        id: this.generateId('psg'),
+        reference: cleanRef,
+        verses: cleanVerses,
+        createdAt: isoNow,
+        updatedAt: isoNow,
+        ...(cleanLabel ? { label: cleanLabel } : {}),
+      };
+      const card: Flashcard = {
+        ...this.srs.createInitialFlashcard(passage.id, now),
+        learningStep: 1,
+      };
+      newPassages.push(passage);
+      newCards.push(card);
+    }
+
+    if (newPassages.length > 0) {
+      this.passages.update((prev) => [...newPassages, ...prev]);
+      this.flashcards.update((prev) => [...newCards, ...prev]);
+      this.persistToStorage();
+    }
+
+    return newPassages;
+  }
+
+  /**
+   * Splits an existing long passage into smaller named chunks in canonical order.
+   */
+  splitPassageIntoChunks(
+    passageId: string,
+    chunks: Array<{ reference: string; label?: string; verses: Verse[] }>
+  ): void {
+    if (!chunks || chunks.length === 0) {
+      return;
+    }
+
+    const now = new Date();
+    const isoNow = now.toISOString();
+    const createdPassages: Passage[] = [];
+    const createdCards: Flashcard[] = [];
+
+    for (const chunk of chunks) {
+      const cleanRef = chunk.reference.trim() || 'Untitled Passage';
+      const cleanLabel = chunk.label?.trim() || undefined;
+      const cleanVerses: Verse[] = (chunk.verses ?? [])
+        .map((v, idx) => ({
+          verseNumber: v.verseNumber > 0 ? v.verseNumber : idx + 1,
+          text: v.text.trim(),
+          ...(v.chapterNumber && v.chapterNumber > 0 ? { chapterNumber: v.chapterNumber } : {}),
+        }))
+        .filter((v) => v.text.length > 0);
+
+      if (cleanVerses.length === 0) {
+        continue;
+      }
+
+      const passage: Passage = {
+        id: this.generateId('psg'),
+        reference: cleanRef,
+        verses: cleanVerses,
+        createdAt: isoNow,
+        updatedAt: isoNow,
+        ...(cleanLabel ? { label: cleanLabel } : {}),
+      };
+      const card: Flashcard = {
+        ...this.srs.createInitialFlashcard(passage.id, now),
+        learningStep: 1,
+      };
+      createdPassages.push(passage);
+      createdCards.push(card);
+    }
+
+    if (createdPassages.length === 0) {
+      return;
+    }
+
+    this.passages.update((prev) => {
+      const idx = prev.findIndex((p) => p.id === passageId);
+      if (idx === -1) {
+        return [...createdPassages, ...prev];
+      }
+      const next = [...prev];
+      next.splice(idx, 1, ...createdPassages);
+      return next;
+    });
+
+    this.flashcards.update((prev) => {
+      const filtered = prev.filter((c) => c.passageId !== passageId);
+      return [...createdCards, ...filtered];
+    });
+
+    this.syncContiguousStitchedCards();
+    this.persistToStorage();
+  }
+
+  /**
    * Parses raw pasted text (and optional explicit reference) and adds it to the Memorization Queue.
    */
-  addFromRawText(rawText: string, explicitReference?: string): DeckItem {
+  addFromRawText(rawText: string, explicitReference?: string, label?: string): DeckItem {
     const parsed = this.parser.parseRawInput(rawText, explicitReference);
-    return this.addPassage(parsed.reference, parsed.verses);
+    return this.addPassage(parsed.reference, parsed.verses, label);
   }
 
   /**
@@ -694,6 +1060,7 @@ export class StorageService {
     this.passages.update((prev) => prev.filter((p) => p.id !== passageId));
     this.flashcards.update((prev) => prev.filter((c) => c.passageId !== passageId));
     this.reviewLogs.update((prev) => prev.filter((r) => r.passageId !== passageId));
+    this.syncContiguousStitchedCards();
     this.persistToStorage();
   }
 
@@ -743,6 +1110,12 @@ export class StorageService {
           parentCardId: targetCard.parentCardId,
           ...(targetCard.repairChapterNumber
             ? { repairChapterNumber: targetCard.repairChapterNumber }
+            : {}),
+          ...(targetCard.repairEndVerseNumber
+            ? { repairEndVerseNumber: targetCard.repairEndVerseNumber }
+            : {}),
+          ...(targetCard.repairEndChapterNumber
+            ? { repairEndChapterNumber: targetCard.repairEndChapterNumber }
             : {}),
         };
 
@@ -795,6 +1168,12 @@ export class StorageService {
         ...(targetCard.repairChapterNumber
           ? { repairChapterNumber: targetCard.repairChapterNumber }
           : {}),
+        ...(targetCard.repairEndVerseNumber
+          ? { repairEndVerseNumber: targetCard.repairEndVerseNumber }
+          : {}),
+        ...(targetCard.repairEndChapterNumber
+          ? { repairEndChapterNumber: targetCard.repairEndChapterNumber }
+          : {}),
       };
 
       this.flashcards.update((prev) =>
@@ -819,12 +1198,19 @@ export class StorageService {
     const finalUpdatedCard: Flashcard = {
       ...updatedCard,
       learningStep: preservedStep,
+      ...(targetCard.isStitchedPassageCard
+        ? {
+            isStitchedPassageCard: true,
+            stitchedPassageIds: targetCard.stitchedPassageIds ?? [],
+          }
+        : {}),
     };
 
     this.flashcards.update((prev) =>
       prev.map((c) => (c.id === targetCard.id ? finalUpdatedCard : c))
     );
     this.reviewLogs.update((prev) => [reviewLog, ...prev]);
+    this.syncContiguousStitchedCards();
     this.persistToStorage();
 
     if (!passage) {
@@ -838,6 +1224,290 @@ export class StorageService {
         finalUpdatedCard.state !== CardState.CARD_STATE_NEW &&
         this.srs.isDue(finalUpdatedCard, now),
     };
+  }
+
+  /**
+   * Automatically synchronizes Seam Review Cards (2-verse handoff between adjacent chunks A and B)
+   * and Full Contiguous Stitched Passage Cards across any run of >=2 contiguous memorized passages
+   * in the same biblical book.
+   */
+  syncContiguousStitchedCards(): void {
+    const allPassages = this.passages();
+    const allCards = this.flashcards();
+
+    const basePassages = allPassages.filter(
+      (p) => !p.id.startsWith('psg_stitched_') && !p.id.startsWith('psg_seam_')
+    );
+    const existingAutoPassagesById = new Map<string, Passage>();
+    for (const p of allPassages) {
+      if (p.id.startsWith('psg_stitched_') || p.id.startsWith('psg_seam_')) {
+        existingAutoPassagesById.set(p.id, p);
+      }
+    }
+
+    const mainCardByPassageId = new Map<string, Flashcard>();
+    const existingAutoCardsById = new Map<string, Flashcard>();
+    const nonAutoCards: Flashcard[] = [];
+
+    for (const c of allCards) {
+      if (c.isStitchedPassageCard || c.id.startsWith('card_stitched_') || c.id.startsWith('card_seam_')) {
+        existingAutoCardsById.set(c.id, c);
+      } else {
+        nonAutoCards.push(c);
+        if (!c.isRepairCard) {
+          mainCardByPassageId.set(c.passageId, c);
+        }
+      }
+    }
+
+    interface ParsedPassageSpan {
+      passage: Passage;
+      card: Flashcard;
+      bookKey: string;
+      bookDisplay: string;
+      startChapter: number;
+      startVerse: number;
+      endChapter: number;
+      endVerse: number;
+    }
+
+    const memorizedSpansByBook = new Map<string, ParsedPassageSpan[]>();
+
+    for (const passage of basePassages) {
+      if (!passage.verses || passage.verses.length === 0) {
+        continue;
+      }
+      const card = mainCardByPassageId.get(passage.id);
+      if (!card || card.state === CardState.CARD_STATE_NEW) {
+        continue;
+      }
+      const step = card.learningStep || 1;
+      if (step < passage.verses.length) {
+        continue;
+      }
+
+      const bookMatch = passage.reference
+        .trim()
+        .match(/^((?:[1-3]\s+)?[A-Za-z]+(?:\s+of\s+[A-Za-z]+|\s+[A-Za-z]+)?)\s+(\d+)/i);
+      if (!bookMatch) {
+        continue;
+      }
+
+      const bookDisplay = bookMatch[1].trim();
+      const bookKey = bookDisplay.toLowerCase().replace(/\s+/g, ' ');
+      const refChapter = parseInt(bookMatch[2], 10) || 1;
+
+      const firstVerse = passage.verses[0];
+      const lastVerse = passage.verses[passage.verses.length - 1];
+      const startChapter =
+        firstVerse.chapterNumber && firstVerse.chapterNumber > 0
+          ? firstVerse.chapterNumber
+          : refChapter;
+      const startVerse = firstVerse.verseNumber;
+      const endChapter =
+        lastVerse.chapterNumber && lastVerse.chapterNumber > 0
+          ? lastVerse.chapterNumber
+          : startChapter;
+      const endVerse = lastVerse.verseNumber;
+
+      const list = memorizedSpansByBook.get(bookKey) ?? [];
+      list.push({
+        passage,
+        card,
+        bookKey,
+        bookDisplay,
+        startChapter,
+        startVerse,
+        endChapter,
+        endVerse,
+      });
+      memorizedSpansByBook.set(bookKey, list);
+    }
+
+    const now = new Date();
+    const isoNow = now.toISOString();
+    const activeAutoPassages: Passage[] = [];
+    const activeAutoCards: Flashcard[] = [];
+
+    for (const spans of memorizedSpansByBook.values()) {
+      spans.sort((a, b) => {
+        if (a.startChapter !== b.startChapter) {
+          return a.startChapter - b.startChapter;
+        }
+        if (a.startVerse !== b.startVerse) {
+          return a.startVerse - b.startVerse;
+        }
+        if (a.endChapter !== b.endChapter) {
+          return a.endChapter - b.endChapter;
+        }
+        return a.endVerse - b.endVerse;
+      });
+
+      // Group into maximal contiguous runs of >=2 passages
+      let currentRun: ParsedPassageSpan[] = [];
+      const runs: ParsedPassageSpan[][] = [];
+
+      for (const span of spans) {
+        if (currentRun.length === 0) {
+          currentRun.push(span);
+          continue;
+        }
+        const prev = currentRun[currentRun.length - 1];
+        const isSameChapAdjacent =
+          span.startChapter === prev.endChapter && span.startVerse === prev.endVerse + 1;
+        const isNextChapStart =
+          span.startChapter === prev.endChapter + 1 && span.startVerse === 1;
+
+        if (isSameChapAdjacent || isNextChapStart) {
+          currentRun.push(span);
+        } else {
+          if (currentRun.length >= 2) {
+            runs.push(currentRun);
+          }
+          currentRun = [span];
+        }
+      }
+      if (currentRun.length >= 2) {
+        runs.push(currentRun);
+      }
+
+      for (const run of runs) {
+        // 1. Emit Seam Review Cards between each adjacent pair (A, B) when A + B has >2 total verses
+        for (let i = 0; i < run.length - 1; i++) {
+          const left = run[i];
+          const right = run[i + 1];
+          if (left.passage.verses.length + right.passage.verses.length <= 2) {
+            continue;
+          }
+
+          const lastOfLeft = left.passage.verses[left.passage.verses.length - 1];
+          const firstOfRight = right.passage.verses[0];
+          const seamChapLeft = lastOfLeft.chapterNumber ?? left.endChapter;
+          const seamChapRight = firstOfRight.chapterNumber ?? right.startChapter;
+
+          const seamVerses: Verse[] = [
+            {
+              ...lastOfLeft,
+              chapterNumber: seamChapLeft,
+            },
+            {
+              ...firstOfRight,
+              chapterNumber: seamChapRight,
+            },
+          ];
+
+          const seamRef =
+            seamChapLeft === seamChapRight
+              ? `${left.bookDisplay} ${seamChapLeft}:${lastOfLeft.verseNumber}-${firstOfRight.verseNumber}`
+              : `${left.bookDisplay} ${seamChapLeft}:${lastOfLeft.verseNumber}-${seamChapRight}:${firstOfRight.verseNumber}`;
+
+          const leftName = left.passage.label?.trim() || left.passage.reference;
+          const rightName = right.passage.label?.trim() || right.passage.reference;
+          const seamLabel = `Seam: ${leftName} → ${rightName}`;
+
+          const pairKey = `${left.passage.id}__${right.passage.id}`;
+          const seamPassageId = `psg_seam_${pairKey}`;
+          const seamCardId = `card_seam_${pairKey}`;
+
+          const existingSeamPassage = existingAutoPassagesById.get(seamPassageId);
+          const seamPassage: Passage = {
+            id: seamPassageId,
+            reference: seamRef,
+            verses: seamVerses,
+            label: seamLabel,
+            createdAt: existingSeamPassage?.createdAt ?? isoNow,
+            updatedAt: isoNow,
+          };
+
+          const existingSeamCard = existingAutoCardsById.get(seamCardId);
+          const seamCard: Flashcard = existingSeamCard
+            ? {
+                ...existingSeamCard,
+                passageId: seamPassageId,
+                learningStep: seamVerses.length,
+                isStitchedPassageCard: true,
+                stitchedPassageIds: [left.passage.id, right.passage.id],
+                updatedAt: isoNow,
+              }
+            : {
+                ...this.srs.createInitialFlashcard(seamPassageId, now),
+                id: seamCardId,
+                state: CardState.CARD_STATE_LEARNING,
+                learningStep: seamVerses.length,
+                dueAt: isoNow,
+                isStitchedPassageCard: true,
+                stitchedPassageIds: [left.passage.id, right.passage.id],
+              };
+
+          activeAutoPassages.push(seamPassage);
+          activeAutoCards.push(seamCard);
+        }
+
+        // 2. Emit Full Contiguous Stitched Passage Card across the entire run
+        const firstSpan = run[0];
+        const lastSpan = run[run.length - 1];
+        const runIds = run.map((r) => r.passage.id);
+        const runKey = runIds.join('__');
+        const stitchedPassageId = `psg_stitched_${runKey}`;
+        const stitchedCardId = `card_stitched_${runKey}`;
+
+        const stitchedVerses: Verse[] = run.flatMap((r) =>
+          r.passage.verses.map((v) => ({
+            ...v,
+            chapterNumber: v.chapterNumber ?? r.startChapter,
+          }))
+        );
+
+        const stitchedRef =
+          firstSpan.startChapter === lastSpan.endChapter
+            ? `${firstSpan.bookDisplay} ${firstSpan.startChapter}:${firstSpan.startVerse}-${lastSpan.endVerse}`
+            : `${firstSpan.bookDisplay} ${firstSpan.startChapter}:${firstSpan.startVerse}-${lastSpan.endChapter}:${lastSpan.endVerse}`;
+
+        const customLabels = run
+          .map((r) => r.passage.label?.trim())
+          .filter((lbl): lbl is string => Boolean(lbl));
+        const stitchedLabel =
+          customLabels.length > 0
+            ? `Stitched: ${customLabels.join(' → ')}`
+            : `Stitched: ${run.map((r) => r.passage.reference).join(' + ')}`;
+
+        const existingStitchedPassage = existingAutoPassagesById.get(stitchedPassageId);
+        const stitchedPassage: Passage = {
+          id: stitchedPassageId,
+          reference: stitchedRef,
+          verses: stitchedVerses,
+          label: stitchedLabel,
+          createdAt: existingStitchedPassage?.createdAt ?? isoNow,
+          updatedAt: isoNow,
+        };
+
+        const existingStitchedCard = existingAutoCardsById.get(stitchedCardId);
+        const stitchedCard: Flashcard = existingStitchedCard
+          ? {
+              ...existingStitchedCard,
+              passageId: stitchedPassageId,
+              learningStep: stitchedVerses.length,
+              isStitchedPassageCard: true,
+              stitchedPassageIds: runIds,
+              updatedAt: isoNow,
+            }
+          : {
+              ...this.srs.createInitialFlashcard(stitchedPassageId, now),
+              id: stitchedCardId,
+              state: CardState.CARD_STATE_LEARNING,
+              learningStep: stitchedVerses.length,
+              dueAt: isoNow,
+              isStitchedPassageCard: true,
+              stitchedPassageIds: runIds,
+            };
+
+        activeAutoPassages.push(stitchedPassage);
+        activeAutoCards.push(stitchedCard);
+      }
+    }
+
+    this.passages.set([...basePassages, ...activeAutoPassages]);
+    this.flashcards.set([...nonAutoCards, ...activeAutoCards]);
   }
 
   /**
@@ -867,6 +1537,7 @@ export class StorageService {
       this.passages.set(passages);
       this.flashcards.set(flashcards);
       this.reviewLogs.set(bundle.reviewLogs);
+      this.syncContiguousStitchedCards();
       this.persistToStorage();
       return;
     }
@@ -905,55 +1576,71 @@ export class StorageService {
     this.passages.set(mergedPassages);
     this.flashcards.set(mergedCards);
     this.reviewLogs.set(Array.from(logMap.values()));
+    this.syncContiguousStitchedCards();
     this.persistToStorage();
   }
 
   /**
-   * Resets the deck back to the 4 default starter passages.
+   * Clears all passages, flashcards, and review logs back to a clean empty state.
+   */
+  clearAllData(): void {
+    this.passages.set([]);
+    this.flashcards.set([]);
+    this.reviewLogs.set([]);
+    this.persistToStorage();
+  }
+
+  /**
+   * Resets the deck to a clean empty state (no demo passages).
    */
   resetToDefaults(): void {
-    this.seedDefaults();
+    this.clearAllData();
   }
 
   private loadFromStorage(): void {
     if (typeof localStorage === 'undefined') {
-      this.seedDefaults();
+      this.passages.set([]);
+      this.flashcards.set([]);
+      this.reviewLogs.set([]);
       return;
     }
 
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) {
-        this.seedDefaults();
+        this.passages.set([]);
+        this.flashcards.set([]);
+        this.reviewLogs.set([]);
         return;
       }
 
       const bundle = ProtoJsonCodec.deserializeBundle(raw);
       if (!bundle.passages || bundle.passages.length === 0) {
-        this.seedDefaults();
+        this.passages.set([]);
+        this.flashcards.set([]);
+        this.reviewLogs.set([]);
+        return;
+      }
+
+      // Clean up legacy auto-seeded demo deck if the user never added their own passages or reviews
+      const isLegacyAutoSeededDemoDeck =
+        (bundle.reviewLogs?.length ?? 0) === 0 &&
+        bundle.passages.every((p) => p.id.startsWith('psg_seed_'));
+
+      if (isLegacyAutoSeededDemoDeck) {
+        this.clearAllData();
         return;
       }
 
       const flashcards = this.ensureFlashcardsForPassages(bundle.passages, bundle.flashcards);
-
-      // Migrate untouched v1 seed state where all 4 starter cards were NEW and no reviews existed yet
-      const isUntouchedLegacySeed =
-        (bundle.reviewLogs?.length ?? 0) === 0 &&
-        flashcards.length === 4 &&
-        flashcards.every(
-          (c) => c.id.startsWith('card_seed_') && c.state === CardState.CARD_STATE_NEW
-        );
-
-      if (isUntouchedLegacySeed) {
-        this.seedDefaults();
-        return;
-      }
-
       this.passages.set(bundle.passages);
       this.flashcards.set(flashcards);
       this.reviewLogs.set(bundle.reviewLogs ?? []);
+      this.syncContiguousStitchedCards();
     } catch {
-      this.seedDefaults();
+      this.passages.set([]);
+      this.flashcards.set([]);
+      this.reviewLogs.set([]);
     }
   }
 
@@ -1355,7 +2042,10 @@ export class StorageService {
     return [...repairCards, ...mainCards];
   }
 
-  private seedDefaults(): void {
+  /**
+   * Explicit opt-in helper for automated tests only; never called on startup.
+   */
+  seedInitialDemoData(): void {
     const now = new Date();
     const isoNow = now.toISOString();
     const oneHourAgoIso = new Date(now.getTime() - 60 * 60 * 1000).toISOString();

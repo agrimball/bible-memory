@@ -110,13 +110,17 @@ export class FirstLetterStudyService {
         });
       } else {
         const clampedRevealed = Math.min(revealedInActive, totalWordCount);
+        const visibleWordCount = this.computeVisibleWordCountForActiveVerse(
+          parsed.rawWords,
+          clampedRevealed
+        );
         result.push({
           verseIndex: parsed.verseIndex,
           verseNumber: parsed.verseNumber,
           chapterNumber: parsed.chapterNumber,
           verseLabel: parsed.verseLabel,
           status: 'active',
-          words: parsed.rawWords.map((w, wordIdx) => ({
+          words: parsed.rawWords.slice(0, visibleWordCount).map((w, wordIdx) => ({
             ...w,
             isRevealed: wordIdx < clampedRevealed,
           })),
@@ -199,6 +203,25 @@ export class FirstLetterStudyService {
       const lastVerseWords = verses[activeIdx].rawWords.length;
       this.revealedWordsInActiveVerse.set(lastVerseWords);
     }
+  }
+
+  private computeVisibleWordCountForActiveVerse(
+    rawWords: Omit<StudyWordToken, 'isRevealed'>[],
+    revealedWordCount: number
+  ): number {
+    const total = rawWords.length;
+    if (total === 0) {
+      return 0;
+    }
+
+    const startIdx = Math.min(Math.max(0, revealedWordCount), total);
+    for (let i = startIdx; i < total; i++) {
+      if (/[.?!]["'”’)\]]*$/.test(rawWords[i].fullText)) {
+        return i + 1;
+      }
+    }
+
+    return total;
   }
 
   private tokenizeVerseText(text: string): Omit<StudyWordToken, 'isRevealed'>[] {

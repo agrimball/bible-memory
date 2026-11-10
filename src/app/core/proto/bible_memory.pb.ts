@@ -9,32 +9,62 @@ import {
   CardState,
   cardStateFromJSON,
   cardStateToJSON,
-  Flashcard,
+  Flashcard as GeneratedFlashcard,
   Passage,
   ReviewLog,
   ReviewRating,
   reviewRatingFromJSON,
   reviewRatingToJSON,
-  UserDataBundle,
+  UserDataBundle as GeneratedUserDataBundle,
   Verse,
 } from './generated/bible_memory';
+
+export type Flashcard = Omit<GeneratedFlashcard, 'stitchedPassageIds'> & {
+  stitchedPassageIds?: string[];
+};
+
+export interface UserDataBundle {
+  schemaVersion: number;
+  exportedAt: string;
+  passages: Passage[];
+  flashcards: Flashcard[];
+  reviewLogs: ReviewLog[];
+}
+
+export const UserDataBundle = {
+  ...GeneratedUserDataBundle,
+  encode(message: UserDataBundle, writer?: Parameters<typeof GeneratedUserDataBundle.encode>[1]) {
+    const normalized: GeneratedUserDataBundle = {
+      ...message,
+      flashcards: (message.flashcards ?? []).map((c) => ({
+        ...c,
+        stitchedPassageIds: c.stitchedPassageIds ?? [],
+      })),
+    };
+    return GeneratedUserDataBundle.encode(normalized, writer);
+  },
+  decode(
+    input: Parameters<typeof GeneratedUserDataBundle.decode>[0],
+    length?: number
+  ): UserDataBundle {
+    return GeneratedUserDataBundle.decode(input, length);
+  },
+};
 
 export {
   CardState,
   cardStateFromJSON,
   cardStateToJSON,
-  Flashcard,
   Passage,
   ReviewLog,
   ReviewRating,
   reviewRatingFromJSON,
   reviewRatingToJSON,
-  UserDataBundle,
   Verse,
 };
 
 // ============================================================================
-// Cross-Chapter Verse Formatting Helpers
+// Cross-Chapter Verse Formatting & Recitation Time Helpers
 // ============================================================================
 
 export function isMultiChapterPassage(verses: Verse[]): boolean {
@@ -75,6 +105,51 @@ export function formatVerseRange(
   return `v. ${firstVerse.verseNumber}–${lastVerse.verseNumber}`;
 }
 
+export interface RecitationEstimate {
+  wordCount: number;
+  seconds: number;
+  label: string;
+  isLong: boolean;
+}
+
+/**
+ * Estimates recitation time at ~130 words per minute and flags passages
+ * with >10 verses or >180 words as long passages suitable for chunking.
+ */
+export function estimateRecitationTime(verses: Verse[]): RecitationEstimate {
+  const safeVerses = verses ?? [];
+  let wordCount = 0;
+  for (const v of safeVerses) {
+    const trimmed = (v.text ?? '').trim();
+    if (trimmed.length > 0) {
+      wordCount += trimmed.split(/\s+/).length;
+    }
+  }
+
+  if (wordCount === 0) {
+    return {
+      wordCount: 0,
+      seconds: 0,
+      label: '~0s',
+      isLong: safeVerses.length > 10,
+    };
+  }
+
+  const seconds = Math.max(5, Math.round((wordCount / 130) * 60));
+  const roundedFiveSec = Math.ceil(seconds / 5) * 5;
+  const label =
+    roundedFiveSec < 60
+      ? `~${roundedFiveSec}s`
+      : `~${(seconds / 60).toFixed(1).replace(/\.0$/, '')} min`;
+
+  return {
+    wordCount,
+    seconds,
+    label,
+    isLong: safeVerses.length > 10 || wordCount > 180,
+  };
+}
+
 // ============================================================================
 // Canonical ProtoJSON Serialization / Deserialization (Proto3 JSON Spec)
 // ============================================================================
@@ -95,6 +170,7 @@ export interface PassageProtoJson {
   created_at?: string;
   updatedAt?: string;
   updated_at?: string;
+  label?: string;
 }
 
 export interface FlashcardProtoJson {
@@ -130,6 +206,14 @@ export interface FlashcardProtoJson {
   parent_card_id?: string;
   repairChapterNumber?: number;
   repair_chapter_number?: number;
+  repairEndVerseNumber?: number;
+  repair_end_verse_number?: number;
+  repairEndChapterNumber?: number;
+  repair_end_chapter_number?: number;
+  isStitchedPassageCard?: boolean;
+  is_stitched_passage_card?: boolean;
+  stitchedPassageIds?: string[];
+  stitched_passage_ids?: string[];
 }
 
 export interface ReviewLogProtoJson {
@@ -227,17 +311,21 @@ export const ProtoJsonCodec = {
   },
 
   passageToJson(p: Passage): PassageProtoJson {
-    return {
+    const out: PassageProtoJson = {
       id: p.id,
       reference: p.reference,
       verses: (p.verses ?? []).map((v) => ProtoJsonCodec.verseToJson(v)),
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,
     };
+    if (p.label && p.label.trim().length > 0) {
+      out.label = p.label.trim();
+    }
+    return out;
   },
 
   passageFromJson(json: PassageProtoJson): Passage {
-    return {
+    const out: Passage = {
       id: String(json.id ?? ''),
       reference: String(json.reference ?? ''),
       verses: Array.isArray(json.verses)
@@ -246,6 +334,10 @@ export const ProtoJsonCodec = {
       createdAt: String(json.createdAt ?? json.created_at ?? new Date().toISOString()),
       updatedAt: String(json.updatedAt ?? json.updated_at ?? new Date().toISOString()),
     };
+    if (typeof json.label === 'string' && json.label.trim().length > 0) {
+      out.label = json.label.trim();
+    }
+    return out;
   },
 
   flashcardToJson(c: Flashcard): FlashcardProtoJson {
@@ -274,12 +366,28 @@ export const ProtoJsonCodec = {
       if (c.repairChapterNumber && c.repairChapterNumber > 0) {
         out.repairChapterNumber = c.repairChapterNumber;
       }
+      if (c.repairEndVerseNumber && c.repairEndVerseNumber > 0) {
+        out.repairEndVerseNumber = c.repairEndVerseNumber;
+      }
+      if (c.repairEndChapterNumber && c.repairEndChapterNumber > 0) {
+        out.repairEndChapterNumber = c.repairEndChapterNumber;
+      }
+    }
+    if (c.isStitchedPassageCard) {
+      out.isStitchedPassageCard = true;
+      if (Array.isArray(c.stitchedPassageIds) && c.stitchedPassageIds.length > 0) {
+        out.stitchedPassageIds = [...c.stitchedPassageIds];
+      }
     }
     return out;
   },
 
   flashcardFromJson(json: FlashcardProtoJson): Flashcard {
     const isRepair = Boolean(json.isRepairCard ?? json.is_repair_card ?? false);
+    const isStitched = Boolean(
+      json.isStitchedPassageCard ?? json.is_stitched_passage_card ?? false
+    );
+    const rawStitchedIds = json.stitchedPassageIds ?? json.stitched_passage_ids;
     const card: Flashcard = {
       id: String(json.id ?? ''),
       passageId: String(json.passageId ?? json.passage_id ?? ''),
@@ -313,6 +421,24 @@ export const ProtoJsonCodec = {
       if (repairChap > 0) {
         card.repairChapterNumber = repairChap;
       }
+      const repairEndVerse = Number(
+        json.repairEndVerseNumber ?? json.repair_end_verse_number ?? 0
+      );
+      if (repairEndVerse > 0) {
+        card.repairEndVerseNumber = repairEndVerse;
+      }
+      const repairEndChap = Number(
+        json.repairEndChapterNumber ?? json.repair_end_chapter_number ?? 0
+      );
+      if (repairEndChap > 0) {
+        card.repairEndChapterNumber = repairEndChap;
+      }
+    }
+    if (isStitched) {
+      card.isStitchedPassageCard = true;
+      card.stitchedPassageIds = Array.isArray(rawStitchedIds)
+        ? rawStitchedIds.map((id) => String(id))
+        : [];
     }
     return card;
   },

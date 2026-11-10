@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { App } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { StorageService, DeckItem } from './core/services/storage.service';
-import { CardState, ReviewRating, isMultiChapterPassage } from './core/proto/bible_memory.pb';
+import { CardState, Passage, ReviewRating, isMultiChapterPassage } from './core/proto/bible_memory.pb';
 import { DeckDashboardComponent } from './features/deck/deck-dashboard.component';
 import { StudyCardComponent } from './features/study/study-card.component';
 import { FirstLetterStudyPageComponent } from './features/study/first-letter-study-page.component';
@@ -12,6 +12,7 @@ import { ProtoSyncModalComponent } from './features/sync/proto-sync-modal.compon
 
 const THEME_STORAGE_KEY = 'bible_memory_theme';
 const UI_SESSION_STORAGE_KEY = 'selah_ui_session_v1';
+const TEXT_SCALE_STORAGE_KEY = 'selah_text_scale_v1';
 
 export interface SelahUiSessionV1 {
   viewMode: 'deck' | 'study';
@@ -41,6 +42,8 @@ export class AppComponent implements OnInit, OnDestroy {
   readonly storageService = inject(StorageService);
 
   readonly isDarkMode = signal<boolean>(true);
+  readonly textScale = signal<number>(1.0);
+  readonly isDrawerOpen = signal<boolean>(false);
   readonly activeView = signal<'dashboard' | 'study' | 'first-letter-page'>('dashboard');
   readonly dashboardTab = signal<'queue' | 'due' | 'active'>('queue');
   readonly studyQueueIds = signal<string[]>([]);
@@ -49,6 +52,7 @@ export class AppComponent implements OnInit, OnDestroy {
   readonly repairHealedBanner = signal<string | null>(null);
 
   readonly showAddPassageModal = signal<boolean>(false);
+  readonly editingPassage = signal<Passage | null>(null);
   readonly showProtoSyncModal = signal<boolean>(false);
 
   /** Computed aliases matching the selah_ui_session_v1 schema */
@@ -116,6 +120,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     let initialDark = true;
+    let initialScale = 1.0;
     if (typeof localStorage !== 'undefined') {
       const saved = localStorage.getItem(THEME_STORAGE_KEY);
       if (saved === 'light') {
@@ -123,8 +128,13 @@ export class AppComponent implements OnInit, OnDestroy {
       } else if (saved === 'dark') {
         initialDark = true;
       }
+      const savedScale = Number(localStorage.getItem(TEXT_SCALE_STORAGE_KEY));
+      if (!Number.isNaN(savedScale) && savedScale >= 0.8 && savedScale <= 1.35) {
+        initialScale = Number(savedScale.toFixed(2));
+      }
     }
     this.applyTheme(initialDark);
+    this.applyTextScale(initialScale);
     this.restoreUiSession();
     this.registerNativeAndBrowserListeners();
   }
@@ -179,20 +189,36 @@ export class AppComponent implements OnInit, OnDestroy {
     }
   }
 
+  toggleDrawer(): void {
+    const next = !this.isDrawerOpen();
+    this.isDrawerOpen.set(next);
+    if (next) {
+      this.pushHistoryEntry('drawer');
+    }
+  }
+
+  closeDrawer(): void {
+    this.isDrawerOpen.set(false);
+  }
+
   /**
    * Handles hardware/browser back navigation from innermost to outermost layer:
-   * 1. Close Add Passage / ProtoSync modal if open
+   * 1. Close Add Passage / ProtoSync modal or Navigation Drawer if open
    * 2. Exit First-Letter Study Page back to the Flashcard
    * 3. Exit Flashcard Study view back to the Deck Dashboard
    * 4. Returns false only when already at the root Deck Dashboard with no modals open
    */
   handleBackNavigation(): boolean {
     if (this.showAddPassageModal()) {
-      this.showAddPassageModal.set(false);
+      this.closeAddPassageModal();
       return true;
     }
     if (this.showProtoSyncModal()) {
       this.showProtoSyncModal.set(false);
+      return true;
+    }
+    if (this.isDrawerOpen()) {
+      this.isDrawerOpen.set(false);
       return true;
     }
     if (this.activeView() === 'first-letter-page') {
@@ -285,6 +311,32 @@ export class AppComponent implements OnInit, OnDestroy {
     this.applyTheme(!this.isDarkMode());
   }
 
+  onTextScaleInput(event: Event): void {
+    const input = event.target as HTMLInputElement | null;
+    if (!input) {
+      return;
+    }
+    const raw = Number(input.value);
+    if (!Number.isNaN(raw)) {
+      this.applyTextScale(raw);
+    }
+  }
+
+  applyTextScale(scale: number): void {
+    const clamped = Number(Math.max(0.8, Math.min(1.35, scale)).toFixed(2));
+    this.textScale.set(clamped);
+    if (typeof document !== 'undefined') {
+      document.documentElement.style.setProperty('--selah-text-scale', String(clamped));
+    }
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(TEXT_SCALE_STORAGE_KEY, String(clamped));
+      } catch {
+        // Ignore storage errors
+      }
+    }
+  }
+
   private applyTheme(isDark: boolean): void {
     this.isDarkMode.set(isDark);
     if (typeof document !== 'undefined') {
@@ -309,13 +361,41 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   openAddModal(): void {
+    this.editingPassage.set(null);
+    this.isDrawerOpen.set(false);
     this.showAddPassageModal.set(true);
     this.pushHistoryEntry('add-modal');
   }
 
+  openEditPassageModal(itemOrPassage?: DeckItem | Passage | null): void {
+    const target = itemOrPassage ?? this.currentStudyItem();
+    if (!target) {
+      return;
+    }
+    const passage = 'passage' in target ? target.passage : target;
+    this.editingPassage.set(passage);
+    this.isDrawerOpen.set(false);
+    this.showAddPassageModal.set(true);
+    this.pushHistoryEntry('edit-modal');
+  }
+
+  closeAddPassageModal(): void {
+    this.showAddPassageModal.set(false);
+    this.editingPassage.set(null);
+  }
+
   openSyncModal(): void {
+    this.isDrawerOpen.set(false);
     this.showProtoSyncModal.set(true);
     this.pushHistoryEntry('sync-modal');
+  }
+
+  async onDrawerOpenFile(): Promise<void> {
+    await this.storageService.selectExistingDataFile();
+  }
+
+  async onDrawerCreateFile(): Promise<void> {
+    await this.storageService.createNewDataFile();
   }
 
   onDeckTabChange(tab: 'queue' | 'due' | 'active'): void {
@@ -324,6 +404,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   openDashboardTab(tab: 'queue' | 'due' | 'active'): void {
+    this.isDrawerOpen.set(false);
     this.repairHealedBanner.set(null);
     this.dashboardTab.set(tab);
     this.activeView.set('dashboard');
@@ -417,15 +498,29 @@ export class AppComponent implements OnInit, OnDestroy {
     this.saveUiSession();
   }
 
+  onSkipCard(): void {
+    const nextIndex = this.currentQueueIndex() + 1;
+    if (nextIndex < this.studyQueueIds().length) {
+      this.currentQueueIndex.set(nextIndex);
+      this.activeView.set('study');
+    } else {
+      this.activeView.set('dashboard');
+    }
+    this.saveUiSession();
+  }
+
   returnToDashboard(): void {
     this.activeView.set('dashboard');
     this.saveUiSession();
   }
 
   onPassageAdded(_item: DeckItem): void {
-    this.showAddPassageModal.set(false);
-    this.dashboardTab.set('queue');
-    this.activeView.set('dashboard');
+    const wasEditingInStudy = this.editingPassage() !== null && this.activeView() !== 'dashboard';
+    this.closeAddPassageModal();
+    if (!wasEditingInStudy) {
+      this.dashboardTab.set('queue');
+      this.activeView.set('dashboard');
+    }
     this.saveUiSession();
   }
 }

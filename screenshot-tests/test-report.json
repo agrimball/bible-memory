@@ -1,27 +1,26 @@
 {
   "suite": "bible-memory-playwright-screenshot-tests",
   "appUrl": "http://127.0.0.1:4299",
-  "startedAt": "2026-11-09T20:40:24.627Z",
-  "finishedAt": "2026-11-09T20:40:40.274Z",
+  "startedAt": "2026-11-10T01:23:03.472Z",
+  "finishedAt": "2026-11-10T01:23:16.001Z",
   "status": "PASSED",
-  "totalSteps": 12,
+  "totalSteps": 17,
   "consoleErrors": [],
   "steps": [
     {
       "step": "1a",
-      "name": "Home Dashboard (Dark Mode): Active Memory Data File Bar, Currently Memorizing & Saved to Memorize Next",
+      "name": "Home Dashboard (Dark Mode): Remember-Me 3-Tab Header (NEW / DUE / KNOWN) & Flat List Rows",
       "filename": "01-deck-dashboard.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/01-deck-dashboard.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/01-deck-dashboard.png",
-      "bytes": 775818,
+      "bytes": 116981,
       "assertions": [
-        "[data-testid=\"topbar-memory-file-status\"] and [data-testid=\"active-data-file-empty\"] are visible (no phantom file selected)",
-        "[data-testid=\"active-data-file-bar\"] with [data-testid=\"btn-open-data-file\"] and [data-testid=\"btn-create-data-file\"] is visible",
-        "[data-testid=\"currently-memorizing-section\"] displays active learning passages (Philippians 4:6-7)",
-        "[data-testid=\"saved-backlog-section\"] displays saved backlog passages (Romans 8:1-4, Psalm 23:1-6)"
+        "[data-testid=\"topbar-memory-file-status\"] is visible in the compact 52px topbar",
+        "[data-testid=\"tab-queue\"] (NEW), [data-testid=\"tab-due\"] (DUE), and [data-testid=\"tab-active\"] (KNOWN) are visible",
+        "[data-testid=\"passage-deck-list\"] displays NEW passages (Romans 8:1-4, Psalm 23:1-6) in flat rows"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-09T20:40:26.817Z"
+      "timestamp": "2026-11-10T01:23:04.697Z"
     },
     {
       "step": "1c",
@@ -29,75 +28,73 @@
       "filename": "01c-deck-dashboard-light-mode.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/01c-deck-dashboard-light-mode.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/01c-deck-dashboard-light-mode.png",
-      "bytes": 746535,
+      "bytes": 122634,
       "assertions": [
         "Clicking [data-testid=\"btn-toggle-theme\"] switches Home Page from Dark Mode to Light Mode (.light-theme)",
-        "All Home Page cards, tabs, KPIs, and Active Memory Data File bar render in warm parchment Light Mode"
+        "All Home Page rows, tabs, and floating action buttons render in warm parchment Light Mode"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-09T20:40:27.637Z"
+      "timestamp": "2026-11-10T01:23:05.120Z"
     },
     {
       "step": "1b",
-      "name": "Remember-Me Style Due for Review Page",
+      "name": "Remember-Me Style DUE Tab",
       "filename": "01b-due-page.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/01b-due-page.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/01b-due-page.png",
-      "bytes": 666975,
+      "bytes": 115016,
       "assertions": [
         "[data-testid=\"tab-due\"] opens [data-testid=\"due-page-section\"]",
-        "[data-testid=\"btn-study-due\"] is visible",
-        "Active due cards (Philippians 4:6-7, John 1:1-5) are listed separately from the Saved backlog"
+        "[data-testid=\"btn-study-due\"] floating play button is visible",
+        "Active due cards (Philippians 4:6-7, John 1:1-5) are listed with level/step square badges"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-09T20:40:28.481Z"
+      "timestamp": "2026-11-10T01:23:05.548Z"
     },
     {
       "step": "2a",
-      "name": "Copy-Paste Modal - Highlighted Verse Numbers Confirmation Preview",
+      "name": "Copy-Paste Modal - Automatic Verse Number Parsing & Collapsed Peek Verse Boundaries Toggle",
       "filename": "02-copy-paste-highlight-verse-numbers.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/02-copy-paste-highlight-verse-numbers.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/02-copy-paste-highlight-verse-numbers.png",
-      "bytes": 599689,
+      "bytes": 375714,
       "assertions": [
         "[data-testid=\"warning-no-verse-numbers\"] warns when verse numbers are absent",
         "[data-testid=\"btn-paste-example\"] populates multi-verse scripture passage",
-        "[data-testid=\"btn-highlight-verse-numbers\"] reveals [data-testid=\"verse-number-highlight-preview\"]",
-        "Highlighted verse numbers are marked for deletion while preserving verse boundaries"
+        "[data-testid=\"btn-peek-verse-boundaries\"] shows \"(4 verses)\" while keeping [data-testid=\"parsed-verses-preview\"] collapsed by default"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-09T20:40:30.450Z"
+      "timestamp": "2026-11-10T01:23:06.903Z"
     },
     {
       "step": "2b",
-      "name": "Copy-Paste Modal - Stripped Verse Numbers with Remembered Verse Boundaries",
+      "name": "Copy-Paste Modal - Expanded Peek Verse Boundaries Preview",
       "filename": "02-smart-copy-paste-modal.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/02-smart-copy-paste-modal.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/02-smart-copy-paste-modal.png",
-      "bytes": 549895,
+      "bytes": 426497,
       "assertions": [
-        "[data-testid=\"btn-remove-verse-numbers\"] strips verse numbers from raw textarea",
-        "[data-testid=\"remembered-boundaries-badge\"] confirms exact verse boundaries are remembered",
-        "[data-testid=\"parsed-verses-preview\"] preserves all 4 individual verses for +1v study"
+        "Clicking [data-testid=\"btn-peek-verse-boundaries\"] expands [data-testid=\"parsed-verses-preview\"]",
+        "[data-testid=\"parsed-verses-preview\"] displays all 4 automatically parsed verses ([v. 28]..[v. 31]) for +1v study"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-09T20:40:31.619Z"
+      "timestamp": "2026-11-10T01:23:07.711Z"
     },
     {
       "step": 3,
-      "name": "Flashcard Front View with Compact \"Aa Study\" Button & 2-Step Daily Stitching Toggle",
+      "name": "Remember-Me Style Full-Screen Flashcard Front View (r4.png)",
       "filename": "03-card-front-initial.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/03-card-front-initial.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/03-card-front-initial.png",
-      "bytes": 446263,
+      "bytes": 145173,
       "assertions": [
         "[data-testid=\"card-front-view\"] and [data-testid=\"card-reference\"] are visible",
-        "Compact [data-testid=\"btn-enter-study\"] (\"Aa Study\") is in the card header",
+        "Circular [data-testid=\"btn-enter-study\"] (🎓) and [data-testid=\"btn-flip-card\"] (◫) are in the bottom bar",
         "[data-testid=\"stitch-mode-toggle\"] with [data-testid=\"btn-mode-new-verse\"] and [data-testid=\"btn-mode-stitch-block\"] is visible",
-        "[data-testid=\"btn-record-voice\"] and [data-testid=\"btn-flip-card\"] are visible"
+        "Circular [data-testid=\"btn-record-voice\"] (🎤) is centered at the bottom of the card face"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-09T20:40:32.461Z"
+      "timestamp": "2026-11-10T01:23:08.130Z"
     },
     {
       "step": 4,
@@ -105,14 +102,14 @@
       "filename": "04-study-mode-first-letters-verse1.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/04-study-mode-first-letters-verse1.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/04-study-mode-first-letters-verse1.png",
-      "bytes": 279768,
+      "bytes": 56597,
       "assertions": [
         "Clicking [data-testid=\"btn-enter-study\"] opens separate [data-testid=\"first-letter-study-page\"]",
         "[data-testid=\"first-letter-study-panel\"] shows first letters for Verse 1 only",
-        "[data-testid=\"btn-reveal-1w\"] (+1w), [data-testid=\"btn-reveal-1v\"] (+1v), and [data-testid=\"btn-back-to-card\"] (\"✕ Exit to Flashcard\") are visible"
+        "[data-testid=\"btn-reveal-1w\"] (+1w), [data-testid=\"btn-reveal-1v\"] (+1v), and [data-testid=\"btn-back-to-card\"] are visible"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-09T20:40:33.058Z"
+      "timestamp": "2026-11-10T01:23:08.429Z"
     },
     {
       "step": 5,
@@ -120,14 +117,14 @@
       "filename": "05-study-mode-plus-1w-and-plus-1v.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/05-study-mode-plus-1w-and-plus-1v.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/05-study-mode-plus-1w-and-plus-1v.png",
-      "bytes": 323038,
+      "bytes": 79711,
       "assertions": [
         "Clicking +1w 3 times reveals first 3 words of Verse 1",
         "Clicking +1v completes Verse 1 and displays Verse 2 in first-letter mode right below Verse 1",
         "Clicking +1w twice on Verse 2 reveals 2 words of Verse 2 while remaining words stay as first letters"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-09T20:40:34.877Z"
+      "timestamp": "2026-11-10T01:23:09.641Z"
     },
     {
       "step": 6,
@@ -135,30 +132,30 @@
       "filename": "06-voice-recording-active.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/06-voice-recording-active.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/06-voice-recording-active.png",
-      "bytes": 503111,
+      "bytes": 137227,
       "assertions": [
         "[data-testid=\"btn-back-to-card\"] exits Study Page back to [data-testid=\"card-front-view\"]",
         "[data-testid=\"btn-record-voice\"] starts voice recording on the card front",
         "[data-testid=\"recording-active-indicator\"] is active after ~1.2s of recording"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-09T20:40:37.081Z"
+      "timestamp": "2026-11-10T01:23:11.323Z"
     },
     {
       "step": "7a",
-      "name": "Card Back View with Auto Voice Playback, Full Passage Read-Along, Spot-Repair Buttons, and Anki Grading Bar",
+      "name": "Card Back View with Auto Voice Playback, Full-Width Scripture Text (r5.png), and Anki Grading Bar",
       "filename": "07-card-back-voice-playback-and-anki-grading.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/07-card-back-voice-playback-and-anki-grading.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/07-card-back-voice-playback-and-anki-grading.png",
-      "bytes": 491528,
+      "bytes": 246570,
       "assertions": [
         "[data-testid=\"card-back-view\"] is visible",
         "[data-testid=\"voice-playback-bar\"] is visible and auto-playing recorded recitation",
-        "[data-testid=\"card-back-full-text\"] displays full passage text with per-verse 🔧 Repair buttons",
-        "[data-testid=\"anki-grading-bar\"] displays Again / Hard / Good / Easy buttons"
+        "[data-testid=\"card-back-full-text\"] displays full-width passage text with tappable verses for repair",
+        "[data-testid=\"anki-grading-bar\"] displays AGAIN / HARD / GOOD / EASY buttons"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-09T20:40:37.844Z"
+      "timestamp": "2026-11-10T01:23:11.686Z"
     },
     {
       "step": "7b",
@@ -166,14 +163,14 @@
       "filename": "07b-memory-repair-card-front.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/07b-memory-repair-card-front.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/07b-memory-repair-card-front.png",
-      "bytes": 526312,
+      "bytes": 165206,
       "assertions": [
-        "Clicking [data-testid^=\"btn-spawn-repair-\"] spawns a temporary verse repair card and displays [data-testid=\"repair-spawned-toast\"]",
+        "Tapping a verse on the back highlights it in yellow and opens [data-testid=\"repair-action-sheet\"]",
         "Clicking [data-testid=\"btn-practice-repair-now\"] opens the Temporary Memory Repair Flashcard",
         "[data-testid=\"repair-card-banner\"] and [data-testid=\"repair-heal-progress\"] (0/3 heal streak) are visible on the front"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-09T20:40:38.871Z"
+      "timestamp": "2026-11-10T01:23:12.014Z"
     },
     {
       "step": 8,
@@ -181,14 +178,84 @@
       "filename": "08-protojson-wire-format-modal.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/08-protojson-wire-format-modal.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/08-protojson-wire-format-modal.png",
-      "bytes": 539915,
+      "bytes": 358873,
       "assertions": [
         "[data-testid=\"btn-grade-good\"] records Anki review log",
         "[data-testid=\"btn-open-proto-sync\"] opens ProtoJSON wire format modal",
         "[data-testid=\"protojson-textarea\"] contains valid biblememory.v1 JSON with passages, flashcards, and reviewLogs"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-09T20:40:40.274Z"
+      "timestamp": "2026-11-10T01:23:13.077Z"
+    },
+    {
+      "step": "9a",
+      "name": "Mobile Phone (412x915): Home / Deck Dashboard (NEW, DUE, KNOWN Tabs & Flat List Rows)",
+      "filename": "mobile-01-home.png",
+      "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/mobile-01-home.png",
+      "copiedPath": "/home/ashton/bible-memory/screenshot-tests/mobile-01-home.png",
+      "bytes": 104874,
+      "assertions": [
+        "412x915 Android phone viewport renders 52px topbar, 3-tab header (NEW / DUE / KNOWN), and flat list rows without clipping",
+        "Floating bottom ▶ and + action buttons are cleanly positioned in the bottom-right corner"
+      ],
+      "status": "PASS",
+      "timestamp": "2026-11-10T01:23:14.085Z"
+    },
+    {
+      "step": "9b",
+      "name": "Mobile Phone (412x915): Full-Screen Flashcard Front (r4.png)",
+      "filename": "mobile-03-flashcard-front.png",
+      "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/mobile-03-flashcard-front.png",
+      "copiedPath": "/home/ashton/bible-memory/screenshot-tests/mobile-03-flashcard-front.png",
+      "bytes": 143017,
+      "assertions": [
+        "412x915 Android phone viewport renders full-screen Flashcard Front with compact 52px topbar and stitch strip",
+        "No false LEAD-IN context cue box appears on Full-Passage review",
+        "Circular 💡 hint button at top-center, centered reference, circular 🎤 mic button, and bottom bar (🎓 | counter | ◫)"
+      ],
+      "status": "PASS",
+      "timestamp": "2026-11-10T01:23:14.631Z"
+    },
+    {
+      "step": "9c",
+      "name": "Mobile Phone (412x915): Separate First-Letter Study Page (+1w and +1v Progression)",
+      "filename": "mobile-02-study-first-letter.png",
+      "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/mobile-02-study-first-letter.png",
+      "copiedPath": "/home/ashton/bible-memory/screenshot-tests/mobile-02-study-first-letter.png",
+      "bytes": 99884,
+      "assertions": [
+        "412x915 Android phone viewport renders First-Letter Study Page with full-width verse cards and bottom +1w / +1v controls"
+      ],
+      "status": "PASS",
+      "timestamp": "2026-11-10T01:23:15.204Z"
+    },
+    {
+      "step": "9d",
+      "name": "Mobile Phone (412x915): Flashcard Back / Full-Width Verse Review (r5.png)",
+      "filename": "mobile-04-verse-review-back.png",
+      "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/mobile-04-verse-review-back.png",
+      "copiedPath": "/home/ashton/bible-memory/screenshot-tests/mobile-04-verse-review-back.png",
+      "bytes": 292229,
+      "assertions": [
+        "412x915 Android phone viewport renders full-width scripture text from edge to edge with zero side-button squishing",
+        "AnkiDroid-style 4-button grading bar (AGAIN / HARD / GOOD / EASY) spans the bottom edge cleanly"
+      ],
+      "status": "PASS",
+      "timestamp": "2026-11-10T01:23:15.689Z"
+    },
+    {
+      "step": "9e",
+      "name": "Mobile Phone (412x915): Verse Highlighted for Repair with Queue Repair & Resume + Forgot Rest Sheet",
+      "filename": "mobile-05-verse-repair-highlight.png",
+      "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/mobile-05-verse-repair-highlight.png",
+      "copiedPath": "/home/ashton/bible-memory/screenshot-tests/mobile-05-verse-repair-highlight.png",
+      "bytes": 337923,
+      "assertions": [
+        "Tapping a verse on mobile highlights it in warm amber/yellow without squishing the text column",
+        "[data-testid=\"repair-action-sheet\"] displays Queue Repair & Resume, Forgot From Here Onward, and Practice Repair Now above the 4-button Anki bar"
+      ],
+      "status": "PASS",
+      "timestamp": "2026-11-10T01:23:15.992Z"
     }
   ]
 }

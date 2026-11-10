@@ -1,484 +1,196 @@
 import { Component, EventEmitter, Input, Output, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { CardState, ReviewRating, Verse } from '../../core/proto/bible_memory.pb';
+import * as pb from '../../core/proto/bible_memory.pb';
+import {
+  CardState,
+  Passage,
+  Verse,
+  formatVerseBadge,
+  isMultiChapterPassage,
+} from '../../core/proto/bible_memory.pb';
 import { SrsService } from '../../core/services/srs.service';
 import { DeckItem, StorageService } from '../../core/services/storage.service';
 
 export type DashboardTab = 'queue' | 'due' | 'active';
+
+function getEstimatedRecitationLabel(verses: Verse[]): string {
+  const pbWithHelper = pb as unknown as {
+    estimateRecitationTime?: (v: Verse[]) => { label: string };
+  };
+  if (typeof pbWithHelper.estimateRecitationTime === 'function') {
+    return pbWithHelper.estimateRecitationTime(verses).label;
+  }
+  const wordCount = (verses ?? []).reduce((sum, v) => {
+    const words = (v.text ?? '')
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.length > 0);
+    return sum + words.length;
+  }, 0);
+  const seconds = wordCount === 0 ? 0 : Math.max(5, Math.round((wordCount / 135) * 60));
+  if (seconds < 60) {
+    return `~${Math.max(5, Math.round(seconds / 5) * 5)}s`;
+  }
+  const mins = Math.round((seconds / 60) * 2) / 2;
+  return `~${mins} min`;
+}
 
 @Component({
   selector: 'app-deck-dashboard',
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div class="dashboard-container" data-testid="deck-dashboard">
-      <!-- Active Memory Data File Auto-Save Bar -->
-      <section class="data-file-bar" data-testid="active-data-file-bar" aria-label="Active memory data file status">
-        @if (!storageService.activeFileName()) {
-          <div class="data-file-empty-row" data-testid="active-data-file-empty">
-            <div class="data-file-info">
-              <span class="file-status-dot disconnected" aria-hidden="true"></span>
-              <div class="file-copy">
-                <strong class="file-headline">💾 No Active Memory Data File selected</strong>
-                <span class="file-subtext">
-                  Select or create a <code>.proto.json</code> file on your computer so every change
-                  auto-saves to disk in the background.
-                </span>
-              </div>
-            </div>
-
-            <div class="data-file-actions">
-              <button
-                type="button"
-                class="file-btn open-file-btn"
-                (click)="onOpenDataFile()"
-                data-testid="btn-open-data-file"
-              >
-                📂 Open Memory File...
-              </button>
-              <button
-                type="button"
-                class="file-btn create-file-btn"
-                (click)="onCreateDataFile()"
-                data-testid="btn-create-data-file"
-              >
-                ✨ Create New Memory File...
-              </button>
-            </div>
-          </div>
-        } @else {
-          <div class="data-file-connected-row" data-testid="active-data-file-connected">
-            <div class="data-file-info">
-              <span
-                class="file-status-dot"
-                [class.connected]="storageService.activeFileStatus() !== 'needs-permission' && storageService.activeFileStatus() !== 'error'"
-                [class.warning]="storageService.activeFileStatus() === 'needs-permission'"
-                [class.error]="storageService.activeFileStatus() === 'error'"
-                aria-hidden="true"
-              ></span>
-              <div class="file-copy">
-                <strong class="file-headline" data-testid="active-data-file-name">
-                  🟢 Active Memory Data File: <code>{{ storageService.activeFileName() }}</code>
-                </strong>
-                <span class="file-subtext" data-testid="active-data-file-status-pill">
-                  @if (storageService.activeFileStatus() === 'saving') {
-                    Auto-saving changes to disk...
-                  } @else if (storageService.activeFileStatus() === 'needs-permission') {
-                    Permission needed to resume background auto-save to this file.
-                  } @else if (storageService.activeFileStatus() === 'error') {
-                    {{ storageService.fileSyncError() || 'Auto-save error' }}
-                  } @else {
-                    ✓ Auto-saving in background
-                    @if (storageService.lastFileSavedAt()) {
-                      • Last saved {{ formatSavedTime(storageService.lastFileSavedAt()) }}
-                    }
-                  }
-                </span>
-              </div>
-            </div>
-
-            <div class="data-file-actions">
-              @if (storageService.activeFileStatus() === 'needs-permission') {
-                <button
-                  type="button"
-                  class="file-btn create-file-btn"
-                  (click)="onReconnectDataFile()"
-                  data-testid="btn-reconnect-data-file"
-                >
-                  🔓 Reconnect Permission
-                </button>
-              }
-              <button
-                type="button"
-                class="file-btn open-file-btn"
-                (click)="onOpenDataFile()"
-                data-testid="btn-change-data-file"
-              >
-                Change File
-              </button>
-              <button
-                type="button"
-                class="file-btn disconnect-file-btn"
-                (click)="onDisconnectDataFile()"
-                data-testid="btn-disconnect-data-file"
-              >
-                Disconnect
-              </button>
-            </div>
-          </div>
-        }
-      </section>
-
-      <!-- Top Navigation Tabs (Home: Memorizing & Backlog | Due | Memorized / Known) -->
-      <nav class="dashboard-tabs-bar" aria-label="Memory deck views" data-testid="dashboard-tabs">
+    <div class="rm-dashboard" data-testid="deck-dashboard">
+      <!-- Sleek Edge-to-Edge 3-Tab Header matching Remember Me (r3.png) -->
+      <nav class="rm-tabs-bar" aria-label="Memory deck tabs" data-testid="dashboard-tabs">
         <button
           type="button"
-          class="tab-pill"
+          class="rm-tab"
           [class.active]="activeTab === 'queue'"
+          [class.tab-new]="activeTab === 'queue'"
           (click)="selectTab('queue')"
           data-testid="tab-queue"
         >
-          <span class="tab-title">Memorizing &amp; Backlog (Home)</span>
-          <span class="tab-badge queue-badge">
-            {{ currentlyMemorizingItems().length }} / {{ storageService.queuedDeckItems().length }}
+          <span class="rm-tab-icon-wrap">
+            <span class="rm-tab-icon" aria-hidden="true">⊔</span>
+            <span class="rm-tab-count">{{ newTabItems().length }}</span>
           </span>
+          <span class="rm-tab-label">NEW</span>
         </button>
 
         <button
           type="button"
-          class="tab-pill"
+          class="rm-tab"
           [class.active]="activeTab === 'due'"
+          [class.tab-due]="activeTab === 'due'"
           (click)="selectTab('due')"
           data-testid="tab-due"
         >
-          <span class="tab-title">Due</span>
-          <span class="tab-badge due-badge">{{ storageService.stats().due }}</span>
+          <span class="rm-tab-icon-wrap">
+            <span class="rm-tab-icon" aria-hidden="true">▢</span>
+            <span class="rm-tab-count">{{ dueTabItems().length }}</span>
+          </span>
+          <span class="rm-tab-label">DUE</span>
         </button>
 
         <button
           type="button"
-          class="tab-pill"
+          class="rm-tab"
           [class.active]="activeTab === 'active'"
+          [class.tab-known]="activeTab === 'active'"
           (click)="selectTab('active')"
           data-testid="tab-active"
         >
-          <span class="tab-title">Memorized / Known</span>
-          <span class="tab-badge active-badge">{{ storageService.stats().reviewCount }}</span>
+          <span class="rm-tab-icon-wrap">
+            <span class="rm-tab-icon" aria-hidden="true">✓</span>
+            <span class="rm-tab-count">{{ knownTabItems().length }}</span>
+          </span>
+          <span class="rm-tab-label">KNOWN</span>
         </button>
       </nav>
 
-      <!-- Summary KPI Grid -->
-      <section class="stats-grid" data-testid="deck-stats-grid" aria-label="Deck statistics">
-        <div
-          class="kpi-card learning-kpi clickable-kpi"
-          [class.selected-kpi]="activeTab === 'queue'"
-          (click)="selectTab('queue')"
-          data-testid="kpi-learning"
-        >
-          <span class="kpi-label">Currently Memorizing</span>
-          <strong class="kpi-value">{{ storageService.stats().learningCount }}</strong>
-          <span class="kpi-sub">In-progress &amp; repair</span>
-        </div>
-
-        <div
-          class="kpi-card queue-kpi clickable-kpi"
-          [class.selected-kpi]="activeTab === 'queue'"
-          (click)="selectTab('queue')"
-          data-testid="kpi-new"
-        >
-          <span class="kpi-label">Saved to Memorize Next</span>
-          <strong class="kpi-value">{{ storageService.stats().queuedCount }}</strong>
-          <span class="kpi-sub">Pick any passage</span>
-        </div>
-
-        <div
-          class="kpi-card due-kpi clickable-kpi"
-          [class.selected-kpi]="activeTab === 'due'"
-          (click)="selectTab('due')"
-          data-testid="kpi-due-today"
-        >
-          <span class="kpi-label">Due Today</span>
-          <strong class="kpi-value">{{ storageService.stats().due }}</strong>
-          <span class="kpi-sub">Ready for review</span>
-        </div>
-
-        <div
-          class="kpi-card review-kpi clickable-kpi"
-          [class.selected-kpi]="activeTab === 'active'"
-          (click)="selectTab('active')"
-          data-testid="kpi-review"
-        >
-          <span class="kpi-label">Memorized / Known</span>
-          <strong class="kpi-value">{{ storageService.stats().reviewCount }}</strong>
-          <span class="kpi-sub">Long-term Anki review</span>
-        </div>
-
-        <div class="kpi-card total-kpi" data-testid="kpi-total">
-          <span class="kpi-label">Total Cards</span>
-          <strong class="kpi-value">{{ storageService.stats().total }}</strong>
-          <span class="kpi-sub">In ProtoJSON store</span>
-        </div>
-      </section>
-
       <!-- ======================================================================= -->
-      <!-- TAB 1: HOME PAGE ("Currently Memorizing" + "Saved to Memorize Next")    -->
+      <!-- TAB 1: NEW (Unstarted Queue)                                            -->
       <!-- ======================================================================= -->
       @if (activeTab === 'queue') {
-        <section class="tab-view-section" data-testid="queue-page-section">
-          <div class="hero-card queue-hero">
-            <div class="hero-copy">
-              <span class="hero-eyebrow">Home • User-Controlled Memorization Workspace</span>
-              <h2 class="hero-title">Choose What You're Memorizing</h2>
-              <p class="hero-description">
-                Move any passage between <strong>Saved to Memorize Next</strong> and
-                <strong>Currently Memorizing</strong> in any order. Click any passage card to open
-                its <strong>Flashcard</strong> (with accumulative verse stitching, single-verse
-                <strong>Memory Repair</strong>, &amp; a dedicated <strong>First-Letter Study Page</strong>).
-              </p>
-            </div>
-
-            <div class="primary-action-bar">
-              <button
-                type="button"
-                class="action-btn add-passage-btn"
-                (click)="openAddPassage.emit()"
-                data-testid="btn-open-add-passage"
-              >
-                + Add Passage (Copy-Paste)
-              </button>
-
-              <button
-                type="button"
-                class="action-btn study-due-btn"
-                (click)="selectTab('due')"
-                data-testid="btn-go-to-due-page"
-              >
-                Due Page ({{ storageService.stats().due }})
-              </button>
-
-              <button
-                type="button"
-                class="action-btn proto-sync-btn"
-                (click)="openProtoSync.emit()"
-                data-testid="btn-open-proto-sync"
-              >
-                ⇄ ProtoJSON
-              </button>
-            </div>
-          </div>
-
-          <!-- SECTION A: CURRENTLY MEMORIZING (LEARNING / RELEARNING + REPAIR CARDS) -->
-          <div class="home-subsection" data-testid="currently-memorizing-section">
-            <div class="section-header">
-              <div>
-                <h3 class="section-title">
-                  🔥 Currently Memorizing ({{ currentlyMemorizingItems().length }})
-                </h3>
-                <p class="section-subtitle">
-                  Passages and temporary verse-repair cards you are actively working on right now.
-                  Click any card to open its Flashcard.
-                </p>
-              </div>
-            </div>
-
-            <div class="passage-deck-list" data-testid="currently-memorizing-list">
-              @for (item of currentlyMemorizingItems(); track item.card.id; let i = $index) {
+        <section
+          class="rm-list-section"
+          data-testid="queue-page-section"
+        >
+          <div
+            class="rm-flat-list"
+            data-testid="currently-memorizing-section"
+          >
+            <div data-testid="passage-deck-list">
+              @for (item of newTabItems(); track item.card.id; let i = $index) {
                 <article
-                  class="deck-item-card clickable-card memorizing-card"
-                  [class.repair-card]="item.card.isRepairCard"
-                  (click)="onOpenFlashcard(item)"
+                  class="rm-row"
+                  (click)="onRowClick(item)"
                   role="button"
                   tabindex="0"
-                  (keydown.enter)="onOpenFlashcard(item)"
-                  [attr.data-testid]="'memorizing-item-' + i"
+                  (keydown.enter)="onRowClick(item)"
+                  [attr.data-testid]="'deck-item-' + i"
                 >
-                  <div class="deck-item-main">
-                    <div class="deck-item-header">
-                      <h4 class="passage-ref" [attr.data-testid]="'memorizing-item-ref-' + i">
+                  <!-- Left 42x42 Square Badge -->
+                  <div class="rm-square-badge badge-new-square">
+                    <span class="square-primary">{{ item.passage.verses.length }}v</span>
+                  </div>
+
+                  <!-- Middle Reference + Label or Opening Snippet -->
+                  <div class="rm-row-middle">
+                    <div class="rm-row-line">
+                      <span class="rm-ref" [attr.data-testid]="'deck-item-ref-' + i">
                         {{ item.passage.reference }}
-                      </h4>
-
-                      @if (item.card.isRepairCard) {
-                        <span class="repair-card-badge" data-testid="repair-card-badge">
-                          🔧 Memory Repair · v. {{ item.card.repairVerseNumber }}
-                        </span>
-                        <span class="repair-heal-pill" data-testid="repair-heal-pill">
-                          Heal Streak: {{ item.card.repairStreak || 0 }} /
-                          {{ item.card.repairTargetStreak || 3 }}
-                        </span>
-                      } @else {
-                        <span class="verse-count-pill">
-                          {{ item.passage.verses.length }}
-                          {{ item.passage.verses.length === 1 ? 'verse' : 'verses' }}
-                        </span>
-
-                        <span class="state-badge badge-learning">
-                          MEMORIZING
-                        </span>
-
-                        <span class="stitch-progress-pill" [attr.data-testid]="'memorizing-stitch-pill-' + i">
-                          🧵 Stitched: {{ getStitchedProgressLabel(item) }}
+                      </span>
+                      @if (getRowCueText(item); as cue) {
+                        <span class="rm-snippet" [attr.data-testid]="'deck-item-cue-' + i">
+                          ({{ cue }})
                         </span>
                       }
                     </div>
-
-                    @if (getSnippetVerse(item); as snippetVerse) {
-                      <p class="first-verse-snippet">
-                        <span class="verse-num">[{{ snippetVerse.verseNumber }}]</span>
-                        {{ snippetVerse.text }}
-                        @if (!item.card.isRepairCard && item.passage.verses.length > 1) {
-                          <span class="more-verses-hint">
-                            (+{{ item.passage.verses.length - 1 }} more
-                            {{ item.passage.verses.length - 1 === 1 ? 'verse' : 'verses' }})
-                          </span>
-                        }
-                      </p>
-                    }
                   </div>
 
-                  <div class="deck-item-actions" (click)="$event.stopPropagation()">
-                    <button
-                      type="button"
-                      class="study-card-btn"
-                      (click)="onOpenFlashcard(item)"
-                      [attr.data-testid]="'btn-open-memorizing-card-' + i"
-                    >
-                      {{ item.card.isRepairCard ? 'Practice Repair Card →' : 'Open Flashcard →' }}
-                    </button>
-                    @if (!item.card.isRepairCard) {
-                      <button
-                        type="button"
-                        class="phase-action-btn mark-memorized-btn"
-                        (click)="markAsMemorized(item, $event)"
-                        title="Graduate to Memorized / Known"
-                        [attr.data-testid]="'btn-mark-memorized-' + i"
-                      >
-                        ✓ Mark Memorized
-                      </button>
-                      <button
-                        type="button"
-                        class="phase-action-btn move-saved-btn"
-                        (click)="moveBackToSaved(item, $event)"
-                        title="Move back to Saved to Memorize Next"
-                        [attr.data-testid]="'btn-move-to-saved-' + i"
-                      >
-                        ↩ Move back to Saved
-                      </button>
-                    } @else {
-                      <button
-                        type="button"
-                        class="delete-card-btn"
-                        (click)="deleteItem(item, $event)"
-                        title="Dismiss repair card"
-                        [attr.data-testid]="'btn-dismiss-repair-' + i"
-                      >
-                        ✕
-                      </button>
+                  <!-- Right Tag + Recitation Time + Reorder/Edit/Delete -->
+                  <div class="rm-row-right">
+                    @if (newTabItems().length > 1) {
+                      <div class="rm-reorder-group" (click)="$event.stopPropagation()">
+                        <button
+                          type="button"
+                          class="rm-icon-action"
+                          [disabled]="i === 0"
+                          (click)="moveQueueItem(i, -1, $event)"
+                          title="Move up"
+                          [attr.data-testid]="'btn-move-up-' + i"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          class="rm-icon-action"
+                          [disabled]="i === newTabItems().length - 1"
+                          (click)="moveQueueItem(i, 1, $event)"
+                          title="Move down"
+                          [attr.data-testid]="'btn-move-down-' + i"
+                        >
+                          ↓
+                        </button>
+                      </div>
                     }
-                  </div>
-                </article>
-              } @empty {
-                <div class="empty-deck-box compact-empty" data-testid="empty-memorizing-state">
-                  <p>
-                    No passages in <strong>Currently Memorizing</strong> right now. Pick any passage
-                    from <strong>Saved to Memorize Next</strong> below and click
-                    <strong>+ Add to Currently Memorizing</strong>!
-                  </p>
-                </div>
-              }
-            </div>
-          </div>
 
-          <!-- SECTION B: SAVED TO MEMORIZE NEXT (NEW / BACKLOG — PICK IN ANY ORDER) -->
-          <div class="home-subsection" data-testid="saved-backlog-section">
-            <div class="section-header">
-              <div>
-                <h3 class="section-title">
-                  📌 Saved to Memorize Next ({{ storageService.queuedDeckItems().length }})
-                </h3>
-                <p class="section-subtitle">
-                  Your saved passages waiting to be learned. Choose <strong>any</strong> passage in
-                  any order to add to <strong>Currently Memorizing</strong> or open its Flashcard.
-                </p>
-              </div>
-            </div>
-
-            <div class="passage-deck-list" data-testid="passage-deck-list">
-              @for (item of storageService.queuedDeckItems(); track item.card.id; let i = $index) {
-                <article
-                  class="deck-item-card clickable-card queue-card"
-                  (click)="onOpenFlashcard(item)"
-                  role="button"
-                  tabindex="0"
-                  (keydown.enter)="onOpenFlashcard(item)"
-                  [attr.data-testid]="'deck-item-' + i"
-                >
-                  <div class="deck-item-main">
-                    <div class="deck-item-header">
-                      <h4 class="passage-ref" [attr.data-testid]="'deck-item-ref-' + i">
-                        {{ item.passage.reference }}
-                      </h4>
-
-                      <span class="verse-count-pill">
-                        {{ item.passage.verses.length }}
-                        {{ item.passage.verses.length === 1 ? 'verse' : 'verses' }}
-                      </span>
-
-                      <span
-                        class="state-badge badge-queued"
-                        [attr.data-testid]="'deck-item-badge-' + i"
-                      >
-                        SAVED
-                      </span>
+                    <div class="rm-meta-col" (click)="onRowClick(item)">
+                      <span class="rm-top-tag">ESV · ⏱ {{ getRecitationLabel(item) }}</span>
+                      <span class="rm-sub-due">new</span>
                     </div>
 
-                    @if (getSnippetVerse(item); as snippetVerse) {
-                      <p class="first-verse-snippet">
-                        <span class="verse-num">[{{ snippetVerse.verseNumber }}]</span>
-                        {{ snippetVerse.text }}
-                        @if (item.passage.verses.length > 1) {
-                          <span class="more-verses-hint">
-                            (+{{ item.passage.verses.length - 1 }} more
-                            {{ item.passage.verses.length - 1 === 1 ? 'verse' : 'verses' }})
-                          </span>
-                        }
-                      </p>
-                    }
-                  </div>
+                    <button
+                      [id]="'btn-edit-new-' + i"
+                      type="button"
+                      class="rm-edit-btn"
+                      (click)="onEditClick(item, $event)"
+                      aria-label="Edit passage"
+                      title="Edit passage"
+                      data-testid="btn-edit-passage"
+                    >
+                      ✎
+                    </button>
 
-                  <div class="deck-item-actions" (click)="$event.stopPropagation()">
                     <button
+                      [id]="'btn-delete-new-' + i"
                       type="button"
-                      class="start-memorize-btn"
-                      (click)="addToCurrentlyMemorizing(item, $event)"
-                      [attr.data-testid]="'btn-add-to-memorizing-' + i"
-                    >
-                      + Add to Currently Memorizing
-                    </button>
-                    <button
-                      type="button"
-                      class="study-card-btn"
-                      (click)="onOpenFlashcard(item)"
-                      [attr.data-testid]="'btn-start-memorizing-' + i"
-                    >
-                      Open Flashcard →
-                    </button>
-                    <button
-                      type="button"
-                      class="study-card-btn subtle-study-btn"
-                      (click)="onOpenFlashcard(item)"
-                      [attr.data-testid]="'btn-study-card-' + i"
-                    >
-                      Study Card
-                    </button>
-                    <button
-                      type="button"
-                      class="delete-card-btn"
+                      class="rm-delete-btn"
                       (click)="deleteItem(item, $event)"
                       aria-label="Delete passage"
                       title="Delete passage"
                       [attr.data-testid]="'btn-delete-card-' + i"
                     >
-                      🗑
+                      ✕
                     </button>
                   </div>
                 </article>
               } @empty {
-                <div class="empty-deck-box" data-testid="empty-queue-state">
-                  <h4>No Saved Passages in Your Backlog</h4>
-                  <p>
-                    Add passages you'd like to memorize via Copy-Paste, or practice your
-                    <strong>Currently Memorizing</strong> cards above.
-                  </p>
-                  <div class="empty-actions">
-                    <button
-                      type="button"
-                      class="action-btn add-passage-btn"
-                      (click)="openAddPassage.emit()"
-                    >
-                      + Add Passage (Copy-Paste)
-                    </button>
-                  </div>
+                <div class="rm-empty-state" data-testid="empty-queue-state">
+                  <p class="rm-empty-title">No new passages in your queue</p>
+                  <p class="rm-empty-sub">Tap <strong>+</strong> below to add a passage from BibleGateway or paste text.</p>
                 </div>
               }
             </div>
@@ -487,1200 +199,708 @@ export type DashboardTab = 'queue' | 'due' | 'active';
       }
 
       <!-- ======================================================================= -->
-      <!-- TAB 2: DUE PAGE (Remember Me style Due View)                            -->
+      <!-- TAB 2: DUE (Repair Cards, Stitched Cards, Partially-Memorized, & Due)   -->
       <!-- ======================================================================= -->
       @if (activeTab === 'due') {
-        <section class="tab-view-section" data-testid="due-page-section">
-          <div class="hero-card due-hero">
-            <div class="hero-copy">
-              <span class="hero-eyebrow">Remember Me Style • Daily SRS Queue</span>
-              <h2 class="hero-title">
-                Due for Review ({{ storageService.dueDeckItems().length }})
-              </h2>
-              <p class="hero-description">
-                Passages and temporary verse-repair cards whose Anki / SM-2 review interval is due
-                right now. Tap any card below to open its Flashcard, or practice all due cards in
-                sequence.
-              </p>
-            </div>
-
-            <div class="primary-action-bar">
-              <button
-                type="button"
-                class="action-btn study-due-btn"
-                [disabled]="storageService.dueDeckItems().length === 0"
-                (click)="startDueSession.emit()"
-                data-testid="btn-study-due"
-              >
-                ▶ Practice All Due ({{ storageService.dueDeckItems().length }})
-              </button>
-
-              <button
-                type="button"
-                class="action-btn add-passage-btn"
-                (click)="openAddPassage.emit()"
-                data-testid="btn-open-add-passage"
-              >
-                + Add Passage
-              </button>
-            </div>
-          </div>
-
-          <div class="passage-deck-list" data-testid="passage-deck-list">
-            @for (item of storageService.dueDeckItems(); track item.card.id; let i = $index) {
+        <section
+          class="rm-list-section"
+          data-testid="due-page-section"
+        >
+          <div class="rm-flat-list" data-testid="due-deck-list">
+            @for (item of dueTabItems(); track item.card.id; let i = $index) {
               <article
-                class="deck-item-card is-due clickable-card"
-                [class.repair-card]="item.card.isRepairCard"
-                (click)="onOpenFlashcard(item)"
+                class="rm-row"
+                [class.rm-row-repair]="item.card.isRepairCard"
+                (click)="onRowClick(item)"
                 role="button"
                 tabindex="0"
-                [attr.data-testid]="'deck-item-' + i"
+                (keydown.enter)="onRowClick(item)"
+                [attr.data-testid]="'due-item-' + i"
               >
-                <div class="deck-item-main">
-                  <div class="deck-item-header">
-                    <h4 class="passage-ref" [attr.data-testid]="'deck-item-ref-' + i">
+                <!-- Left 42x42 Square Badge -->
+                @if (item.card.isRepairCard) {
+                  <div
+                    class="rm-square-badge badge-repair-square"
+                    data-testid="repair-card-badge"
+                  >
+                    <span class="square-icon">🔧</span>
+                    <span class="square-sub" data-testid="repair-heal-pill">
+                      {{ item.card.repairStreak || 0 }}/{{ item.card.repairTargetStreak || 3 }}
+                    </span>
+                  </div>
+                } @else if (item.card.isStitchedPassageCard) {
+                  <div
+                    class="rm-square-badge badge-stitched-square"
+                    data-testid="stitched-card-badge"
+                  >
+                    <span class="square-icon">🔗</span>
+                    <span class="square-sub">{{ getStitchedChunkCount(item) }}x</span>
+                  </div>
+                } @else if (isPartiallyMemorized(item)) {
+                  <div class="rm-square-badge badge-partial-square">
+                    <span class="square-primary">
+                      {{ item.card.learningStep || 1 }}/{{ item.passage.verses.length }}
+                    </span>
+                  </div>
+                } @else {
+                  <div
+                    class="rm-square-badge"
+                    [ngClass]="getLevelSquareClass(item)"
+                  >
+                    <span class="square-level">{{ getCardLevelNumber(item) }}</span>
+                  </div>
+                }
+
+                <!-- Middle Reference + Label or Opening Snippet -->
+                <div class="rm-row-middle">
+                  <div class="rm-row-line">
+                    <span class="rm-ref" [attr.data-testid]="'due-item-ref-' + i">
                       {{ item.passage.reference }}
-                    </h4>
-
+                    </span>
                     @if (item.card.isRepairCard) {
-                      <span class="repair-card-badge" data-testid="repair-card-badge">
-                        🔧 Memory Repair · v. {{ item.card.repairVerseNumber }}
+                      <span class="rm-repair-tag">
+                        ({{ getRepairTargetLabel(item) }})
                       </span>
-                      <span class="repair-heal-pill" data-testid="repair-heal-pill">
-                        Heal Streak: {{ item.card.repairStreak || 0 }} /
-                        {{ item.card.repairTargetStreak || 3 }}
-                      </span>
-                    } @else {
-                      <span class="verse-count-pill">
-                        {{ item.passage.verses.length }}
-                        {{ item.passage.verses.length === 1 ? 'verse' : 'verses' }}
-                      </span>
-
-                      <span
-                        class="state-badge"
-                        [ngClass]="getBadgeClass(item.card.state)"
-                        [attr.data-testid]="'deck-item-badge-' + i"
-                      >
-                        {{ getStateLabel(item.card.state) }}
+                    } @else if (item.card.isStitchedPassageCard) {
+                      <span class="rm-stitched-tag">
+                        (Stitched)
                       </span>
                     }
-
-                    <span class="due-indicator">Due Now</span>
-                  </div>
-
-                  @if (getSnippetVerse(item); as snippetVerse) {
-                    <p class="first-verse-snippet">
-                      <span class="verse-num">[{{ snippetVerse.verseNumber }}]</span>
-                      {{ snippetVerse.text }}
-                      @if (!item.card.isRepairCard && item.passage.verses.length > 1) {
-                        <span class="more-verses-hint">
-                          (+{{ item.passage.verses.length - 1 }} more
-                          {{ item.passage.verses.length - 1 === 1 ? 'verse' : 'verses' }})
-                        </span>
-                      }
-                    </p>
-                  }
-
-                  <div class="srs-meta-row">
-                    <span class="meta-chip">
-                      Interval:
-                      <strong>{{ formatCardInterval(item) }}</strong>
-                    </span>
-                    <span class="meta-chip">
-                      Ease:
-                      <strong>{{ (item.card.easeFactor * 100).toFixed(0) }}%</strong>
-                    </span>
-                    <span class="meta-chip">
-                      Reps:
-                      <strong>{{ item.card.repetitions }}</strong>
-                    </span>
-                  </div>
-                </div>
-
-                <div class="deck-item-actions" (click)="$event.stopPropagation()">
-                  <button
-                    type="button"
-                    class="study-card-btn"
-                    (click)="onOpenFlashcard(item)"
-                    [attr.data-testid]="'btn-study-card-' + i"
-                  >
-                    {{ item.card.isRepairCard ? 'Repair Verse →' : 'Open Flashcard →' }}
-                  </button>
-                </div>
-              </article>
-            } @empty {
-              <div class="empty-deck-box" data-testid="empty-due-page-state">
-                <h4>All Caught Up for Today! 🎉</h4>
-                <p>
-                  No passages are due right now. Visit the <strong>Home</strong> tab to work on your
-                  <strong>Currently Memorizing</strong> passages!
-                </p>
-                <div class="empty-actions">
-                  <button
-                    type="button"
-                    class="action-btn add-passage-btn"
-                    (click)="selectTab('queue')"
-                  >
-                    Back to Home ({{ currentlyMemorizingItems().length }} Memorizing)
-                  </button>
-                </div>
-              </div>
-            }
-          </div>
-        </section>
-      }
-
-      <!-- ======================================================================= -->
-      <!-- TAB 3: MEMORIZED / KNOWN (Graduated Review + Active Rotation)           -->
-      <!-- ======================================================================= -->
-      @if (activeTab === 'active') {
-        <section class="tab-view-section" data-testid="active-page-section">
-          <div class="hero-card active-hero">
-            <div class="hero-copy">
-              <span class="hero-eyebrow">Long-Term Retention • Anki Review Schedule</span>
-              <h2 class="hero-title">
-                Memorized &amp; Active Passages ({{ storageService.activeDeckItems().length }})
-              </h2>
-              <p class="hero-description">
-                Passages in your long-term spaced repetition rotation (<strong>Memorized / Known</strong>
-                in <code>REVIEW</code> state alongside <strong>Currently Memorizing</strong> cards).
-              </p>
-            </div>
-
-            <div class="primary-action-bar">
-              <button
-                type="button"
-                class="action-btn study-due-btn"
-                (click)="startDueSession.emit()"
-                data-testid="btn-study-due"
-              >
-                ▶ Study Due ({{ storageService.stats().due }})
-              </button>
-              <button
-                type="button"
-                class="action-btn add-passage-btn"
-                (click)="selectTab('queue')"
-              >
-                Home / Backlog ({{ storageService.stats().queuedCount }})
-              </button>
-            </div>
-          </div>
-
-          <div class="passage-deck-list" data-testid="passage-deck-list">
-            @for (item of storageService.activeDeckItems(); track item.card.id; let i = $index) {
-              <article
-                class="deck-item-card clickable-card"
-                [class.is-due]="item.isDue"
-                [class.repair-card]="item.card.isRepairCard"
-                (click)="onOpenFlashcard(item)"
-                role="button"
-                tabindex="0"
-                [attr.data-testid]="'deck-item-' + i"
-              >
-                <div class="deck-item-main">
-                  <div class="deck-item-header">
-                    <h4 class="passage-ref" [attr.data-testid]="'deck-item-ref-' + i">
-                      {{ item.passage.reference }}
-                    </h4>
-
-                    @if (item.card.isRepairCard) {
-                      <span class="repair-card-badge" data-testid="repair-card-badge">
-                        🔧 Memory Repair · v. {{ item.card.repairVerseNumber }}
-                      </span>
-                      <span class="repair-heal-pill" data-testid="repair-heal-pill">
-                        Heal Streak: {{ item.card.repairStreak || 0 }} /
-                        {{ item.card.repairTargetStreak || 3 }}
-                      </span>
-                    } @else {
-                      <span class="verse-count-pill">
-                        {{ item.passage.verses.length }}
-                        {{ item.passage.verses.length === 1 ? 'verse' : 'verses' }}
-                      </span>
-
-                      <span
-                        class="state-badge"
-                        [ngClass]="getBadgeClass(item.card.state)"
-                        [attr.data-testid]="'deck-item-badge-' + i"
-                      >
-                        {{ getStateLabel(item.card.state) }}
-                      </span>
-                    }
-
-                    @if (item.isDue) {
-                      <span class="due-indicator">Due Now</span>
-                    } @else {
-                      <span class="scheduled-indicator">Scheduled</span>
+                    @if (getRowCueText(item); as cue) {
+                      <span class="rm-snippet">({{ cue }})</span>
                     }
                   </div>
-
-                  @if (getSnippetVerse(item); as snippetVerse) {
-                    <p class="first-verse-snippet">
-                      <span class="verse-num">[{{ snippetVerse.verseNumber }}]</span>
-                      {{ snippetVerse.text }}
-                      @if (!item.card.isRepairCard && item.passage.verses.length > 1) {
-                        <span class="more-verses-hint">
-                          (+{{ item.passage.verses.length - 1 }} more
-                          {{ item.passage.verses.length - 1 === 1 ? 'verse' : 'verses' }})
-                        </span>
-                      }
-                    </p>
-                  }
-
-                  <div class="srs-meta-row">
-                    <span class="meta-chip">
-                      Interval:
-                      <strong>{{ formatCardInterval(item) }}</strong>
-                    </span>
-                    <span class="meta-chip">
-                      Ease:
-                      <strong>{{ (item.card.easeFactor * 100).toFixed(0) }}%</strong>
-                    </span>
-                    <span class="meta-chip">
-                      Reps:
-                      <strong>{{ item.card.repetitions }}</strong>
-                    </span>
-                  </div>
                 </div>
 
-                <div class="deck-item-actions" (click)="$event.stopPropagation()">
-                  <button
-                    type="button"
-                    class="study-card-btn"
-                    (click)="onOpenFlashcard(item)"
-                    [attr.data-testid]="'btn-study-card-' + i"
-                  >
-                    Open Flashcard →
-                  </button>
+                <!-- Right Tag + Recitation Time + Due Label + Edit/Delete -->
+                <div class="rm-row-right" (click)="$event.stopPropagation()">
+                  <div class="rm-meta-col" (click)="onRowClick(item)">
+                    <span class="rm-top-tag">{{ getRightTopTag(item) }} · ⏱ {{ getRecitationLabel(item) }}</span>
+                    <span class="rm-sub-due due-now-text">{{ getRelativeDueLabel(item) }}</span>
+                  </div>
+
                   @if (!item.card.isRepairCard) {
                     <button
+                      [id]="'btn-edit-due-' + i"
                       type="button"
-                      class="phase-action-btn move-saved-btn"
-                      (click)="moveBackToSaved(item, $event)"
-                      title="Move back to Saved to Memorize Next"
+                      class="rm-edit-btn"
+                      (click)="onEditClick(item, $event)"
+                      aria-label="Edit passage"
+                      title="Edit passage"
+                      data-testid="btn-edit-passage"
                     >
-                      ↩ Move to Saved
+                      ✎
                     </button>
                   }
+
                   <button
+                    [id]="'btn-delete-due-' + i"
                     type="button"
-                    class="delete-card-btn"
+                    class="rm-delete-btn"
                     (click)="deleteItem(item, $event)"
                     aria-label="Delete card"
                     title="Delete card"
-                    [attr.data-testid]="'btn-delete-card-' + i"
+                    [attr.data-testid]="'btn-delete-due-' + i"
                   >
-                    🗑
+                    ✕
                   </button>
                 </div>
               </article>
             } @empty {
-              <div class="empty-deck-box">
-                <h4>No Memorized or Active Passages Yet</h4>
-                <p>Pick any passage on the Home tab to start memorizing it!</p>
-                <button
-                  type="button"
-                  class="action-btn add-passage-btn"
-                  (click)="selectTab('queue')"
-                >
-                  Go to Home Tab
-                </button>
+              <div class="rm-empty-state" data-testid="due-caught-up-state">
+                <p class="rm-empty-title">All caught up for today</p>
+                <p class="rm-empty-sub">No passages are currently due for review.</p>
               </div>
             }
           </div>
         </section>
       }
+
+      <!-- ======================================================================= -->
+      <!-- TAB 3: KNOWN (Started / Memorized Cards Scheduled for Future Review)    -->
+      <!-- ======================================================================= -->
+      @if (activeTab === 'active') {
+        <section
+          class="rm-list-section"
+          data-testid="active-page-section"
+        >
+          <div class="rm-flat-list" data-testid="active-deck-list">
+            @for (item of knownTabItems(); track item.card.id; let i = $index) {
+              <article
+                class="rm-row"
+                (click)="onRowClick(item)"
+                role="button"
+                tabindex="0"
+                (keydown.enter)="onRowClick(item)"
+                [attr.data-testid]="'active-item-' + i"
+              >
+                <!-- Left 42x42 Square Badge -->
+                @if (item.card.isRepairCard) {
+                  <div
+                    class="rm-square-badge badge-repair-square"
+                    data-testid="repair-card-badge"
+                  >
+                    <span class="square-icon">🔧</span>
+                    <span class="square-sub" data-testid="repair-heal-pill">
+                      {{ item.card.repairStreak || 0 }}/{{ item.card.repairTargetStreak || 3 }}
+                    </span>
+                  </div>
+                } @else if (item.card.isStitchedPassageCard) {
+                  <div
+                    class="rm-square-badge badge-stitched-square"
+                    data-testid="stitched-card-badge"
+                  >
+                    <span class="square-icon">🔗</span>
+                    <span class="square-sub">{{ getStitchedChunkCount(item) }}x</span>
+                  </div>
+                } @else if (isPartiallyMemorized(item)) {
+                  <div class="rm-square-badge badge-partial-square">
+                    <span class="square-primary">
+                      {{ item.card.learningStep || 1 }}/{{ item.passage.verses.length }}
+                    </span>
+                  </div>
+                } @else {
+                  <div
+                    class="rm-square-badge"
+                    [ngClass]="getLevelSquareClass(item)"
+                  >
+                    <span class="square-level">{{ getCardLevelNumber(item) }}</span>
+                  </div>
+                }
+
+                <!-- Middle Reference + Label or Opening Snippet -->
+                <div class="rm-row-middle">
+                  <div class="rm-row-line">
+                    <span class="rm-ref" [attr.data-testid]="'active-item-ref-' + i">
+                      {{ item.passage.reference }}
+                    </span>
+                    @if (item.card.isRepairCard) {
+                      <span class="rm-repair-tag">
+                        ({{ getRepairTargetLabel(item) }})
+                      </span>
+                    } @else if (item.card.isStitchedPassageCard) {
+                      <span class="rm-stitched-tag">
+                        (Stitched)
+                      </span>
+                    }
+                    @if (getRowCueText(item); as cue) {
+                      <span class="rm-snippet">({{ cue }})</span>
+                    }
+                  </div>
+                </div>
+
+                <!-- Right Tag + Recitation Time + Due Label + Edit/Delete -->
+                <div class="rm-row-right" (click)="$event.stopPropagation()">
+                  <div class="rm-meta-col" (click)="onRowClick(item)">
+                    <span class="rm-top-tag">{{ getRightTopTag(item) }} · ⏱ {{ getRecitationLabel(item) }}</span>
+                    <span class="rm-sub-due">{{ getRelativeDueLabel(item) }}</span>
+                  </div>
+
+                  @if (!item.card.isRepairCard) {
+                    <button
+                      [id]="'btn-edit-known-' + i"
+                      type="button"
+                      class="rm-edit-btn"
+                      (click)="onEditClick(item, $event)"
+                      aria-label="Edit passage"
+                      title="Edit passage"
+                      data-testid="btn-edit-passage"
+                    >
+                      ✎
+                    </button>
+                  }
+
+                  <button
+                    [id]="'btn-delete-known-' + i"
+                    type="button"
+                    class="rm-delete-btn"
+                    (click)="deleteItem(item, $event)"
+                    aria-label="Delete passage"
+                    title="Delete passage"
+                    [attr.data-testid]="'btn-delete-active-' + i"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </article>
+            } @empty {
+              <div class="rm-empty-state" data-testid="empty-active-state">
+                <p class="rm-empty-title">No scheduled passages yet</p>
+                <p class="rm-empty-sub">Start memorizing a passage from <strong>NEW</strong> or complete your <strong>DUE</strong> reviews.</p>
+              </div>
+            }
+          </div>
+        </section>
+      }
+
+      <!-- Floating Bottom Circular Action Buttons (r2.png, r3.png) -->
+      <div class="rm-fab-dock" role="toolbar" aria-label="Deck actions">
+        <button
+          id="btn-study-due"
+          type="button"
+          class="rm-fab rm-fab-play"
+          [disabled]="currentTabItems().length === 0"
+          (click)="onPlayFabClick()"
+          aria-label="Study cards"
+          title="Study cards in this tab"
+          data-testid="btn-study-due"
+        >
+          ▶
+        </button>
+
+        <button
+          id="btn-fab-add"
+          type="button"
+          class="rm-fab rm-fab-add"
+          (click)="onAddFabClick()"
+          aria-label="Add passage"
+          title="Add passage"
+          data-testid="btn-empty-add"
+        >
+          +
+        </button>
+      </div>
     </div>
   `,
   styles: [
     `
       :host {
-        --bg-surface: #1e293b;
-        --bg-surface-elevated: #0f172a;
-        --bg-subtle: #0f172a;
-        --border-color: #334155;
-        --border-hover: #475569;
-        --text-primary: #f8fafc;
-        --text-secondary: #cbd5e1;
-        --text-muted: #94a3b8;
-        --card-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
-        --card-hover-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
-
-        --hero-bg: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        --due-hero-bg: linear-gradient(135deg, #134e4a 0%, #0f172a 100%);
-        --active-hero-bg: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        --hero-border: #334155;
-        --hero-eyebrow: #5eead4;
-        --hero-title: #ffffff;
-        --hero-desc: #cbd5e1;
-        --hero-code-bg: rgba(255, 255, 255, 0.14);
-        --hero-code-text: #fde68a;
-        --proto-btn-bg: rgba(255, 255, 255, 0.08);
-        --proto-btn-text: #f8fafc;
-        --proto-btn-border: rgba(255, 255, 255, 0.2);
-        --proto-btn-hover: rgba(255, 255, 255, 0.16);
-
-        --tab-hover-bg: rgba(255, 255, 255, 0.05);
-        --tab-active-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-        --badge-queue-bg: rgba(59, 130, 246, 0.22);
-        --badge-queue-text: #93c5fd;
-        --badge-due-bg: rgba(20, 184, 166, 0.22);
-        --badge-due-text: #5eead4;
-        --badge-active-bg: rgba(34, 197, 94, 0.22);
-        --badge-active-text: #86efac;
-        --badge-learning-bg: rgba(245, 158, 11, 0.2);
-        --badge-learning-text: #fcd34d;
-
-        --kpi-queue-color: #60a5fa;
-        --kpi-due-color: #2dd4bf;
-        --kpi-learning-color: #fbbf24;
-        --kpi-review-color: #4ade80;
-        --verse-num-color: #2dd4bf;
-
-        --repair-card-bg: linear-gradient(90deg, rgba(244, 63, 94, 0.08) 0%, #1e293b 35%);
-        --repair-badge-bg: rgba(244, 63, 94, 0.22);
-        --repair-badge-text: #fda4af;
-        --repair-badge-border: rgba(244, 63, 94, 0.45);
-        --heal-pill-bg: rgba(16, 185, 129, 0.18);
-        --heal-pill-text: #6ee7b7;
-        --heal-pill-border: rgba(16, 185, 129, 0.4);
-        --stitch-pill-bg: rgba(245, 158, 11, 0.18);
-        --stitch-pill-text: #fcd34d;
-        --stitch-pill-border: rgba(245, 158, 11, 0.4);
-
-        --start-btn-bg: rgba(245, 158, 11, 0.16);
-        --start-btn-text: #fde68a;
-        --start-btn-border: rgba(245, 158, 11, 0.5);
-        --start-btn-hover: rgba(245, 158, 11, 0.28);
-        --mark-mem-bg: rgba(34, 197, 94, 0.18);
-        --mark-mem-text: #86efac;
-        --mark-mem-border: rgba(34, 197, 94, 0.45);
-        --mark-mem-hover: rgba(34, 197, 94, 0.28);
-
-        --data-empty-bg: rgba(120, 53, 15, 0.28);
-        --data-empty-border: rgba(245, 158, 11, 0.45);
-        --data-conn-bg: rgba(6, 78, 59, 0.32);
-        --data-conn-border: rgba(52, 211, 153, 0.45);
-        --code-inline-bg: rgba(148, 163, 184, 0.18);
-        --code-inline-text: #5eead4;
+        --rm-bg: #0b1120;
+        --rm-row-hover: #151f32;
+        --rm-divider: #1e293b;
+        --rm-header-bg: #0f172a;
+        --rm-tab-active-bg: rgba(245, 158, 11, 0.1);
+        --rm-tab-hover-bg: rgba(255, 255, 255, 0.04);
+        --rm-tab-text: #94a3b8;
+        --rm-tab-active-text: #f8fafc;
+        --rm-tab-accent: #f59e0b;
+        --rm-tab-badge-bg: rgba(245, 158, 11, 0.18);
+        --rm-tab-badge-text: #fbbf24;
+        --rm-text-primary: #f8fafc;
+        --rm-text-snippet: #cbd5e1;
+        --rm-text-muted: #94a3b8;
+        --rm-fab-play-bg: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+        --rm-fab-play-border: #3b82f6;
+        --rm-fab-add-bg: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        --rm-fab-add-text: #0f172a;
         display: block;
       }
 
       :host-context(.light-theme),
       :host-context(html:not(.dark-theme)) {
-        --bg-surface: #ffffff;
-        --bg-surface-elevated: #faf6ee;
-        --bg-subtle: #f1ece1;
-        --border-color: #e2dacb;
-        --border-hover: #b8afa0;
-        --text-primary: #1c1917;
-        --text-secondary: #44403c;
-        --text-muted: #78716c;
-        --card-shadow: 0 2px 8px rgba(28, 25, 23, 0.05);
-        --card-hover-shadow: 0 8px 20px rgba(28, 25, 23, 0.09);
-
-        --hero-bg: linear-gradient(135deg, #f5efe4 0%, #ebe2d2 100%);
-        --due-hero-bg: linear-gradient(135deg, #e6f7f4 0%, #d5f0ec 100%);
-        --active-hero-bg: linear-gradient(135deg, #eef6ee 0%, #e1efe2 100%);
-        --hero-border: #d8cebe;
-        --hero-eyebrow: #0f766e;
-        --hero-title: #1c1917;
-        --hero-desc: #44403c;
-        --hero-code-bg: rgba(15, 118, 110, 0.1);
-        --hero-code-text: #0f766e;
-        --proto-btn-bg: #ffffff;
-        --proto-btn-text: #292524;
-        --proto-btn-border: #cfc6b6;
-        --proto-btn-hover: #f7f3eb;
-
-        --tab-hover-bg: rgba(255, 255, 255, 0.65);
-        --tab-active-shadow: 0 2px 8px rgba(28, 25, 23, 0.08);
-        --badge-queue-bg: #dbeafe;
-        --badge-queue-text: #1e40af;
-        --badge-due-bg: #ccfbf1;
-        --badge-due-text: #0f766e;
-        --badge-active-bg: #dcfce7;
-        --badge-active-text: #166534;
-        --badge-learning-bg: #fef3c7;
-        --badge-learning-text: #92400e;
-
-        --kpi-queue-color: #1d4ed8;
-        --kpi-due-color: #0f766e;
-        --kpi-learning-color: #b45309;
-        --kpi-review-color: #15803d;
-        --verse-num-color: #0f766e;
-
-        --repair-card-bg: linear-gradient(90deg, #fff1f2 0%, #ffffff 35%);
-        --repair-badge-bg: #ffe4e6;
-        --repair-badge-text: #be123c;
-        --repair-badge-border: #fda4af;
-        --heal-pill-bg: #d1fae5;
-        --heal-pill-text: #065f46;
-        --heal-pill-border: #6ee7b7;
-        --stitch-pill-bg: #fffbeb;
-        --stitch-pill-text: #92400e;
-        --stitch-pill-border: #fde68a;
-
-        --start-btn-bg: #fffbeb;
-        --start-btn-text: #92400e;
-        --start-btn-border: #d97706;
-        --start-btn-hover: #fef3c7;
-        --mark-mem-bg: #dcfce7;
-        --mark-mem-text: #166534;
-        --mark-mem-border: #86efac;
-        --mark-mem-hover: #bbf7d0;
-
-        --data-empty-bg: #fffbeb;
-        --data-empty-border: #f59e0b;
-        --data-conn-bg: #f0fdf4;
-        --data-conn-border: #86efac;
-        --code-inline-bg: rgba(15, 118, 110, 0.09);
-        --code-inline-text: #0f766e;
+        --rm-bg: #f8fafc;
+        --rm-row-hover: #f1f5f9;
+        --rm-divider: #e2e8f0;
+        --rm-header-bg: #ffffff;
+        --rm-tab-active-bg: rgba(245, 158, 11, 0.12);
+        --rm-tab-hover-bg: #f1f5f9;
+        --rm-tab-text: #64748b;
+        --rm-tab-active-text: #0f172a;
+        --rm-tab-accent: #d97706;
+        --rm-tab-badge-bg: #fef3c7;
+        --rm-tab-badge-text: #b45309;
+        --rm-text-primary: #0f172a;
+        --rm-text-snippet: #334155;
+        --rm-text-muted: #64748b;
+        --rm-fab-play-bg: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+        --rm-fab-play-border: #3b82f6;
+        --rm-fab-add-bg: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        --rm-fab-add-text: #0f172a;
       }
 
-      .dashboard-container {
+      .rm-dashboard {
         display: flex;
         flex-direction: column;
-        gap: 1.25rem;
+        min-height: calc(100vh - 56px);
+        background: var(--rm-bg);
+        color: var(--rm-text-primary);
+        padding-bottom: 5.5rem;
       }
 
-      .data-file-bar {
-        border-radius: 0.85rem;
+      /* ===================================================================== */
+      /* 3-Tab Header Strip (Minimalist layout + Selah Navy & Warm Gold theme) */
+      /* ===================================================================== */
+      .rm-tabs-bar {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        background: var(--rm-header-bg);
+        border-bottom: 1px solid var(--rm-divider);
+        user-select: none;
+      }
+
+      .rm-tab {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.18rem;
+        padding: 0.55rem 0.5rem 0.5rem;
+        border: none;
+        background: transparent;
+        color: var(--rm-tab-text);
+        cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease;
+      }
+
+      .rm-tab:hover {
+        color: var(--rm-tab-active-text);
+        background: var(--rm-tab-hover-bg);
+      }
+
+      .rm-tab.active {
+        color: var(--rm-tab-active-text);
+        background: var(--rm-tab-active-bg);
+        box-shadow: inset 0 -3px 0 var(--rm-tab-accent);
+      }
+
+      .rm-tab-icon-wrap {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 0.5rem;
+      }
+
+      .rm-tab-icon {
+        font-size: 1.1rem;
+        line-height: 1;
+        font-weight: 700;
+      }
+
+      .rm-tab-count {
+        font-size: 0.68rem;
+        font-weight: 800;
+        line-height: 1;
+        padding: 0.14rem 0.4rem;
+        border-radius: 999px;
+        background: rgba(148, 163, 184, 0.18);
+        color: var(--rm-tab-text);
+        margin-left: 0.24rem;
+      }
+
+      .rm-tab.active .rm-tab-count {
+        background: var(--rm-tab-badge-bg);
+        color: var(--rm-tab-badge-text);
+      }
+
+      .rm-tab-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      /* ===================================================================== */
+      /* Flat Edge-to-Edge Passage Rows                                        */
+      /* ===================================================================== */
+      .rm-list-section {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .rm-flat-list {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+      }
+
+      .rm-row {
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+        padding: 0.62rem 0.9rem;
+        border-bottom: 1px solid var(--rm-divider);
+        background: transparent;
+        cursor: pointer;
+        transition: background 0.12s ease;
+        min-height: 56px;
+        box-sizing: border-box;
+      }
+
+      .rm-row:hover {
+        background: var(--rm-row-hover);
+      }
+
+      .rm-row:focus-visible {
+        outline: 2px solid #f59e0b;
+        outline-offset: -2px;
+      }
+
+      /* Left 42x42px Rounded Square (Selah Navy, Teal, Indigo, & Warm Gold) */
+      .rm-square-badge {
+        width: 42px;
+        height: 42px;
+        border-radius: 7px;
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: #ffffff;
+        font-weight: 700;
+        box-sizing: border-box;
+        position: relative;
+        padding: 2px;
+      }
+
+      .badge-new-square {
+        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+        border: 1px solid #475569;
+        color: #f8fafc;
+      }
+
+      .badge-partial-square {
+        background: linear-gradient(135deg, #0d9488 0%, #115e59 100%);
+      }
+
+      .badge-repair-square {
+        background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+      }
+
+      .badge-stitched-square {
+        background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%);
+      }
+
+      .badge-level-1 {
+        background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%);
+      }
+
+      .badge-level-2 {
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+      }
+
+      .badge-level-3 {
+        background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
+      }
+
+      .badge-level-high {
+        background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+      }
+
+      .square-primary {
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+
+      .square-level {
+        position: absolute;
+        top: 4px;
+        left: 6px;
+        font-size: 0.78rem;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .square-icon {
+        font-size: 0.78rem;
+        line-height: 1;
+      }
+
+      .square-sub {
+        font-size: 0.64rem;
+        font-weight: 800;
+        line-height: 1.1;
+      }
+
+      /* Middle Single-Line Reference + Label/Opening Words */
+      .rm-row-middle {
+        flex: 1 1 0;
+        min-width: 0;
         overflow: hidden;
       }
 
-      .data-file-empty-row {
-        background: var(--data-empty-bg);
-        border: 1px solid var(--data-empty-border);
-        border-radius: 0.85rem;
-        padding: 0.8rem 1.15rem;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        flex-wrap: wrap;
+      .rm-row-line {
+        display: block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 1rem;
+        line-height: 1.35;
+        color: var(--rm-text-primary);
       }
 
-      .data-file-connected-row {
-        background: var(--data-conn-bg);
-        border: 1px solid var(--data-conn-border);
-        border-radius: 0.85rem;
-        padding: 0.75rem 1.15rem;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        flex-wrap: wrap;
+      .rm-ref {
+        font-weight: 600;
+        color: var(--rm-text-primary);
       }
 
-      .data-file-info {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        min-width: 0;
-        flex: 1;
+      .rm-repair-tag {
+        margin-left: 0.35rem;
+        font-size: 0.88rem;
+        font-weight: 700;
+        color: #f59e0b;
       }
 
-      .file-status-dot {
-        width: 0.65rem;
-        height: 0.65rem;
-        border-radius: 999px;
+      .rm-stitched-tag {
+        margin-left: 0.35rem;
+        font-size: 0.85rem;
+        font-weight: 700;
+        color: #818cf8;
+      }
+
+      .rm-snippet {
+        margin-left: 0.35rem;
+        font-weight: 400;
+        color: var(--rm-text-snippet);
+      }
+
+      /* Right Column */
+      .rm-row-right {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
         flex-shrink: 0;
       }
 
-      .file-status-dot.disconnected,
-      .file-status-dot.warning {
-        background: #f59e0b;
-        box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
-      }
-
-      .file-status-dot.connected {
-        background: #10b981;
-        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25);
-      }
-
-      .file-status-dot.error {
-        background: #ef4444;
-        box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.25);
-      }
-
-      .file-copy {
+      .rm-meta-col {
         display: flex;
         flex-direction: column;
-        gap: 0.12rem;
-        min-width: 0;
-      }
-
-      .file-headline {
-        font-size: 0.85rem;
-        color: var(--text-primary);
-      }
-
-      .file-headline code {
-        background: var(--code-inline-bg);
-        padding: 0.08rem 0.38rem;
-        border-radius: 0.3rem;
-        font-size: 0.82rem;
-        color: var(--code-inline-text);
-      }
-
-      .file-subtext {
-        font-size: 0.77rem;
-        color: var(--text-secondary);
-      }
-
-      .data-file-actions {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        flex-wrap: wrap;
-      }
-
-      .file-btn {
-        padding: 0.45rem 0.85rem;
-        border-radius: 0.55rem;
-        font-size: 0.79rem;
-        font-weight: 700;
-        cursor: pointer;
-        transition: all 0.15s ease;
-        white-space: nowrap;
-      }
-
-      .open-file-btn {
-        background: var(--bg-surface);
-        border: 1px solid var(--border-color);
-        color: var(--text-primary);
-      }
-
-      .open-file-btn:hover {
-        border-color: var(--border-hover);
-      }
-
-      .create-file-btn {
-        background: #0d9488;
-        border: 1px solid #0d9488;
-        color: #ffffff;
-      }
-
-      .create-file-btn:hover {
-        background: #0f766e;
-      }
-
-      .disconnect-file-btn {
-        background: transparent;
-        border: 1px solid var(--border-color);
-        color: var(--text-muted);
-      }
-
-      .disconnect-file-btn:hover {
-        background: rgba(239, 68, 68, 0.12);
-        border-color: #f87171;
-        color: #dc2626;
-      }
-
-      .dashboard-tabs-bar {
-        display: flex;
-        align-items: center;
-        gap: 0.65rem;
-        background: var(--bg-subtle);
-        padding: 0.4rem;
-        border-radius: 0.85rem;
-        border: 1px solid var(--border-color);
-        flex-wrap: wrap;
-      }
-
-      .tab-pill {
-        flex: 1 1 180px;
-        display: flex;
-        align-items: center;
+        align-items: flex-end;
         justify-content: center;
-        gap: 0.55rem;
-        padding: 0.68rem 1rem;
-        border-radius: 0.65rem;
-        border: none;
-        background: transparent;
-        color: var(--text-muted);
-        font-size: 0.9rem;
-        font-weight: 700;
-        cursor: pointer;
-        transition: all 0.15s ease;
+        gap: 0.1rem;
+        min-width: 72px;
+        text-align: right;
       }
 
-      .tab-pill:hover {
-        color: var(--text-primary);
-        background: var(--tab-hover-bg);
+      .rm-top-tag {
+        font-size: 0.76rem;
+        font-weight: 500;
+        color: var(--rm-text-snippet);
+        line-height: 1.15;
       }
 
-      .tab-pill.active {
-        background: var(--bg-surface);
-        color: var(--text-primary);
-        box-shadow: var(--tab-active-shadow);
-      }
-
-      .tab-badge {
-        font-size: 0.75rem;
-        font-weight: 800;
-        padding: 0.14rem 0.52rem;
-        border-radius: 999px;
-      }
-
-      .queue-badge {
-        background: var(--badge-queue-bg);
-        color: var(--badge-queue-text);
-      }
-
-      .due-badge {
-        background: var(--badge-due-bg);
-        color: var(--badge-due-text);
-      }
-
-      .active-badge {
-        background: var(--badge-active-bg);
-        color: var(--badge-active-text);
-      }
-
-      .tab-view-section {
-        display: flex;
-        flex-direction: column;
-        gap: 1.35rem;
-      }
-
-      .home-subsection {
-        display: flex;
-        flex-direction: column;
-        gap: 0.85rem;
-      }
-
-      .hero-card {
-        background: var(--hero-bg);
-        border: 1px solid var(--hero-border);
-        color: var(--hero-title);
-        border-radius: 1.1rem;
-        padding: 1.55rem 1.8rem;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1.4rem;
-        flex-wrap: wrap;
-        box-shadow: var(--card-shadow);
-      }
-
-      .due-hero {
-        background: var(--due-hero-bg);
-      }
-
-      .active-hero {
-        background: var(--active-hero-bg);
-      }
-
-      .hero-copy {
-        max-width: 560px;
-      }
-
-      .hero-eyebrow {
-        display: inline-block;
+      .rm-sub-due {
         font-size: 0.72rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--hero-eyebrow);
-        margin-bottom: 0.35rem;
+        color: var(--rm-text-muted);
+        line-height: 1.15;
       }
 
-      .hero-title {
-        margin: 0;
-        font-size: 1.48rem;
-        font-weight: 800;
-        letter-spacing: -0.02em;
-        color: var(--hero-title);
-      }
-
-      .hero-description {
-        margin: 0.45rem 0 0;
-        font-size: 0.87rem;
-        line-height: 1.5;
-        color: var(--hero-desc);
-      }
-
-      .hero-description code {
-        background: var(--hero-code-bg);
-        padding: 0.1rem 0.35rem;
-        border-radius: 0.3rem;
-        color: var(--hero-code-text);
+      .due-now-text {
+        color: #f59e0b;
         font-weight: 600;
       }
 
-      .primary-action-bar {
+      .rm-reorder-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.15rem;
+      }
+
+      .rm-icon-action,
+      .rm-edit-btn,
+      .rm-delete-btn {
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        color: var(--rm-text-muted);
+        font-size: 0.8rem;
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        opacity: 0.55;
+        transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+      }
+
+      .rm-row:hover .rm-icon-action,
+      .rm-row:hover .rm-edit-btn,
+      .rm-row:hover .rm-delete-btn {
+        opacity: 0.9;
+      }
+
+      .rm-icon-action:disabled {
+        opacity: 0.2;
+        cursor: default;
+      }
+
+      .rm-icon-action:hover:not(:disabled),
+      .rm-edit-btn:hover {
+        opacity: 1;
+        background: rgba(245, 158, 11, 0.12);
+        color: #f59e0b;
+      }
+
+      .rm-delete-btn:hover {
+        opacity: 1;
+        color: #ef4444;
+        background: rgba(239, 68, 68, 0.12);
+      }
+
+      .rm-empty-state {
+        padding: 3.5rem 1.5rem;
+        text-align: center;
+        color: var(--rm-text-muted);
+      }
+
+      .rm-empty-title {
+        margin: 0 0 0.35rem;
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--rm-text-primary);
+      }
+
+      .rm-empty-sub {
+        margin: 0;
+        font-size: 0.85rem;
+      }
+
+      /* ===================================================================== */
+      /* Floating Bottom Circular Action Buttons (Selah Slate/Indigo & Gold)   */
+      /* ===================================================================== */
+      .rm-fab-dock {
+        position: fixed;
+        left: 50%;
+        bottom: 1.35rem;
+        transform: translateX(-50%);
         display: flex;
         align-items: center;
-        gap: 0.65rem;
-        flex-wrap: wrap;
+        gap: 1rem;
+        z-index: 40;
       }
 
-      .action-btn {
-        padding: 0.68rem 1.05rem;
-        border-radius: 0.65rem;
-        font-size: 0.85rem;
-        font-weight: 700;
+      .rm-fab {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        border: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         cursor: pointer;
-        border: 1px solid transparent;
-        transition: all 0.15s ease;
-        white-space: nowrap;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+        transition: transform 0.15s ease, filter 0.15s ease, opacity 0.15s ease;
       }
 
-      .action-btn:disabled {
-        opacity: 0.5;
+      .rm-fab:hover:not(:disabled) {
+        transform: translateY(-2px);
+        filter: brightness(1.08);
+      }
+
+      .rm-fab:disabled {
+        opacity: 0.4;
         cursor: not-allowed;
       }
 
-      .study-due-btn {
-        background: #0d9488;
-        color: #ffffff;
-        box-shadow: 0 4px 12px rgba(13, 148, 136, 0.22);
+      .rm-fab-play {
+        background: var(--rm-fab-play-bg);
+        border: 1px solid var(--rm-fab-play-border);
+        color: #f8fafc;
+        font-size: 1.25rem;
+        padding-left: 3px;
       }
 
-      .study-due-btn:hover:not(:disabled) {
-        background: #0f766e;
-      }
-
-      .add-passage-btn {
-        background: #f59e0b;
-        color: #1c1917;
-      }
-
-      .add-passage-btn:hover {
-        background: #fbbf24;
-      }
-
-      .proto-sync-btn {
-        background: var(--proto-btn-bg);
-        color: var(--proto-btn-text);
-        border-color: var(--proto-btn-border);
-      }
-
-      .proto-sync-btn:hover {
-        background: var(--proto-btn-hover);
-      }
-
-      .stats-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
-        gap: 0.8rem;
-      }
-
-      .kpi-card {
-        background: var(--bg-surface);
-        border: 1px solid var(--border-color);
-        border-radius: 0.85rem;
-        padding: 0.95rem 1.1rem;
-        display: flex;
-        flex-direction: column;
-        gap: 0.18rem;
-        box-shadow: var(--card-shadow);
-      }
-
-      .clickable-kpi {
-        cursor: pointer;
-        transition: border-color 0.15s ease, transform 0.12s ease;
-      }
-
-      .clickable-kpi:hover {
-        border-color: var(--border-hover);
-        transform: translateY(-1px);
-      }
-
-      .selected-kpi {
-        border-color: #0d9488;
-        box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.18);
-      }
-
-      .kpi-label {
-        font-size: 0.74rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--text-muted);
-      }
-
-      .kpi-value {
-        font-size: 1.7rem;
-        font-weight: 800;
-        line-height: 1.15;
-        color: var(--text-primary);
-      }
-
-      .queue-kpi .kpi-value {
-        color: var(--kpi-queue-color);
-      }
-
-      .due-kpi .kpi-value {
-        color: var(--kpi-due-color);
-      }
-
-      .learning-kpi .kpi-value {
-        color: var(--kpi-learning-color);
-      }
-
-      .review-kpi .kpi-value {
-        color: var(--kpi-review-color);
-      }
-
-      .kpi-sub {
-        font-size: 0.74rem;
-        color: var(--text-muted);
-      }
-
-      .section-header {
-        display: flex;
-        align-items: flex-end;
-        justify-content: space-between;
-        gap: 1rem;
-        flex-wrap: wrap;
-      }
-
-      .section-title {
-        margin: 0;
-        font-size: 1.12rem;
-        font-weight: 700;
-        color: var(--text-primary);
-      }
-
-      .section-subtitle {
-        margin: 0.2rem 0 0;
-        font-size: 0.82rem;
-        color: var(--text-secondary);
-      }
-
-      .passage-deck-list {
-        display: flex;
-        flex-direction: column;
-        gap: 0.8rem;
-      }
-
-      .deck-item-card {
-        background: var(--bg-surface);
-        border: 1px solid var(--border-color);
-        border-radius: 0.9rem;
-        padding: 1.15rem 1.3rem;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1.25rem;
-        box-shadow: var(--card-shadow);
-        transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
-      }
-
-      .clickable-card {
-        cursor: pointer;
-      }
-
-      .clickable-card:hover {
-        border-color: #0d9488;
-        box-shadow: var(--card-hover-shadow);
-      }
-
-      .memorizing-card {
-        border-left: 4px solid #f59e0b;
-      }
-
-      .repair-card {
-        border-left: 4px solid #f43f5e !important;
-        background: var(--repair-card-bg);
-      }
-
-      .queue-card {
-        border-left: 4px solid #3b82f6;
-      }
-
-      .deck-item-card.is-due {
-        border-left: 4px solid #0d9488;
-      }
-
-      .deck-item-main {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 0.45rem;
-      }
-
-      .deck-item-header {
-        display: flex;
-        align-items: center;
-        gap: 0.55rem;
-        flex-wrap: wrap;
-      }
-
-      .passage-ref {
-        margin: 0;
-        font-size: 1.05rem;
-        font-weight: 700;
-        color: var(--text-primary);
-      }
-
-      .verse-count-pill {
-        font-size: 0.74rem;
+      .rm-fab-add {
+        background: var(--rm-fab-add-bg);
+        color: var(--rm-fab-add-text);
+        font-size: 1.75rem;
         font-weight: 600;
-        padding: 0.15rem 0.55rem;
-        border-radius: 999px;
-        background: var(--bg-subtle);
-        color: var(--text-secondary);
-        border: 1px solid var(--border-color);
-      }
-
-      .stitch-progress-pill {
-        font-size: 0.73rem;
-        font-weight: 700;
-        padding: 0.15rem 0.58rem;
-        border-radius: 999px;
-        background: var(--stitch-pill-bg);
-        color: var(--stitch-pill-text);
-        border: 1px solid var(--stitch-pill-border);
-      }
-
-      .repair-card-badge {
-        font-size: 0.72rem;
-        font-weight: 800;
-        padding: 0.18rem 0.6rem;
-        border-radius: 999px;
-        background: var(--repair-badge-bg);
-        color: var(--repair-badge-text);
-        border: 1px solid var(--repair-badge-border);
-      }
-
-      .repair-heal-pill {
-        font-size: 0.72rem;
-        font-weight: 700;
-        padding: 0.16rem 0.55rem;
-        border-radius: 999px;
-        background: var(--heal-pill-bg);
-        color: var(--heal-pill-text);
-        border: 1px solid var(--heal-pill-border);
-      }
-
-      .state-badge {
-        font-size: 0.7rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        padding: 0.16rem 0.55rem;
-        border-radius: 0.35rem;
-      }
-
-      .badge-queued,
-      .badge-new {
-        background: var(--badge-queue-bg);
-        color: var(--badge-queue-text);
-      }
-
-      .badge-learning {
-        background: var(--badge-learning-bg);
-        color: var(--badge-learning-text);
-      }
-
-      .badge-review {
-        background: var(--badge-active-bg);
-        color: var(--badge-active-text);
-      }
-
-      .due-indicator {
-        font-size: 0.72rem;
-        font-weight: 700;
-        color: var(--badge-due-text);
-        background: var(--badge-due-bg);
-        padding: 0.14rem 0.5rem;
-        border-radius: 999px;
-      }
-
-      .scheduled-indicator {
-        font-size: 0.72rem;
-        font-weight: 600;
-        color: var(--text-muted);
-        background: var(--bg-subtle);
-        padding: 0.14rem 0.5rem;
-        border-radius: 999px;
-      }
-
-      .first-verse-snippet {
-        margin: 0;
-        font-size: 0.9rem;
-        color: var(--text-secondary);
-        line-height: 1.48;
-      }
-
-      .verse-num {
-        font-weight: 700;
-        color: var(--verse-num-color);
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.8rem;
-        margin-right: 0.25rem;
-      }
-
-      .more-verses-hint {
-        font-size: 0.8rem;
-        color: var(--text-muted);
-        font-style: italic;
-        margin-left: 0.3rem;
-      }
-
-      .srs-meta-row {
-        display: flex;
-        align-items: center;
-        gap: 0.85rem;
-        flex-wrap: wrap;
-        margin-top: 0.1rem;
-      }
-
-      .meta-chip {
-        font-size: 0.76rem;
-        color: var(--text-muted);
-      }
-
-      .meta-chip strong {
-        color: var(--text-primary);
-      }
-
-      .deck-item-actions {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        flex-shrink: 0;
-        flex-wrap: wrap;
-      }
-
-      .start-memorize-btn {
-        padding: 0.56rem 0.95rem;
-        border-radius: 0.6rem;
-        border: 1px solid var(--start-btn-border);
-        background: var(--start-btn-bg);
-        color: var(--start-btn-text);
-        font-size: 0.81rem;
-        font-weight: 700;
-        cursor: pointer;
-        transition: all 0.15s ease;
-        white-space: nowrap;
-      }
-
-      .start-memorize-btn:hover {
-        background: var(--start-btn-hover);
-      }
-
-      .study-card-btn {
-        padding: 0.58rem 1rem;
-        border-radius: 0.6rem;
-        border: 1px solid #0d9488;
-        background: #0d9488;
-        color: #ffffff;
-        font-size: 0.83rem;
-        font-weight: 600;
-        cursor: pointer;
-        transition: background 0.15s ease;
-        white-space: nowrap;
-      }
-
-      .study-card-btn:hover {
-        background: #0f766e;
-      }
-
-      .subtle-study-btn {
-        background: var(--bg-subtle);
-        color: var(--text-primary);
-        border-color: var(--border-color);
-      }
-
-      .subtle-study-btn:hover {
-        border-color: var(--border-hover);
-      }
-
-      .phase-action-btn {
-        padding: 0.54rem 0.82rem;
-        border-radius: 0.55rem;
-        font-size: 0.79rem;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.15s ease;
-        white-space: nowrap;
-      }
-
-      .mark-memorized-btn {
-        background: var(--mark-mem-bg);
-        border: 1px solid var(--mark-mem-border);
-        color: var(--mark-mem-text);
-      }
-
-      .mark-memorized-btn:hover {
-        background: var(--mark-mem-hover);
-      }
-
-      .move-saved-btn {
-        background: var(--bg-subtle);
-        border: 1px solid var(--border-color);
-        color: var(--text-secondary);
-      }
-
-      .move-saved-btn:hover {
-        border-color: var(--border-hover);
-        color: var(--text-primary);
-      }
-
-      .delete-card-btn {
-        padding: 0.55rem 0.7rem;
-        border-radius: 0.55rem;
-        border: 1px solid var(--border-color);
-        background: var(--bg-subtle);
-        color: var(--text-muted);
-        font-size: 0.85rem;
-        cursor: pointer;
-        transition: all 0.15s ease;
-      }
-
-      .delete-card-btn:hover {
-        background: rgba(239, 68, 68, 0.14);
-        border-color: #f87171;
-        color: #dc2626;
-      }
-
-      .empty-deck-box {
-        text-align: center;
-        background: var(--bg-surface);
-        border: 1px dashed var(--border-color);
-        border-radius: 0.9rem;
-        padding: 2.2rem 1.5rem;
-        color: var(--text-secondary);
-      }
-
-      .compact-empty {
-        padding: 1.25rem 1.25rem;
-      }
-
-      .empty-deck-box h4 {
-        margin: 0 0 0.4rem;
-        font-size: 1.08rem;
-        color: var(--text-primary);
-      }
-
-      .empty-deck-box p {
-        margin: 0;
-        font-size: 0.86rem;
-      }
-
-      .empty-actions {
-        margin-top: 1rem;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.65rem;
-        flex-wrap: wrap;
-      }
-
-      @media (max-width: 680px) {
-        .deck-item-card {
-          flex-direction: column;
-          align-items: stretch;
-        }
-
-        .deck-item-actions {
-          justify-content: flex-end;
-        }
+        line-height: 1;
       }
     `,
   ],
@@ -1693,23 +913,59 @@ export class DeckDashboardComponent {
   @Output() activeTabChange = new EventEmitter<DashboardTab>();
 
   @Output() startDueSession = new EventEmitter<void>();
+  @Output() studySingleItem = new EventEmitter<DeckItem>();
   @Output() practiceSingleItem = new EventEmitter<DeckItem>();
   @Output() startMemorizeFlow = new EventEmitter<DeckItem>();
+  @Output() editItem = new EventEmitter<DeckItem>();
+  @Output() editPassage = new EventEmitter<Passage>();
+  @Output() openAddModal = new EventEmitter<void>();
   @Output() openAddPassage = new EventEmitter<void>();
   @Output() openProtoSync = new EventEmitter<void>();
 
   /**
-   * Passages and temporary repair cards the user is actively working on right now
-   * (between "Saved / Not Known Yet" and "Fully Memorized / Review").
+   * NEW tab: Unstarted passages (state === CARD_STATE_NEW && repetitions === 0 and not a repair card).
    */
-  readonly currentlyMemorizingItems = computed<DeckItem[]>(() => {
+  readonly newTabItems = computed<DeckItem[]>(() => {
     return this.storageService
       .deckItems()
       .filter(
         (item) =>
-          item.card.state === CardState.CARD_STATE_LEARNING ||
-          item.card.state === CardState.CARD_STATE_RELEARNING
+          item.card.state === CardState.CARD_STATE_NEW &&
+          (item.card.repetitions ?? 0) === 0 &&
+          !item.card.isRepairCard &&
+          !item.card.isStitchedPassageCard
       );
+  });
+
+  /**
+   * DUE tab: All cards currently due (repair cards, stitched cards, partially-memorized passages due today, and full passages due today).
+   */
+  readonly dueTabItems = computed<DeckItem[]>(() => {
+    return this.storageService.dueDeckItems();
+  });
+
+  /**
+   * KNOWN tab: All started/memorized cards scheduled for a future review date (!isDue).
+   */
+  readonly knownTabItems = computed<DeckItem[]>(() => {
+    return this.storageService
+      .activeDeckItems()
+      .filter((item) => !item.isDue)
+      .sort((a, b) => {
+        const dueA = new Date(a.card.dueAt).getTime() || 0;
+        const dueB = new Date(b.card.dueAt).getTime() || 0;
+        return dueA - dueB;
+      });
+  });
+
+  readonly currentTabItems = computed<DeckItem[]>(() => {
+    if (this.activeTab === 'due') {
+      return this.dueTabItems();
+    }
+    if (this.activeTab === 'active') {
+      return this.knownTabItems();
+    }
+    return this.newTabItems();
   });
 
   selectTab(tab: DashboardTab): void {
@@ -1717,8 +973,168 @@ export class DeckDashboardComponent {
     this.activeTabChange.emit(tab);
   }
 
-  onOpenFlashcard(item: DeckItem): void {
-    this.startMemorizeFlow.emit(item);
+  onRowClick(item: DeckItem): void {
+    if (this.studySingleItem.observed) {
+      this.studySingleItem.emit(item);
+      return;
+    }
+    if (this.startMemorizeFlow.observed) {
+      this.startMemorizeFlow.emit(item);
+      return;
+    }
+    this.practiceSingleItem.emit(item);
+  }
+
+  onEditClick(item: DeckItem, event?: Event): void {
+    event?.stopPropagation();
+    this.editItem.emit(item);
+    this.editPassage.emit(item.passage);
+  }
+
+  onPlayFabClick(): void {
+    if (this.activeTab === 'due' && this.dueTabItems().length > 0) {
+      this.startDueSession.emit();
+      return;
+    }
+    const list = this.currentTabItems();
+    if (list.length > 0) {
+      if (this.startDueSession.observed && this.dueTabItems().length > 0) {
+        this.startDueSession.emit();
+      } else {
+        this.onRowClick(list[0]);
+      }
+    }
+  }
+
+  onAddFabClick(): void {
+    if (this.openAddModal.observed) {
+      this.openAddModal.emit();
+      return;
+    }
+    this.openAddPassage.emit();
+  }
+
+  isPartiallyMemorized(item: DeckItem): boolean {
+    if (
+      item.card.isRepairCard ||
+      item.card.isStitchedPassageCard ||
+      item.card.state === CardState.CARD_STATE_NEW
+    ) {
+      return false;
+    }
+    const total = item.passage.verses.length;
+    const step = item.card.learningStep || 1;
+    return total > 1 && step >= 1 && step < total;
+  }
+
+  getStitchedChunkCount(item: DeckItem): number {
+    return Math.max(2, item.card.stitchedPassageIds?.length || 2);
+  }
+
+  getRecitationLabel(item: DeckItem): string {
+    return getEstimatedRecitationLabel(item.passage.verses);
+  }
+
+  getCardLevelNumber(item: DeckItem): number {
+    const reps = item.card.repetitions || 0;
+    if (reps > 0) {
+      return reps;
+    }
+    if (item.card.intervalDays >= 7) {
+      return 3;
+    }
+    if (item.card.intervalDays >= 2) {
+      return 2;
+    }
+    return 1;
+  }
+
+  getLevelSquareClass(item: DeckItem): string {
+    const lvl = this.getCardLevelNumber(item);
+    if (lvl <= 1) {
+      return 'badge-level-1';
+    }
+    if (lvl === 2) {
+      return 'badge-level-2';
+    }
+    if (lvl === 3) {
+      return 'badge-level-3';
+    }
+    return 'badge-level-high';
+  }
+
+  /**
+   * Returns `passage.label` if set (e.g. "the one who offers txgvg" in r2.png),
+   * falling back to the opening words preview when `passage.label` is empty.
+   */
+  getRowCueText(item: DeckItem): string {
+    const customLabel = item.passage.label?.trim();
+    if (customLabel) {
+      return customLabel;
+    }
+    return this.getOpeningWords(item);
+  }
+
+  getOpeningWords(item: DeckItem): string {
+    const verse = this.getSnippetVerse(item);
+    if (!verse || !verse.text) {
+      return '';
+    }
+    const clean = verse.text.replace(/^["'“‘(\s]+/, '').trim();
+    const words = clean.split(/\s+/);
+    if (words.length <= 6) {
+      return clean;
+    }
+    return `${words.slice(0, 6).join(' ')}...`;
+  }
+
+  getRepairTargetLabel(item: DeckItem): string {
+    const vNum = item.card.repairVerseNumber ?? 1;
+    const multiChap = isMultiChapterPassage(item.passage.verses);
+    if (multiChap && item.card.repairChapterNumber) {
+      return `Repair ${item.card.repairChapterNumber}:${vNum}`;
+    }
+    const matched = item.passage.verses.find((v) => v.verseNumber === vNum);
+    if (matched) {
+      return `Repair ${formatVerseBadge(matched, multiChap)}`;
+    }
+    return `Repair v. ${vNum}`;
+  }
+
+  getRightTopTag(item: DeckItem): string {
+    if (item.card.isRepairCard) {
+      return this.getRepairTargetLabel(item);
+    }
+    if (item.card.isStitchedPassageCard) {
+      return 'Stitched';
+    }
+    if (this.isPartiallyMemorized(item)) {
+      const step = item.card.learningStep || 1;
+      return `v. 1–${step}`;
+    }
+    return 'ESV';
+  }
+
+  getRelativeDueLabel(item: DeckItem): string {
+    if (item.card.state === CardState.CARD_STATE_NEW && !item.card.isRepairCard) {
+      return 'new';
+    }
+    if (item.isDue) {
+      return 'due';
+    }
+    const dueMs = new Date(item.card.dueAt).getTime();
+    if (isNaN(dueMs)) {
+      return this.srsService.formatIntervalDays(item.card.intervalDays);
+    }
+    const diffDays = Math.max(1, Math.round((dueMs - Date.now()) / (1000 * 60 * 60 * 24)));
+    if (diffDays === 1) {
+      return 'tomorrow';
+    }
+    if (diffDays < 30) {
+      return `in ${diffDays} days`;
+    }
+    const months = Math.round(diffDays / 30);
+    return months === 1 ? 'in 1 month' : `in ${months} months`;
   }
 
   getSnippetVerse(item: DeckItem): Verse | null {
@@ -1727,7 +1143,9 @@ export class DeckDashboardComponent {
     }
     if (item.card.isRepairCard && item.card.repairVerseNumber) {
       const target = item.passage.verses.find(
-        (v) => v.verseNumber === item.card.repairVerseNumber
+        (v) =>
+          v.verseNumber === item.card.repairVerseNumber &&
+          (!item.card.repairChapterNumber || v.chapterNumber === item.card.repairChapterNumber)
       );
       if (target) {
         return target;
@@ -1736,102 +1154,38 @@ export class DeckDashboardComponent {
     return item.passage.verses[0];
   }
 
-  async onOpenDataFile(): Promise<void> {
-    await this.storageService.selectExistingDataFile();
-  }
-
-  async onCreateDataFile(): Promise<void> {
-    await this.storageService.createNewDataFile();
-  }
-
-  async onReconnectDataFile(): Promise<void> {
-    await this.storageService.reconnectSavedFileHandle();
-  }
-
-  onDisconnectDataFile(): void {
-    this.storageService.disconnectDataFile();
-  }
-
-  formatSavedTime(iso: string | null): string {
-    if (!iso) {
-      return 'just now';
-    }
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) {
-      return 'just now';
-    }
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  }
-
-  addToCurrentlyMemorizing(item: DeckItem, event?: Event): void {
+  moveQueueItem(index: number, direction: -1 | 1, event?: Event): void {
     event?.stopPropagation();
-    this.storageService.startMemorizingPassage(item.card.id);
-  }
-
-  moveBackToSaved(item: DeckItem, event?: Event): void {
-    event?.stopPropagation();
-    const isoNow = new Date().toISOString();
-    this.storageService.flashcards.update((prev) =>
-      prev.map((c) =>
-        c.id === item.card.id
-          ? {
-              ...c,
-              state: CardState.CARD_STATE_NEW,
-              intervalDays: 0,
-              learningStep: 0,
-              updatedAt: isoNow,
-            }
-          : c
-      )
-    );
+    const list = this.newTabItems();
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= list.length) {
+      return;
+    }
+    const itemA = list[index];
+    const itemB = list[targetIndex];
+    this.storageService.passages.update((prev) => {
+      const copy = [...prev];
+      const idxA = copy.findIndex((p) => p.id === itemA.passage.id);
+      const idxB = copy.findIndex((p) => p.id === itemB.passage.id);
+      if (idxA !== -1 && idxB !== -1) {
+        const temp = copy[idxA];
+        copy[idxA] = copy[idxB];
+        copy[idxB] = temp;
+      }
+      return copy;
+    });
+    this.storageService.flashcards.update((prev) => {
+      const copy = [...prev];
+      const idxA = copy.findIndex((c) => c.id === itemA.card.id);
+      const idxB = copy.findIndex((c) => c.id === itemB.card.id);
+      if (idxA !== -1 && idxB !== -1) {
+        const temp = copy[idxA];
+        copy[idxA] = copy[idxB];
+        copy[idxB] = temp;
+      }
+      return copy;
+    });
     this.storageService.importProtoJson(this.storageService.exportProtoJson(false), false);
-  }
-
-  markAsMemorized(item: DeckItem, event?: Event): void {
-    event?.stopPropagation();
-    this.storageService.recordReview(item.card.id, ReviewRating.REVIEW_RATING_EASY);
-  }
-
-  getStitchedProgressLabel(item: DeckItem): string {
-    const total = Math.max(1, item.passage.verses.length);
-    const stitched = Math.min(total, Math.max(1, item.card.learningStep || 1));
-    return `${stitched} of ${total} ${total === 1 ? 'verse' : 'verses'}`;
-  }
-
-  getStateLabel(state: CardState): string {
-    switch (state) {
-      case CardState.CARD_STATE_NEW:
-        return 'SAVED';
-      case CardState.CARD_STATE_LEARNING:
-        return 'MEMORIZING';
-      case CardState.CARD_STATE_RELEARNING:
-        return 'RELEARNING';
-      case CardState.CARD_STATE_REVIEW:
-        return 'MEMORIZED';
-      default:
-        return 'SAVED';
-    }
-  }
-
-  getBadgeClass(state: CardState): string {
-    switch (state) {
-      case CardState.CARD_STATE_NEW:
-        return 'badge-new';
-      case CardState.CARD_STATE_LEARNING:
-      case CardState.CARD_STATE_RELEARNING:
-        return 'badge-learning';
-      case CardState.CARD_STATE_REVIEW:
-        return 'badge-review';
-      default:
-        return 'badge-new';
-    }
-  }
-
-  formatCardInterval(item: DeckItem): string {
-    if (item.card.state === CardState.CARD_STATE_NEW) {
-      return 'Saved';
-    }
-    return this.srsService.formatIntervalDays(item.card.intervalDays);
   }
 
   deleteItem(item: DeckItem, event?: Event): void {
@@ -1839,13 +1193,11 @@ export class DeckDashboardComponent {
     const svc = this.storageService as unknown as {
       deleteCard?: (cardId: string) => void;
     };
-    if (item.card.isRepairCard && typeof svc.deleteCard === 'function') {
+    if (
+      (item.card.isRepairCard || item.card.isStitchedPassageCard) &&
+      typeof svc.deleteCard === 'function'
+    ) {
       svc.deleteCard(item.card.id);
-      return;
-    }
-    if (item.card.isRepairCard) {
-      this.storageService.flashcards.update((prev) => prev.filter((c) => c.id !== item.card.id));
-      this.storageService.importProtoJson(this.storageService.exportProtoJson(false), false);
       return;
     }
     this.storageService.deletePassage(item.passage.id);

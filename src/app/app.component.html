@@ -1,85 +1,246 @@
-<div class="app-shell" [class.dark-theme]="isDarkMode()" [class.light-theme]="!isDarkMode()">
-  <header class="app-topbar" data-testid="app-topbar">
-    <div class="brand-group" (click)="openDashboardTab('queue')" role="button" tabindex="0">
-      <div class="brand-logo" aria-hidden="true">✦</div>
-      <div>
-        <h1 class="brand-title">Selah Memory</h1>
-        <p class="brand-subtitle">Voice-Recitation &amp; First-Letter Scripture SRS</p>
+<div
+  class="app-shell"
+  [class.dark-theme]="isDarkMode()"
+  [class.light-theme]="!isDarkMode()"
+  [class.study-fullscreen]="activeView() !== 'dashboard'"
+  [style.--selah-text-scale]="textScale()"
+>
+  <!-- Single-Row 52px Remember-Me Top Bar (Only on Dashboard; hidden during Study) -->
+  @if (activeView() === 'dashboard') {
+    <header class="app-topbar" data-testid="app-topbar">
+      <div class="topbar-left">
+        <button
+          type="button"
+          id="btn-open-drawer"
+          class="icon-btn hamburger-btn"
+          data-testid="btn-open-drawer"
+          (click)="toggleDrawer()"
+          aria-label="Open navigation menu"
+        >
+          ☰
+        </button>
+
+        <div
+          class="brand-group"
+          (click)="openDashboardTab('queue')"
+          role="button"
+          tabindex="0"
+        >
+          <span class="brand-title">Selah Memory</span>
+        </div>
+
+        <button
+          type="button"
+          class="file-dot-pill"
+          [class.connected]="!!storageService.activeFileName()"
+          [class.disconnected]="!storageService.activeFileName()"
+          (click)="openSyncModal()"
+          data-testid="topbar-memory-file-status"
+          [title]="storageService.activeFileName() ? 'Auto-saving to ' + storageService.activeFileName() : 'Select or create a Memory Data File (.proto.json)'"
+        >
+          <span class="file-dot" aria-hidden="true"></span>
+          <span class="file-dot-text">
+            {{ storageService.activeFileName() || 'Select File' }}
+          </span>
+        </button>
       </div>
+
+      <nav class="topbar-right" aria-label="Quick actions">
+        <button
+          type="button"
+          id="btn-open-add-passage"
+          class="icon-btn"
+          (click)="openAddModal()"
+          data-testid="nav-add-passage"
+          title="Add Passage"
+          aria-label="Add Passage"
+        >
+          <span data-testid="btn-open-add-passage">＋</span>
+        </button>
+
+        <button
+          type="button"
+          id="btn-open-proto-sync"
+          class="icon-btn"
+          (click)="openSyncModal()"
+          data-testid="nav-proto-sync"
+          title="Memory File & ProtoJSON Sync"
+          aria-label="Memory File & ProtoJSON Sync"
+        >
+          <span data-testid="btn-open-proto-sync">☁</span>
+        </button>
+
+        <button
+          type="button"
+          id="btn-toggle-theme"
+          class="icon-btn"
+          (click)="toggleTheme()"
+          data-testid="btn-toggle-theme"
+          [attr.aria-label]="isDarkMode() ? 'Switch to light mode' : 'Switch to dark mode'"
+          [title]="isDarkMode() ? 'Switch to light mode' : 'Switch to dark mode'"
+        >
+          {{ isDarkMode() ? '☀' : '☾' }}
+        </button>
+      </nav>
+    </header>
+  }
+
+  <!-- Remember Me Style Slide-Out Navigation Drawer (r1.png) -->
+  @if (isDrawerOpen()) {
+    <div
+      class="drawer-backdrop"
+      data-testid="drawer-backdrop"
+      (click)="closeDrawer()"
+    >
+      <aside
+        class="nav-drawer"
+        data-testid="nav-drawer"
+        (click)="$event.stopPropagation()"
+        aria-label="Main navigation drawer"
+      >
+        <div class="drawer-hero">
+          <div class="drawer-hero-top">
+            <div class="drawer-brand-badge">✦</div>
+            <button
+              type="button"
+              class="drawer-close-btn"
+              (click)="closeDrawer()"
+              aria-label="Close drawer"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div class="drawer-hero-bottom">
+            <div>
+              <h2 class="drawer-title">Selah Memory</h2>
+              <p class="drawer-subtitle">
+                @if (storageService.activeFileName()) {
+                  🟢 {{ storageService.activeFileName() }} (Auto-save)
+                } @else {
+                  💾 Local Storage · No file linked
+                }
+              </p>
+            </div>
+            <span class="drawer-cloud-icon" aria-hidden="true">☁</span>
+          </div>
+
+          <div class="drawer-file-actions">
+            <button
+              type="button"
+              class="drawer-file-btn"
+              (click)="onDrawerOpenFile()"
+              data-testid="drawer-btn-open-file"
+            >
+              📂 Open File
+            </button>
+            <button
+              type="button"
+              class="drawer-file-btn"
+              (click)="onDrawerCreateFile()"
+              data-testid="drawer-btn-create-file"
+            >
+              ✨ New File
+            </button>
+          </div>
+        </div>
+
+        <nav class="drawer-menu">
+          <button
+            type="button"
+            class="drawer-item"
+            [class.active]="activeView() === 'dashboard' && dashboardTab() === 'queue'"
+            (click)="openDashboardTab('queue')"
+            data-testid="nav-queue"
+          >
+            <span class="drawer-icon" aria-hidden="true">🏠</span>
+            <span class="drawer-label">Verses · New / Memorizing</span>
+            <span class="drawer-count">{{ storageService.stats().learningCount }}</span>
+          </button>
+
+          <button
+            type="button"
+            class="drawer-item"
+            [class.active]="activeView() === 'dashboard' && dashboardTab() === 'due'"
+            (click)="openDashboardTab('due')"
+            data-testid="nav-due"
+          >
+            <span class="drawer-icon" aria-hidden="true">📅</span>
+            <span class="drawer-label">Due for Review</span>
+            <span class="drawer-count">{{ storageService.dueDeckItems().length }}</span>
+          </button>
+
+          <button
+            type="button"
+            class="drawer-item"
+            [class.active]="activeView() === 'dashboard' && dashboardTab() === 'active'"
+            (click)="openDashboardTab('active')"
+            data-testid="nav-active"
+          >
+            <span class="drawer-icon" aria-hidden="true">✓</span>
+            <span class="drawer-label">Known / Memorized</span>
+            <span class="drawer-count">{{ storageService.stats().reviewCount }}</span>
+          </button>
+
+          <div class="drawer-divider"></div>
+
+          <button
+            type="button"
+            class="drawer-item"
+            (click)="openAddModal()"
+          >
+            <span class="drawer-icon" aria-hidden="true">➕</span>
+            <span class="drawer-label">Add Passage (Copy-Paste)</span>
+          </button>
+
+          <button
+            type="button"
+            class="drawer-item"
+            (click)="openSyncModal()"
+          >
+            <span class="drawer-icon" aria-hidden="true">🗂</span>
+            <span class="drawer-label">ProtoJSON Data Inspector</span>
+          </button>
+
+          <button
+            type="button"
+            class="drawer-item"
+            (click)="toggleTheme()"
+          >
+            <span class="drawer-icon" aria-hidden="true">{{ isDarkMode() ? '☀' : '☾' }}</span>
+            <span class="drawer-label">
+              {{ isDarkMode() ? 'Switch to Light Mode' : 'Switch to Dark Mode' }}
+            </span>
+          </button>
+
+          <div class="drawer-slider-row">
+            <div class="drawer-slider-header">
+              <span class="drawer-icon" aria-hidden="true">Aa</span>
+              <label for="slider-text-size" class="drawer-label">Text Size</label>
+              <span class="drawer-count">{{ (textScale() * 100) | number:'1.0-0' }}%</span>
+            </div>
+            <input
+              type="range"
+              id="slider-text-size"
+              class="drawer-range-input"
+              data-testid="slider-text-size"
+              min="0.8"
+              max="1.35"
+              step="0.05"
+              [value]="textScale()"
+              (input)="onTextScaleInput($event)"
+            />
+          </div>
+        </nav>
+
+        <footer class="drawer-footer">
+          Selah Memory 1.0 · Remember Me + Anki SRS
+        </footer>
+      </aside>
     </div>
+  }
 
-    <nav class="topbar-actions">
-      <button
-        type="button"
-        class="topbar-btn memory-file-pill"
-        [class.file-disconnected]="!storageService.activeFileName()"
-        [class.file-connected]="!!storageService.activeFileName()"
-        (click)="openSyncModal()"
-        data-testid="topbar-memory-file-status"
-        title="Click to select, create, or manage your active Memory Data File (.proto.json)"
-      >
-        @if (!storageService.activeFileName()) {
-          <span>💾 Select Memory File...</span>
-        } @else {
-          <span>🟢 {{ storageService.activeFileName() }} (Auto-save)</span>
-        }
-      </button>
-      <button
-        type="button"
-        class="topbar-btn"
-        [class.active]="activeView() === 'dashboard' && dashboardTab() === 'queue'"
-        (click)="openDashboardTab('queue')"
-        data-testid="nav-queue"
-      >
-        Memorizing ({{ storageService.stats().learningCount }})
-      </button>
-      <button
-        type="button"
-        class="topbar-btn"
-        [class.active]="activeView() === 'dashboard' && dashboardTab() === 'due'"
-        (click)="openDashboardTab('due')"
-        data-testid="nav-due"
-      >
-        Due ({{ storageService.dueDeckItems().length }})
-      </button>
-      <button
-        type="button"
-        class="topbar-btn"
-        [class.active]="activeView() === 'dashboard' && dashboardTab() === 'active'"
-        (click)="openDashboardTab('active')"
-        data-testid="nav-active"
-      >
-        Memorized ({{ storageService.stats().reviewCount }})
-      </button>
-      <button
-        type="button"
-        class="topbar-btn accent"
-        (click)="openAddModal()"
-        data-testid="nav-add-passage"
-      >
-        + Copy-Paste Text
-      </button>
-      <button
-        type="button"
-        class="topbar-btn subtle"
-        (click)="openSyncModal()"
-        data-testid="nav-proto-sync"
-      >
-        ProtoJSON
-      </button>
-      <button
-        type="button"
-        class="topbar-btn theme-toggle-btn"
-        (click)="toggleTheme()"
-        data-testid="btn-toggle-theme"
-        [attr.aria-label]="isDarkMode() ? 'Switch to light mode' : 'Switch to dark mode'"
-      >
-        {{ isDarkMode() ? '☀️ Light' : '🌙 Dark' }}
-      </button>
-    </nav>
-  </header>
-
-  <main class="app-main">
+  <main class="app-main" [class.study-main]="activeView() !== 'dashboard'">
     @if (repairHealedBanner(); as bannerMsg) {
       <div class="healed-banner" data-testid="repair-healed-banner">
         <span>{{ bannerMsg }}</span>
@@ -96,6 +257,7 @@
         (startMemorizeFlow)="onStartMemorizeFlow($event)"
         (openAddPassage)="openAddModal()"
         (openProtoSync)="openSyncModal()"
+        (editItem)="openEditPassageModal($event)"
       />
     } @else if (activeView() === 'first-letter-page') {
       <app-first-letter-study-page
@@ -113,6 +275,8 @@
           [stitchedVerseCount]="currentStitchedVerseCount()"
           (stitchedVerseCountChange)="onStitchedVerseCountChange($event)"
           (rated)="onCardRated($event)"
+          (skipCard)="onSkipCard()"
+          (editPassage)="openEditPassageModal()"
           (backToDeck)="returnToDashboard()"
           (openStudyPage)="openFirstLetterStudyPage($event)"
           (openRepairCard)="practiceSingleItem($event)"
@@ -131,7 +295,8 @@
 
   @if (showAddPassageModal()) {
     <app-add-passage-modal
-      (closed)="showAddPassageModal.set(false)"
+      [editingPassage]="editingPassage()"
+      (closed)="closeAddPassageModal()"
       (passageAdded)="onPassageAdded($event)"
     />
   }

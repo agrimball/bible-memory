@@ -54,15 +54,12 @@ body {
 }
 
 .app-topbar {
-  padding-top: calc(0.9rem + env(safe-area-inset-top, 0px));
-  padding-left: calc(1.75rem + env(safe-area-inset-left, 0px));
-  padding-right: calc(1.75rem + env(safe-area-inset-right, 0px));
   user-select: none;
   -webkit-user-select: none;
 }
 
-.app-main {
-  padding-bottom: calc(3rem + env(safe-area-inset-bottom, 0px));
+.app-main:not(.study-main) {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 button,

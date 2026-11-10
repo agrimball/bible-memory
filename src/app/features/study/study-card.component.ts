@@ -1,18 +1,23 @@
 import {
   Component,
+  ElementRef,
   EventEmitter,
   Input,
   OnChanges,
   OnDestroy,
   Output,
   SimpleChanges,
+  ViewChild,
   computed,
   inject,
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import * as PbModule from '../../core/proto/bible_memory.pb';
 import {
   CardState,
+  Flashcard,
+  Passage,
   ReviewRating,
   Verse,
   formatVerseBadge,
@@ -24,6 +29,11 @@ import { SrsService } from '../../core/services/srs.service';
 import { VoiceRecorderService } from '../../core/services/voice-recorder.service';
 
 export type StitchPracticePhase = 'new-verse-only' | 'stitch-block' | 'full-passage';
+
+export interface VerseIndexRange {
+  startIdx: number;
+  endIdx: number;
+}
 
 @Component({
   selector: 'app-study-card',
@@ -37,23 +47,36 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   readonly srsService = inject(SrsService);
   readonly voiceService = inject(VoiceRecorderService);
 
+  @ViewChild('backScrollContainer') backScrollRef?: ElementRef<HTMLElement>;
+
   @Input() item: DeckItem | null = null;
   @Input() queuePosition = 1;
   @Input() queueTotal = 1;
   @Input() stitchedVerseCount = 0;
 
   @Output() rated = new EventEmitter<{ cardId: string; rating: ReviewRating }>();
+  @Output() skipCard = new EventEmitter<void>();
+  @Output() editPassage = new EventEmitter<void>();
   @Output() backToDeck = new EventEmitter<void>();
   @Output() openStudyPage = new EventEmitter<DeckItem>();
   @Output() openRepairCard = new EventEmitter<DeckItem>();
   @Output() stitchedVerseCountChange = new EventEmitter<number>();
 
   readonly isFlipped = signal<boolean>(false);
+  readonly showHint = signal<boolean>(false);
   readonly localTargetVerseCount = signal<number>(1);
   readonly stitchPhase = signal<StitchPracticePhase>('new-verse-only');
   readonly stitchToastMessage = signal<string | null>(null);
   readonly repairSpawnedMessage = signal<string | null>(null);
   readonly spawnedRepairItem = signal<DeckItem | null>(null);
+
+  /** Start-to-End Repair Range Highlighting & Resume Recitation state */
+  readonly draftRepairRange = signal<VerseIndexRange | null>(null);
+  readonly queuedRepairs = signal<VerseIndexRange[]>([]);
+  readonly resumeFromVerseIndex = signal<number | null>(null);
+
+  /** Saved scroll position of the Back card container across flips */
+  private savedBackScrollTop = 0;
 
   readonly CardState = CardState;
   readonly ReviewRating = ReviewRating;
@@ -63,6 +86,51 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   readonly isMultiChapter = computed<boolean>(() => {
     const verses = this.currentItemSignal()?.passage.verses ?? [];
     return isMultiChapterPassage(verses);
+  });
+
+  readonly passageTitleWithLabel = computed<string>(() => {
+    const p = this.currentItemSignal()?.passage as (Passage & { label?: string }) | undefined;
+    if (!p) {
+      return '';
+    }
+    const cleanLabel = p.label?.trim();
+    return cleanLabel ? `${p.reference} (${cleanLabel})` : p.reference;
+  });
+
+  readonly recitationTime = computed<{ seconds: number; label: string }>(() => {
+    const verses = this.activeVerses();
+    const pbHelper = (
+      PbModule as unknown as {
+        estimateRecitationTime?: (v: Verse[]) => { seconds: number; label: string };
+      }
+    ).estimateRecitationTime;
+    if (typeof pbHelper === 'function') {
+      return pbHelper(verses);
+    }
+    const wordCount = verses.reduce(
+      (sum, v) => sum + (v.text.trim() ? v.text.trim().split(/\s+/).length : 0),
+      0
+    );
+    const seconds = Math.max(5, Math.round((wordCount / 130) * 60));
+    const label =
+      seconds < 60
+        ? `~${Math.max(5, Math.round(seconds / 5) * 5)}s`
+        : `~${(seconds / 60).toFixed(1).replace(/\.0$/, '')} min`;
+    return { seconds, label };
+  });
+
+  readonly canSkipLongCard = computed<boolean>(() => {
+    const card = this.currentItemSignal()?.card as
+      | (Flashcard & { isStitchedPassageCard?: boolean })
+      | undefined;
+    if (!card) {
+      return false;
+    }
+    return (
+      Boolean(card.isStitchedPassageCard) ||
+      this.activeVerses().length > 6 ||
+      this.recitationTime().seconds >= 45
+    );
   });
 
   readonly isRepairCard = computed<boolean>(() => {
@@ -163,6 +231,10 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     return 1;
   });
 
+  readonly activeVerses = computed<Verse[]>(() => {
+    return this.currentItemSignal()?.passage.verses ?? [];
+  });
+
   /**
    * The single "New Verse for the Day" (the last verse in the current target block).
    */
@@ -221,21 +293,152 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   });
 
   /**
-   * The verse immediately preceding today's new verse.
+   * Compact scope badge shown in the 52px top bar (e.g. `v. 1–3 of 7` or `v. 4 (New)`).
    */
-  readonly previousContextVerse = computed<Verse | null>(() => {
-    const current = this.currentItemSignal();
-    if (!current || current.passage.verses.length <= 1) {
+  readonly topbarScopeLabel = computed<string>(() => {
+    if (this.isRepairCard()) {
+      return `🔧 ${this.repairTargetLabel()}`;
+    }
+    const total = this.totalVerses();
+    if (total <= 1) {
+      return '';
+    }
+    if (this.stitchPhase() === 'new-verse-only') {
+      return `${this.targetVerseLabel()} (${this.activeStitchedCount()}/${total})`;
+    }
+    if (this.stitchPhase() === 'stitch-block') {
+      return `${this.stitchedVerseRangeLabel()} of ${total}v`;
+    }
+    return `${total}v`;
+  });
+
+  /**
+   * Next verse label for the `+1v` expand button in the topbar.
+   */
+  readonly nextExpandVerseLabel = computed<string>(() => {
+    const verses = this.activeVerses();
+    const nextIdx = this.activeStitchedCount();
+    if (nextIdx >= 0 && nextIdx < verses.length) {
+      return this.getVerseBadge(verses[nextIdx]);
+    }
+    return '+1v';
+  });
+
+  /**
+   * Returns a preceding lead-in verse ONLY when recitation starts after the 1st verse:
+   * - When resuming mid-passage (`resumeFromVerseIndex() > 0`)
+   * - When practicing a repair card (`isRepairCard()`)
+   * - When in Step 1 (`new-verse-only`) for verse 2+ (`activeStitchedCount() > 1`)
+   * Returns `null` in `All` mode or `Stitch Block` mode (which both start at the 1st verse).
+   */
+  readonly leadInContextVerse = computed<Verse | null>(() => {
+    const verses = this.activeVerses();
+    if (verses.length === 0) {
       return null;
     }
-    const targetIdx = Math.max(
-      0,
-      Math.min(this.activeStitchedCount() - 1, current.passage.verses.length - 1)
-    );
-    if (targetIdx === 0) {
+    const resumeIdx = this.resumeFromVerseIndex();
+    if (resumeIdx !== null && resumeIdx > 0) {
+      return verses[resumeIdx - 1] ?? null;
+    }
+    if (this.isRepairCard()) {
+      return this.repairPrecedingVerse();
+    }
+    if (this.stitchPhase() === 'new-verse-only' && this.activeStitchedCount() > 1) {
+      return verses[this.activeStitchedCount() - 2] ?? null;
+    }
+    return null;
+  });
+
+  readonly previousContextVerse = this.leadInContextVerse;
+
+  /**
+   * Resume Recitation Computed Helpers (when `resumeFromVerseIndex() !== null`)
+   */
+  readonly resumeTargetVerse = computed<Verse | null>(() => {
+    const idx = this.resumeFromVerseIndex();
+    const verses = this.activeVerses();
+    if (idx === null || idx < 0 || idx >= verses.length) {
       return null;
     }
-    return current.passage.verses[targetIdx - 1] ?? null;
+    return verses[idx] ?? null;
+  });
+
+  readonly resumeLeadInVerse = computed<Verse | null>(() => {
+    const idx = this.resumeFromVerseIndex();
+    const verses = this.activeVerses();
+    if (idx === null || idx <= 0 || idx > verses.length) {
+      return null;
+    }
+    return verses[idx - 1] ?? null;
+  });
+
+  readonly resumeLeadInSnippet = computed<string>(() => {
+    const prev = this.resumeLeadInVerse();
+    if (!prev) {
+      return '';
+    }
+    const words = prev.text.trim().split(/\s+/);
+    if (words.length <= 7) {
+      return prev.text.trim();
+    }
+    return '…' + words.slice(-7).join(' ');
+  });
+
+  /**
+   * Draft & Queued Repair Range Helpers
+   */
+  readonly draftRangeLabel = computed<string>(() => {
+    const draft = this.draftRepairRange();
+    if (!draft) {
+      return '';
+    }
+    return this.formatIndexRange(draft);
+  });
+
+  readonly draftStartVerseLabel = computed<string>(() => {
+    const draft = this.draftRepairRange();
+    const verses = this.activeVerses();
+    if (!draft || !verses[draft.startIdx]) {
+      return '';
+    }
+    return this.getVerseBadge(verses[draft.startIdx]);
+  });
+
+  readonly hasMoreVersesAfterDraft = computed<boolean>(() => {
+    const draft = this.draftRepairRange();
+    const verses = this.activeVerses();
+    if (!draft || verses.length === 0) {
+      return false;
+    }
+    const maxLimit = Math.min(verses.length - 1, Math.max(0, this.activeStitchedCount() - 1));
+    return draft.endIdx < Math.max(maxLimit, verses.length - 1);
+  });
+
+  readonly nextVerseAfterDraftLabel = computed<string>(() => {
+    const draft = this.draftRepairRange();
+    const verses = this.activeVerses();
+    if (!draft) {
+      return '';
+    }
+    const nextVerse = verses[draft.endIdx + 1];
+    return nextVerse ? this.getVerseBadge(nextVerse) : '';
+  });
+
+  readonly allPendingRepairRanges = computed<VerseIndexRange[]>(() => {
+    const list = [...this.queuedRepairs()];
+    const draft = this.draftRepairRange();
+    if (draft) {
+      list.push(draft);
+    }
+    return list;
+  });
+
+  readonly pendingRepairsSummary = computed<string>(() => {
+    const ranges = this.allPendingRepairRanges();
+    if (ranges.length === 0) {
+      return '';
+    }
+    return ranges.map((r) => this.formatIndexRange(r)).join(', ');
   });
 
   readonly intervalPreviews = computed<Record<ReviewRating, string>>(() => {
@@ -272,9 +475,15 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
 
   private initializeForCurrentCard(): void {
     this.isFlipped.set(false);
+    this.showHint.set(false);
     this.stitchToastMessage.set(null);
     this.repairSpawnedMessage.set(null);
     this.spawnedRepairItem.set(null);
+    this.draftRepairRange.set(null);
+    this.queuedRepairs.set([]);
+    this.resumeFromVerseIndex.set(null);
+    this.savedBackScrollTop = 0;
+    this.resetBackScrollTop();
     this.voiceService.resetForNewCard();
 
     const total = this.item?.passage.verses.length ?? 0;
@@ -298,7 +507,45 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
           ? Math.min(savedStep, total)
           : 1;
     this.localTargetVerseCount.set(initialCount);
-    this.stitchPhase.set('new-verse-only');
+    if (initialCount >= total) {
+      this.stitchPhase.set('full-passage');
+    } else {
+      this.stitchPhase.set('new-verse-only');
+    }
+  }
+
+  onBackScroll(event: Event): void {
+    const el = event.target as HTMLElement | null;
+    if (el && this.isFlipped()) {
+      this.savedBackScrollTop = el.scrollTop;
+    }
+  }
+
+  private restoreBackScrollTop(): void {
+    const targetTop = this.savedBackScrollTop;
+    const el = this.backScrollRef?.nativeElement;
+    if (el) {
+      el.scrollTop = targetTop;
+    }
+    if (typeof requestAnimationFrame !== 'undefined') {
+      requestAnimationFrame(() => {
+        if (this.backScrollRef?.nativeElement) {
+          this.backScrollRef.nativeElement.scrollTop = targetTop;
+        }
+      });
+    }
+  }
+
+  private resetBackScrollTop(): void {
+    const el = this.backScrollRef?.nativeElement;
+    if (el) {
+      el.scrollTop = 0;
+    }
+  }
+
+  toggleHint(event?: Event): void {
+    event?.stopPropagation();
+    this.showHint.update((v) => !v);
   }
 
   getVerseBadge(verse: Verse | null | undefined): string {
@@ -306,6 +553,16 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
       return '';
     }
     return formatVerseBadge(verse, this.isMultiChapter());
+  }
+
+  getVerseInlineNumber(verse: Verse | null | undefined): string {
+    if (!verse) {
+      return '';
+    }
+    if (this.isMultiChapter() && verse.chapterNumber && verse.chapterNumber > 0) {
+      return `${verse.chapterNumber}:${verse.verseNumber}`;
+    }
+    return `${verse.verseNumber}`;
   }
 
   getVerseVerboseLabel(verse: Verse | null | undefined): string {
@@ -339,6 +596,124 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     );
   }
 
+  formatIndexRange(range: VerseIndexRange): string {
+    const verses = this.activeVerses();
+    const startV = verses[range.startIdx];
+    const endV = verses[range.endIdx];
+    if (!startV || !endV) {
+      return '';
+    }
+    return formatVerseRange(startV, endV, this.isMultiChapter());
+  }
+
+  isVerseInDraftRepair(idx: number): boolean {
+    const draft = this.draftRepairRange();
+    if (!draft) {
+      return false;
+    }
+    return idx >= draft.startIdx && idx <= draft.endIdx;
+  }
+
+  isVerseInQueuedRepair(idx: number): boolean {
+    return this.queuedRepairs().some((r) => idx >= r.startIdx && idx <= r.endIdx);
+  }
+
+  /**
+   * Tap a verse on the Back of the card to start/extend/cancel a repair highlight range:
+   * - Tapping inside the current draft range cancels it.
+   * - Tapping inside a queued repair range removes that queued range.
+   * - Tapping an unhighlighted verse when no draft is active starts `[idx..idx]`.
+   * - Tapping another verse while a draft `[s..e]` is active extends it to `[min(s,idx)..max(e,idx)]`.
+   */
+  onVerseTap(idx: number, event?: Event): void {
+    event?.stopPropagation();
+    if (!this.item || this.isRepairCard() || this.totalVerses() <= 1) {
+      return;
+    }
+
+    const currentDraft = this.draftRepairRange();
+    if (currentDraft && idx >= currentDraft.startIdx && idx <= currentDraft.endIdx) {
+      this.draftRepairRange.set(null);
+      this.repairSpawnedMessage.set(null);
+      return;
+    }
+
+    const existingQueuedIdx = this.queuedRepairs().findIndex(
+      (r) => idx >= r.startIdx && idx <= r.endIdx
+    );
+    if (existingQueuedIdx >= 0) {
+      this.queuedRepairs.update((list) => list.filter((_, i) => i !== existingQueuedIdx));
+      return;
+    }
+
+    if (!currentDraft) {
+      this.draftRepairRange.set({ startIdx: idx, endIdx: idx });
+    } else {
+      this.draftRepairRange.set({
+        startIdx: Math.min(currentDraft.startIdx, idx),
+        endIdx: Math.max(currentDraft.endIdx, idx),
+      });
+    }
+  }
+
+  cancelDraftRepair(event?: Event): void {
+    event?.stopPropagation();
+    this.draftRepairRange.set(null);
+  }
+
+  /**
+   * Queues the currently highlighted `[startIdx..endIdx]` repair range,
+   * sets `resumeFromVerseIndex` to `endIdx + 1`, clears the draft selection,
+   * and flips back to the Front (keeping Back scroll position!) so the user can continue reciting.
+   */
+  queueRepairAndResume(event?: Event): void {
+    event?.stopPropagation();
+    const draft = this.draftRepairRange();
+    if (!draft) {
+      return;
+    }
+    this.queuedRepairs.update((prev) => [...prev, draft]);
+    const verses = this.activeVerses();
+    const nextIdx = draft.endIdx + 1;
+    if (nextIdx < verses.length) {
+      this.resumeFromVerseIndex.set(nextIdx);
+    }
+    this.draftRepairRange.set(null);
+    this.flipToFront();
+  }
+
+  /**
+   * Truncates passage progress (`learningStep`) back to the verses before `draft.startIdx`
+   * ("Forgot From v. X Onward") and finishes/grades the card.
+   */
+  forgotFromHereOnward(event?: Event): void {
+    event?.stopPropagation();
+    if (!this.item) {
+      return;
+    }
+    const draft = this.draftRepairRange();
+    const startIdx = draft ? draft.startIdx : 0;
+    const newStep = Math.max(1, startIdx);
+
+    const svc = this.storageService as StorageService & {
+      truncatePassageProgress?: (passageId: string, step: number) => void;
+    };
+    if (typeof svc.truncatePassageProgress === 'function') {
+      svc.truncatePassageProgress(this.item.passage.id, newStep);
+    }
+    this.setTargetVerseCount(newStep);
+    this.draftRepairRange.set(null);
+    this.queuedRepairs.set([]);
+
+    this.rated.emit({
+      cardId: this.item.card.id,
+      rating: ReviewRating.REVIEW_RATING_HARD,
+    });
+  }
+
+  /**
+   * Backwards-compatible method to spawn a repair card for a specific verse directly.
+   */
   spawnRepairCardForVerse(verseOrNumber: Verse | number, chapterNumber?: number): void {
     if (!this.item) {
       return;
@@ -367,13 +742,66 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     }
   }
 
+  spawnAndPracticeDraftRepairNow(event?: Event): void {
+    event?.stopPropagation();
+    const committed = this.commitPendingRepairs();
+    const targetRepair = committed[0] ?? this.spawnedRepairItem();
+    if (targetRepair) {
+      this.voiceService.pausePlayback();
+      this.openRepairCard.emit(targetRepair);
+    }
+  }
+
   practiceSpawnedRepairNow(): void {
     const repair = this.spawnedRepairItem();
-    if (!repair) {
+    if (repair) {
+      this.voiceService.pausePlayback();
+      this.openRepairCard.emit(repair);
       return;
     }
-    this.voiceService.pausePlayback();
-    this.openRepairCard.emit(repair);
+    this.spawnAndPracticeDraftRepairNow();
+  }
+
+  private commitPendingRepairs(): DeckItem[] {
+    if (!this.item) {
+      return [];
+    }
+    const ranges = this.allPendingRepairRanges();
+    if (ranges.length === 0) {
+      return [];
+    }
+    const verses = this.activeVerses();
+    const created: DeckItem[] = [];
+
+    for (const range of ranges) {
+      for (let i = range.startIdx; i <= range.endIdx; i++) {
+        const v = verses[i];
+        if (!v) {
+          continue;
+        }
+        const item = this.storageService.createRepairCard(
+          this.item.passage.id,
+          v.verseNumber,
+          3,
+          v.chapterNumber
+        );
+        if (item) {
+          created.push(item);
+        }
+      }
+    }
+
+    if (created.length > 0) {
+      this.spawnedRepairItem.set(created[0]);
+    }
+    this.draftRepairRange.set(null);
+    this.queuedRepairs.set([]);
+    return created;
+  }
+
+  expandOneVerse(event?: Event): void {
+    event?.stopPropagation();
+    this.stitchNextVerse();
   }
 
   setStitchPhase(phase: StitchPracticePhase): void {
@@ -427,12 +855,30 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     }
   }
 
-  navigateToStudyPage(): void {
+  navigateToStudyPage(event?: Event): void {
+    event?.stopPropagation();
     if (!this.item) {
       return;
     }
     this.voiceService.pausePlayback();
     this.openStudyPage.emit(this.item);
+  }
+
+  onSkipCard(event?: Event): void {
+    event?.stopPropagation();
+    this.voiceService.pausePlayback();
+    this.skipCard.emit();
+  }
+
+  onEditPassage(event?: Event): void {
+    event?.stopPropagation();
+    this.voiceService.pausePlayback();
+    this.editPassage.emit();
+  }
+
+  async onMicButtonClick(event: Event): Promise<void> {
+    event.stopPropagation();
+    await this.toggleVoiceRecording();
   }
 
   async toggleVoiceRecording(): Promise<void> {
@@ -445,10 +891,15 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
 
   async flipToBack(): Promise<void> {
     this.isFlipped.set(true);
+    this.restoreBackScrollTop();
     await this.voiceService.stopAndPlayOnFlip();
   }
 
-  flipToFront(): void {
+  flipToFront(event?: Event): void {
+    event?.stopPropagation();
+    if (this.backScrollRef?.nativeElement) {
+      this.savedBackScrollTop = this.backScrollRef.nativeElement.scrollTop;
+    }
     this.voiceService.pausePlayback();
     this.isFlipped.set(false);
   }
@@ -458,6 +909,11 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
       return;
     }
     this.voiceService.pausePlayback();
+
+    // First commit any queued or highlighted repair ranges
+    if (!this.item.card.isRepairCard && this.allPendingRepairRanges().length > 0) {
+      this.commitPendingRepairs();
+    }
 
     // If this is a temporary Repair Card, emit directly so StorageService updates heal streak / retires when healed
     if (this.item.card.isRepairCard) {
@@ -478,9 +934,6 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     // Two-step daily stitching workflow:
     // Step 1: Practicing ONLY the new verse for the day ('new-verse-only').
     if (isMultiVerse && this.stitchPhase() === 'new-verse-only' && isGoodOrEasy) {
-      // If we are on the very 1st verse of the passage (currentTarget === 1),
-      // there are no prior verses to stitch with yet! Completing the 1st verse
-      // advances the saved step to 2 (the 2nd verse) and finishes the card review.
       if (currentTarget <= 1) {
         const nextCount = Math.min(total, 2);
         this.setTargetVerseCount(nextCount);
@@ -491,8 +944,6 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
         return;
       }
 
-      // For currentTarget >= 2: Step 1 is solid -> transition to Step 2 ('stitch-block')
-      // to practice verses[0..currentTarget-1] together!
       const updated = this.storageService.recordReview(this.item.card.id, rating);
       if (updated) {
         this.currentItemSignal.set(updated);
@@ -510,7 +961,6 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     }
 
     // Step 2: Practicing the stitched block ('stitch-block').
-    // When graded Good or Easy -> completes the stitching for this block and advances to next verse!
     if (isMultiVerse && this.stitchPhase() === 'stitch-block' && isGoodOrEasy) {
       if (currentTarget < total) {
         const nextCount = Math.min(total, currentTarget + 1);

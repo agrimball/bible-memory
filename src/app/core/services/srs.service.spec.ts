@@ -54,7 +54,56 @@ function runSrsServiceTests(): void {
   assertEqual(lapsed.updatedCard.lapses, 1, 'AGAIN increments lapses');
   assertTrue(lapsed.updatedCard.intervalDays < 0.01, 'AGAIN resets interval to <10m');
 
-  console.log('✓ srs.service.spec.ts: All SM-2 scheduling and interval assertions passed.');
+  // 7. Contiguous Stitched Passage Card & Seam Review Card generation + Custom Passage.label via StorageService
+  require('@angular/compiler');
+  const { createEnvironmentInjector, runInInjectionContext } = require('@angular/core') as typeof import('@angular/core');
+  const { PassageParserService } = require('./passage-parser.service') as typeof import('./passage-parser.service');
+  const { StorageService } = require('./storage.service') as typeof import('./storage.service');
+  const envInjector = createEnvironmentInjector([SrsService, PassageParserService, StorageService], null as never);
+  const storage = runInInjectionContext(envInjector, () => new StorageService());
+  storage.clearAllData();
+
+  const chunkA = storage.addPassage(
+    'Romans 8:1-2',
+    [
+      { chapterNumber: 8, verseNumber: 1, text: 'There is therefore now no condemnation for those who are in Christ Jesus.' },
+      { chapterNumber: 8, verseNumber: 2, text: 'For the law of the Spirit of life has set you free in Christ Jesus.' },
+    ],
+    'No Condemnation'
+  );
+  const chunkB = storage.addPassage(
+    'Romans 8:3-4',
+    [
+      { chapterNumber: 8, verseNumber: 3, text: 'For God has done what the law, weakened by the flesh, could not do.' },
+      { chapterNumber: 8, verseNumber: 4, text: 'in order that the righteous requirement of the law might be fulfilled in us.' },
+    ],
+    'Fulfilled in Us'
+  );
+  assertEqual(chunkA.passage.label, 'No Condemnation', 'addPassage sets custom Passage.label on chunk A');
+  assertEqual(chunkB.passage.label, 'Fulfilled in Us', 'addPassage sets custom Passage.label on chunk B');
+
+  // Advance both chunks to full verse step (2 of 2) so they are fully memorized contiguous passages
+  storage.updateStitchedVerseStep(chunkA.card.id, 2);
+  storage.updateStitchedVerseStep(chunkB.card.id, 2);
+
+  const allPassages = storage.passages();
+  const seamPassage = allPassages.find((p) => p.id.startsWith('psg_seam_'));
+  const stitchedPassage = allPassages.find((p) => p.id.startsWith('psg_stitched_'));
+  assertTrue(Boolean(seamPassage), 'syncContiguousStitchedCards generates a 2-verse Seam Review Passage');
+  assertEqual(seamPassage?.reference, 'Romans 8:2-3', 'Seam passage reference is Romans 8:2-3');
+  assertEqual(seamPassage?.label, 'Seam: No Condemnation → Fulfilled in Us', 'Seam passage label uses custom chunk labels');
+  assertEqual(seamPassage?.verses.length, 2, 'Seam passage has 2 boundary verses');
+
+  assertTrue(Boolean(stitchedPassage), 'syncContiguousStitchedCards generates a Full Contiguous Stitched Passage');
+  assertEqual(stitchedPassage?.reference, 'Romans 8:1-4', 'Stitched passage reference is Romans 8:1-4');
+  assertEqual(stitchedPassage?.label, 'Stitched: No Condemnation → Fulfilled in Us', 'Stitched passage label uses custom chunk labels');
+  assertEqual(stitchedPassage?.verses.length, 4, 'Stitched passage combines all 4 verses');
+
+  const stitchedCard = storage.flashcards().find((c) => c.passageId === stitchedPassage?.id);
+  assertEqual(stitchedCard?.isStitchedPassageCard, true, 'Stitched card has isStitchedPassageCard = true');
+  assertEqual(stitchedCard?.stitchedPassageIds?.length, 2, 'Stitched card tracks both source passage IDs');
+
+  console.log('✓ srs.service.spec.ts: All SM-2 scheduling, interval, and contiguous stitched/seam card assertions passed.');
 }
 
 runSrsServiceTests();
