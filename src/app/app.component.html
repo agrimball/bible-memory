@@ -33,18 +33,6 @@
       <nav class="topbar-right" aria-label="Quick actions">
         <button
           type="button"
-          id="btn-open-add-passage"
-          class="icon-btn"
-          (click)="openAddModal()"
-          data-testid="nav-add-passage"
-          title="Add Passage"
-          aria-label="Add Passage"
-        >
-          <span data-testid="btn-open-add-passage">＋</span>
-        </button>
-
-        <button
-          type="button"
           id="btn-open-proto-sync"
           class="icon-btn cloud-status-btn"
           [class.cloud-connected]="storageService.fileConnectionStatus() === 'connected'"

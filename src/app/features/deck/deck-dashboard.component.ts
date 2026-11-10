@@ -1067,7 +1067,7 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
           title="Add passage"
           data-testid="btn-empty-add"
         >
-          +
+          <span data-testid="btn-open-add-passage">+</span>
         </button>
       </div>
     </div>
