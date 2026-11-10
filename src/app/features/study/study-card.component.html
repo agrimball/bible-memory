@@ -366,7 +366,7 @@
           </p>
 
           <p
-            *ngIf="repairTargetVerse() as targetVerse"
+            *ngFor="let targetVerse of repairTargetVerses()"
             class="verse-line target-verse-emphasis"
             [attr.data-testid]="'back-verse-' + targetVerse.verseNumber"
           >
@@ -475,7 +475,7 @@
         </div>
       </div>
 
-      <div class="repair-action-buttons" *ngIf="hasMoreVersesAfterDraft()">
+      <div class="repair-action-buttons">
         <button
           type="button"
           id="btn-queue-repair-resume"
@@ -483,10 +483,16 @@
           data-testid="btn-queue-repair-resume"
           (click)="queueRepairAndResume($event)"
         >
-          🔧 Queue &amp; Resume ({{ nextVerseAfterDraftLabel() }}) ↩
+          <ng-container *ngIf="hasMoreVersesAfterDraft(); else queueOnlyLabel">
+            🔧 Queue &amp; Resume ({{ nextVerseAfterDraftLabel() }}) ↩
+          </ng-container>
+          <ng-template #queueOnlyLabel>
+            🔧 Queue Repair ({{ draftRangeLabel() }})
+          </ng-template>
         </button>
 
         <button
+          *ngIf="hasMoreVersesAfterDraft() || (draftRepairRange()?.startIdx ?? 0) > 0"
           type="button"
           id="btn-forgot-rest"
           class="btn-repair-action warn-forgot"

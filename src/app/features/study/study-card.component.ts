@@ -137,23 +137,51 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     return Boolean(this.currentItemSignal()?.card.isRepairCard);
   });
 
-  readonly repairTargetVerse = computed<Verse | null>(() => {
+  readonly repairTargetVerses = computed<Verse[]>(() => {
     const current = this.currentItemSignal();
     if (!current || !current.card.isRepairCard) {
-      return null;
+      return [];
     }
-    const targetNum = current.card.repairVerseNumber;
-    const targetChap = current.card.repairChapterNumber;
-    return (
-      current.passage.verses.find(
-        (v) =>
-          v.verseNumber === targetNum &&
-          (!targetChap || !v.chapterNumber || v.chapterNumber === targetChap)
-      ) ??
-      current.passage.verses.find((v) => v.verseNumber === targetNum) ??
-      current.passage.verses[0] ??
-      null
+    const verses = current.passage.verses;
+    if (verses.length === 0) {
+      return [];
+    }
+
+    const startNum = current.card.repairVerseNumber;
+    const startChap = current.card.repairChapterNumber;
+    let startIdx = verses.findIndex(
+      (v) =>
+        v.verseNumber === startNum &&
+        (!startChap || !v.chapterNumber || v.chapterNumber === startChap)
     );
+    if (startIdx < 0) {
+      startIdx = verses.findIndex((v) => v.verseNumber === startNum);
+    }
+    if (startIdx < 0) {
+      startIdx = 0;
+    }
+
+    const endNum = current.card.repairEndVerseNumber ?? startNum;
+    const endChap = current.card.repairEndChapterNumber ?? startChap;
+    let endIdx = verses.findIndex(
+      (v, idx) =>
+        idx >= startIdx &&
+        v.verseNumber === endNum &&
+        (!endChap || !v.chapterNumber || v.chapterNumber === endChap)
+    );
+    if (endIdx < 0) {
+      endIdx = verses.findIndex((v, idx) => idx >= startIdx && v.verseNumber === endNum);
+    }
+    if (endIdx < startIdx) {
+      endIdx = startIdx;
+    }
+
+    return verses.slice(startIdx, endIdx + 1);
+  });
+
+  readonly repairTargetVerse = computed<Verse | null>(() => {
+    const targets = this.repairTargetVerses();
+    return targets[0] ?? null;
   });
 
   readonly repairPrecedingVerse = computed<Verse | null>(() => {
@@ -178,9 +206,12 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   });
 
   readonly repairTargetLabel = computed<string>(() => {
-    const target = this.repairTargetVerse();
-    if (target) {
-      return this.getVerseBadge(target);
+    const targets = this.repairTargetVerses();
+    if (targets.length > 1) {
+      return formatVerseRange(targets[0], targets[targets.length - 1], this.isMultiChapter());
+    }
+    if (targets.length === 1) {
+      return this.getVerseBadge(targets[0]);
     }
     const card = this.currentItemSignal()?.card;
     if (this.isMultiChapter() && card?.repairChapterNumber && card?.repairVerseNumber) {
@@ -190,9 +221,17 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   });
 
   readonly repairTargetVerboseLabel = computed<string>(() => {
-    const target = this.repairTargetVerse();
-    if (target) {
-      return this.getVerseVerboseLabel(target);
+    const targets = this.repairTargetVerses();
+    if (targets.length > 1) {
+      const first = targets[0];
+      const last = targets[targets.length - 1];
+      if (this.isMultiChapter()) {
+        return formatVerseRange(first, last, true);
+      }
+      return `Verses ${first.verseNumber}–${last.verseNumber}`;
+    }
+    if (targets.length === 1) {
+      return this.getVerseVerboseLabel(targets[0]);
     }
     const card = this.currentItemSignal()?.card;
     if (this.isMultiChapter() && card?.repairChapterNumber && card?.repairVerseNumber) {
@@ -662,9 +701,11 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
   }
 
   /**
-   * Queues the currently highlighted `[startIdx..endIdx]` repair range,
-   * sets `resumeFromVerseIndex` to `endIdx + 1`, clears the draft selection,
-   * and flips back to the Front (keeping Back scroll position!) so the user can continue reciting.
+   * Queues the currently highlighted `[startIdx..endIdx]` repair range:
+   * - If there are more verses after `endIdx`, sets `resumeFromVerseIndex` to `endIdx + 1`
+   *   and flips back to the Front (keeping Back scroll position!) so the user can continue reciting.
+   * - If `endIdx` is already at the end of the passage, moves `draftRepairRange` into `queuedRepairs`
+   *   on the Back so the user can immediately grade with the 4 Anki buttons below (or click Practice Now).
    */
   queueRepairAndResume(event?: Event): void {
     event?.stopPropagation();
@@ -675,11 +716,11 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     this.queuedRepairs.update((prev) => [...prev, draft]);
     const verses = this.activeVerses();
     const nextIdx = draft.endIdx + 1;
+    this.draftRepairRange.set(null);
     if (nextIdx < verses.length) {
       this.resumeFromVerseIndex.set(nextIdx);
+      this.flipToFront();
     }
-    this.draftRepairRange.set(null);
-    this.flipToFront();
   }
 
   /**
@@ -774,20 +815,21 @@ export class StudyCardComponent implements OnChanges, OnDestroy {
     const created: DeckItem[] = [];
 
     for (const range of ranges) {
-      for (let i = range.startIdx; i <= range.endIdx; i++) {
-        const v = verses[i];
-        if (!v) {
-          continue;
-        }
-        const item = this.storageService.createRepairCard(
-          this.item.passage.id,
-          v.verseNumber,
-          3,
-          v.chapterNumber
-        );
-        if (item) {
-          created.push(item);
-        }
+      const startV = verses[range.startIdx];
+      const endV = verses[range.endIdx] ?? startV;
+      if (!startV || !endV) {
+        continue;
+      }
+      const item = this.storageService.createRepairCard(
+        this.item.passage.id,
+        startV.verseNumber,
+        3,
+        startV.chapterNumber,
+        endV.verseNumber,
+        endV.chapterNumber
+      );
+      if (item) {
+        created.push(item);
       }
     }
 
