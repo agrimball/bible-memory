@@ -1,8 +1,8 @@
 {
   "suite": "bible-memory-playwright-screenshot-tests",
   "appUrl": "http://127.0.0.1:4299",
-  "startedAt": "2026-11-10T16:43:06.456Z",
-  "finishedAt": "2026-11-10T16:43:28.070Z",
+  "startedAt": "2026-11-10T16:58:07.976Z",
+  "finishedAt": "2026-11-10T16:58:29.254Z",
   "status": "PASSED",
   "totalSteps": 19,
   "consoleErrors": [],
@@ -20,7 +20,7 @@
         "[data-testid=\"passage-deck-list\"] displays NEW passages (Romans 8:1-4, Psalm 23:1-6) in flat rows"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:08.175Z"
+      "timestamp": "2026-11-10T16:58:09.621Z"
     },
     {
       "step": "1c",
@@ -34,7 +34,7 @@
         "All Home Page rows, tabs, and floating action buttons render in warm parchment Light Mode"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:08.735Z"
+      "timestamp": "2026-11-10T16:58:10.254Z"
     },
     {
       "step": "1b",
@@ -50,7 +50,7 @@
         "Active due cards (Philippians 4:6-7, John 1:1-5) are listed with level/step square badges"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:09.351Z"
+      "timestamp": "2026-11-10T16:58:10.862Z"
     },
     {
       "step": "2a",
@@ -58,14 +58,14 @@
       "filename": "02-copy-paste-highlight-verse-numbers.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/02-copy-paste-highlight-verse-numbers.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/02-copy-paste-highlight-verse-numbers.png",
-      "bytes": 312631,
+      "bytes": 312953,
       "assertions": [
         "[data-testid=\"warning-no-verse-numbers\"] warns when verse numbers are absent",
         "Filling #input-reference (\"Romans 8:35-39\"), #input-passage-label (\"More Than Conquerors\"), and #textarea-passage populates 5 verses",
         "[data-testid=\"btn-peek-verse-boundaries\"] shows \"(5 verses)\" while keeping [data-testid=\"parsed-verses-preview\"] collapsed by default"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:10.855Z"
+      "timestamp": "2026-11-10T16:58:12.273Z"
     },
     {
       "step": "2b",
@@ -79,7 +79,7 @@
         "[data-testid=\"parsed-verses-preview\"] displays all 5 automatically parsed verses ([v. 35]..[v. 39]) for +1v study"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:11.884Z"
+      "timestamp": "2026-11-10T16:58:13.288Z"
     },
     {
       "step": 3,
@@ -95,7 +95,7 @@
         "Circular [data-testid=\"btn-record-voice\"] (🎤) is centered at the bottom of the card face"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:12.558Z"
+      "timestamp": "2026-11-10T16:58:13.941Z"
     },
     {
       "step": 4,
@@ -110,7 +110,7 @@
         "[data-testid=\"btn-reveal-1w\"] (+1w), [data-testid=\"btn-reveal-1v\"] (+1v), and [data-testid=\"btn-back-to-card\"] are visible"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:12.937Z"
+      "timestamp": "2026-11-10T16:58:14.244Z"
     },
     {
       "step": 5,
@@ -125,7 +125,7 @@
         "Clicking +1w twice on Verse 2 reveals 2 words of Verse 2 while remaining words stay as first letters"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:14.247Z"
+      "timestamp": "2026-11-10T16:58:15.506Z"
     },
     {
       "step": 6,
@@ -140,7 +140,7 @@
         "[data-testid=\"recording-active-indicator\"] is active after ~1.2s of recording"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:16.200Z"
+      "timestamp": "2026-11-10T16:58:17.444Z"
     },
     {
       "step": "7a",
@@ -156,7 +156,7 @@
         "[data-testid=\"anki-grading-bar\"] displays AGAIN / HARD / GOOD / EASY buttons"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:16.947Z"
+      "timestamp": "2026-11-10T16:58:18.231Z"
     },
     {
       "step": "7b",
@@ -171,7 +171,7 @@
         "[data-testid=\"repair-card-banner\"] and [data-testid=\"repair-heal-progress\"] (0/3 heal streak) are visible on the front"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:17.862Z"
+      "timestamp": "2026-11-10T16:58:19.119Z"
     },
     {
       "step": 8,
@@ -179,14 +179,14 @@
       "filename": "08-protojson-wire-format-modal.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/08-protojson-wire-format-modal.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/08-protojson-wire-format-modal.png",
-      "bytes": 244548,
+      "bytes": 244926,
       "assertions": [
         "[data-testid=\"btn-grade-good\"] records Anki review log",
         "[data-testid=\"btn-open-proto-sync\"] opens Memory File modal and #btn-toggle-advanced-sync expands the Advanced section",
         "[data-testid=\"protojson-textarea\"] contains valid biblememory.v1 JSON with passages, flashcards, and reviewLogs"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:19.362Z"
+      "timestamp": "2026-11-10T16:58:20.628Z"
     },
     {
       "step": "9a",
@@ -194,7 +194,7 @@
       "filename": "mobile-01-home.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/mobile-01-home.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/mobile-01-home.png",
-      "bytes": 142471,
+      "bytes": 142499,
       "assertions": [
         "Pinned 4-tab bar (NEW | DUE | KNOWN | OUTLINE) is visible at top",
         "[data-testid=\"due-overall-time\"] overall due time prediction bar is visible",
@@ -202,7 +202,7 @@
         "Consolidated ☰ side drawer exposes 📂 Memory File, mobile-only 🔔 Daily Reminder ([data-testid=\"daily-reminder-modal\"]), and Aa Text Size"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:22.046Z"
+      "timestamp": "2026-11-10T16:58:23.282Z"
     },
     {
       "step": "9b",
@@ -216,7 +216,7 @@
         ".compact-stitch-strip is hidden by default during normal review so the card front is 100% distraction-free"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:22.655Z"
+      "timestamp": "2026-11-10T16:58:23.923Z"
     },
     {
       "step": "9c",
@@ -229,7 +229,7 @@
         "412x915 Android phone viewport renders First-Letter Study Page with full-width verse cards and bottom +1w / +1v controls"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:23.494Z"
+      "timestamp": "2026-11-10T16:58:24.648Z"
     },
     {
       "step": "9d",
@@ -245,7 +245,7 @@
         "AnkiDroid-style 4-button grading bar (AGAIN / HARD / GOOD / EASY) spans the bottom edge cleanly"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:24.274Z"
+      "timestamp": "2026-11-10T16:58:25.433Z"
     },
     {
       "step": "9e",
@@ -260,7 +260,7 @@
         "[data-testid=\"repair-action-sheet\"] displays 🩹 Mend v. 35–37 with Mend & Resume (v. 38) ↩ and Forgot Rest buttons above the 4-button Anki bar"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:25.353Z"
+      "timestamp": "2026-11-10T16:58:26.466Z"
     },
     {
       "step": "9f",
@@ -275,23 +275,23 @@
         "No custom label prompt is required and single full-width #btn-confirm-carve-chunk shows \"✂️ Split into 2 Passages\""
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:26.652Z"
+      "timestamp": "2026-11-10T16:58:27.782Z"
     },
     {
       "step": "9g",
-      "name": "Mobile Phone (412x915): Passages Outline View (📖 OUTLINE Tab with First-Words Default, Group Multi-Select, Gap & Auto-Seam Connectors, Contiguous 🪡 Sew & Inline Verse Preview)",
+      "name": "Mobile Phone (412x915): Passages Outline View (📖 OUTLINE Tab with Collapsed-by-Default Groups, Expanded Romans 8, First-Words Default, Direct Row Tap Verse Peek & Contiguous 🪡 Sew)",
       "filename": "mobile-07-chunks-outline.png",
       "outputPath": "/home/ashton/bible-memory/screenshot-tests/output/mobile-07-chunks-outline.png",
       "copiedPath": "/home/ashton/bible-memory/screenshot-tests/mobile-07-chunks-outline.png",
-      "bytes": 325811,
+      "bytes": 297998,
       "assertions": [
-        "Single-line group headers (\"Romans 8 · 3 passages\") with top-level checkbox ([data-testid=\"outline-group-select-0\"]), ▾ expand/collapse chevron, and Collapse All button",
-        "Unlabeled passages (Psalm 23:1–3, Romans 8:35–36, Romans 8:37–39) display their opening words while labeled passages display their titles",
-        "Honest ⋮ Gap: v. 5–34 not in deck and 🪡 Auto-Seam (v. 36 → v. 37) connectors with contiguous-only 🪡 Sew validation",
-        "Expanded inline verse preview ([35] Who shall separate us...) under 8:35–36"
+        "Groups default to collapsed (▸) with single-line headers; Romans 8 · 3 passages is expanded (▾) while Psalm 23, John 1, and Philippians 4 remain compactly collapsed",
+        "Unlabeled split passages (Romans 8:35–36, Romans 8:37–39) display their opening words while labeled passages display their titles",
+        "Tapping sub-passage row [data-testid=\"outline-chunk-2-1\"] directly expands/collapses its inline verses ([35] Who shall separate us...) without a ▸/▾ arrow in .rm-outline-sub-meta",
+        "Honest ⋮ Gap: v. 5–34 not in deck and 🪡 Auto-Seam (v. 36 → v. 37) connectors with contiguous-only 🪡 Sew validation"
       ],
       "status": "PASS",
-      "timestamp": "2026-11-10T16:43:28.061Z"
+      "timestamp": "2026-11-10T16:58:29.244Z"
     }
   ]
 }

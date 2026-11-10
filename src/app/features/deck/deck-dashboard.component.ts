@@ -783,7 +783,10 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
                     [attr.data-testid]="'outline-group-' + gIdx"
                   >
                     <!-- Compact 42px Single-Line Group Header -->
-                    <header class="rm-outline-group-header">
+                    <header
+                      class="rm-outline-group-header"
+                      (click)="toggleOutlineGroup(group.groupKey, $event)"
+                    >
                       <!-- Top-Level Group Multi-Select Checkbox -->
                       <span
                         class="rm-outline-group-checkbox"
@@ -832,7 +835,7 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
                         </span>
                       </button>
 
-                      <div class="rm-outline-header-actions">
+                      <div class="rm-outline-header-actions" (click)="$event.stopPropagation()">
                         @if (group.chunks.length >= 2) {
                           <button
                             type="button"
@@ -869,10 +872,12 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
                             <article
                               class="rm-outline-chunk-row"
                               [class.rm-row-selected]="isCardSelected(chunk.item.card.id)"
-                              (click)="onRowClick(chunk.item, $event)"
+                              [class.verses-expanded]="isChunkVersesExpanded(chunk.item.passage.id)"
+                              [attr.aria-expanded]="isChunkVersesExpanded(chunk.item.passage.id)"
+                              (click)="toggleChunkVerses(chunk.item.passage.id, $event)"
                               role="button"
                               tabindex="0"
-                              (keydown.enter)="onRowClick(chunk.item, $event)"
+                              (keydown.enter)="toggleChunkVerses(chunk.item.passage.id, $event)"
                               [attr.data-testid]="'outline-chunk-' + gIdx + '-' + cIdx"
                             >
                               <!-- Left Pill: Verse Range Badge (Click to toggle multi-select) -->
@@ -891,7 +896,7 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
                                 }
                               </span>
 
-                              <!-- Center: Fast Inline Section Title + Compact Verse Count & Recitation Peek Toggle -->
+                              <!-- Center: Section Title / First Words + Compact Verse Count & Recitation Time -->
                               <div class="rm-outline-chunk-center">
                                 @if (editingOutlinePassageId() === chunk.item.passage.id) {
                                   <div
@@ -932,11 +937,6 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
                                 } @else {
                                   <div
                                     class="rm-outline-label-line"
-                                    (click)="startInlineLabelEdit(chunk.item.passage, $event)"
-                                    role="button"
-                                    tabindex="0"
-                                    (keydown.enter)="startInlineLabelEdit(chunk.item.passage, $event)"
-                                    title="Tap to edit section title inline"
                                     [attr.data-testid]="'btn-outline-inline-label-' + gIdx + '-' + cIdx"
                                   >
                                     @if (chunk.customLabel) {
@@ -957,15 +957,12 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
                                   </div>
                                 }
 
-                                <button
-                                  type="button"
+                                <span
                                   class="rm-outline-sub-meta"
-                                  (click)="toggleChunkVerses(chunk.item.passage.id, $event)"
-                                  [attr.aria-expanded]="isChunkVersesExpanded(chunk.item.passage.id)"
                                   [attr.data-testid]="'btn-outline-peek-verses-' + gIdx + '-' + cIdx"
                                 >
-                                  {{ chunk.item.passage.verses.length }}v · ⏱ {{ chunk.recitationTime.label }} {{ isChunkVersesExpanded(chunk.item.passage.id) ? '▾' : '▸' }}
-                                </button>
+                                  {{ chunk.item.passage.verses.length }}v · ⏱ {{ chunk.recitationTime.label }}
+                                </span>
                               </div>
 
                               <!-- Right: Compact SRS State Badge + 26x26 Edit Modal Button -->
@@ -1725,6 +1722,7 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
         padding: 0.35rem 0.5rem;
         background: rgba(15, 23, 42, 0.58);
         border-bottom: 1px solid var(--rm-divider);
+        cursor: pointer;
       }
 
       .rm-outline-group-checkbox {
@@ -1905,7 +1903,7 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
         -webkit-box-orient: vertical;
         overflow: hidden;
         line-height: 1.25;
-        cursor: text;
+        cursor: pointer;
       }
 
       .rm-outline-custom-label {
@@ -1995,11 +1993,6 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
         color: var(--rm-text-muted);
         white-space: nowrap;
         cursor: pointer;
-        transition: color 0.12s ease;
-      }
-
-      .rm-outline-sub-meta:hover {
-        color: #fbbf24;
       }
 
       .rm-outline-chunk-right {
@@ -2290,8 +2283,8 @@ export class DeckDashboardComponent implements OnChanges {
   readonly selectedCardIds = signal<Set<string>>(new Set());
   readonly confirmingDelete = signal<boolean>(false);
 
-  /** Outline expand/collapse and fast inline label editing state */
-  readonly collapsedOutlineGroups = signal<Set<string>>(new Set());
+  /** Outline expand/collapse (defaults to all groups collapsed) and fast inline label editing state */
+  readonly expandedOutlineGroups = signal<Set<string>>(new Set());
   readonly expandedOutlineChunkIds = signal<Set<string>>(new Set());
   readonly editingOutlinePassageId = signal<string | null>(null);
   readonly editingOutlineLabelDraft = signal<string>('');
@@ -2561,36 +2554,41 @@ export class DeckDashboardComponent implements OnChanges {
   }
 
   isGroupCollapsed(groupKey: string): boolean {
-    return this.collapsedOutlineGroups().has(groupKey);
+    return !this.expandedOutlineGroups().has(groupKey);
   }
 
   toggleOutlineGroup(groupKey: string, event?: Event): void {
     event?.stopPropagation();
-    const next = new Set(this.collapsedOutlineGroups());
+    const next = new Set(this.expandedOutlineGroups());
     if (next.has(groupKey)) {
       next.delete(groupKey);
     } else {
       next.add(groupKey);
     }
-    this.collapsedOutlineGroups.set(next);
+    this.expandedOutlineGroups.set(next);
   }
 
   areAllOutlineGroupsCollapsed(): boolean {
     const groups = this.outlineGroups();
     if (groups.length === 0) {
-      return false;
+      return true;
     }
-    const collapsed = this.collapsedOutlineGroups();
-    return groups.every((g) => collapsed.has(g.groupKey));
+    const expanded = this.expandedOutlineGroups();
+    return groups.every((g) => !expanded.has(g.groupKey));
   }
 
-  toggleCollapseAllOutlineGroups(): void {
+  toggleAllOutlineGroups(event?: Event): void {
+    event?.stopPropagation();
     if (this.areAllOutlineGroupsCollapsed()) {
-      this.collapsedOutlineGroups.set(new Set());
+      const allKeys = new Set(this.outlineGroups().map((g) => g.groupKey));
+      this.expandedOutlineGroups.set(allKeys);
       return;
     }
-    const allKeys = new Set(this.outlineGroups().map((g) => g.groupKey));
-    this.collapsedOutlineGroups.set(allKeys);
+    this.expandedOutlineGroups.set(new Set());
+  }
+
+  toggleCollapseAllOutlineGroups(event?: Event): void {
+    this.toggleAllOutlineGroups(event);
   }
 
   isChunkVersesExpanded(passageId: string): boolean {

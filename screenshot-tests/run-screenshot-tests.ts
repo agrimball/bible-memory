@@ -1104,8 +1104,10 @@ async function runScreenshotSuite(): Promise<void> {
       `Expected remaining passage after splitting passage to include "Romans 8:37-39", got "${remainingRefText}"`
     );
 
-    // 9g. mobile-07-chunks-outline.png: Return to Deck Dashboard, click OUTLINE tab, verify hierarchical multi-select, contiguous-only "🪡 Sew",
-    // "passages" vocabulary, first-words default on unlabeled passages ("The LORD is my shepherd…", "Who shall separate us…", "No, in all these things…"), and expand inline verse preview on 8:35–36
+    // 9g. mobile-07-chunks-outline.png: Return to Deck Dashboard, click OUTLINE tab, verify groups default to collapsed,
+    // expand Romans 8, verify hierarchical multi-select, contiguous-only "🪡 Sew", "passages" vocabulary,
+    // first-words default on unlabeled passages ("Who shall separate us…", "No, in all these things…"),
+    // and direct sub-passage row tap to expand/collapse inline verse preview on 8:35–36
     await mobilePage.locator('[data-testid="btn-back-to-deck"]').click();
     const outlineTabBtn = mobilePage.locator('[data-testid="tab-filter-outline"], [data-testid="tab-outline"]').first();
     await outlineTabBtn.waitFor({ state: 'visible', timeout: 10000 });
@@ -1113,9 +1115,25 @@ async function runScreenshotSuite(): Promise<void> {
 
     const outlineSection = mobilePage.locator('[data-testid="outline-page-section"]');
     await outlineSection.waitFor({ state: 'visible', timeout: 10000 });
-    await mobilePage.locator('[data-testid="btn-outline-collapse-all"]').waitFor({ state: 'visible', timeout: 10000 });
+    const collapseAllBtn = mobilePage.locator('[data-testid="btn-outline-collapse-all"]');
+    await collapseAllBtn.waitFor({ state: 'visible', timeout: 10000 });
     await mobilePage.locator('[data-testid="outline-group-select-0"]').waitFor({ state: 'visible', timeout: 10000 });
     await mobilePage.locator('[data-testid="outline-group-select-2"]').waitFor({ state: 'visible', timeout: 10000 });
+
+    // Verify all groups default to collapsed ("▸ Expand All", and [data-testid="outline-chunk-2-1"] is hidden)
+    const initialCollapseAllText = await collapseAllBtn.innerText();
+    assertCondition(
+      initialCollapseAllText.includes('Expand All'),
+      `Expected [data-testid="btn-outline-collapse-all"] to show "▸ Expand All" initially, got "${initialCollapseAllText}"`
+    );
+    assertCondition(
+      (await mobilePage.locator('[data-testid="outline-chunk-2-1"]').count()) === 0,
+      'Expected sub-passages to be collapsed by default when 📖 OUTLINE opens'
+    );
+
+    // Click [data-testid="btn-outline-toggle-group-2"] ("Romans 8 · 3 passages") to expand ONLY the Romans 8 group
+    await mobilePage.locator('[data-testid="btn-outline-toggle-group-2"]').click();
+    await mobilePage.locator('[data-testid="outline-chunk-2-1"]').waitFor({ state: 'visible', timeout: 10000 });
 
     // Verify group 2 (Romans 8 with 8:1-4, 8:35-36, 8:37-39) has group-level "🪡 Sew" disabled due to the gap v. 5–34,
     // while selecting the two contiguous passages (8:35-36 and 8:37-39) shows partial group selection (aria-checked="mixed") and enables batch Sew!
@@ -1139,7 +1157,24 @@ async function runScreenshotSuite(): Promise<void> {
     );
     await mobilePage.locator('[data-testid="btn-clear-selection"]').click();
 
-    await mobilePage.locator('[data-testid="btn-outline-peek-verses-2-1"]').click();
+    // Assert that .rm-outline-sub-meta does NOT contain ▸ or ▾
+    const subMetaTexts = await mobilePage.locator('.rm-outline-sub-meta').allInnerTexts();
+    assertCondition(
+      subMetaTexts.length > 0 && subMetaTexts.every((t) => !t.includes('▸') && !t.includes('▾')),
+      `Expected .rm-outline-sub-meta to not contain ▸ or ▾ arrows, got: ${JSON.stringify(subMetaTexts)}`
+    );
+
+    // Click the sub-passage row [data-testid="outline-chunk-2-1"] directly to expand, click again to verify collapse, and click once more so [35] and [36] are expanded
+    const subPassageRow21 = mobilePage.locator('[data-testid="outline-chunk-2-1"]');
+    await subPassageRow21.click();
+    await mobilePage.locator('[data-testid="outline-chunk-verses-2-1"]').waitFor({ state: 'visible', timeout: 10000 });
+    await subPassageRow21.click();
+    await mobilePage.waitForTimeout(100);
+    assertCondition(
+      (await mobilePage.locator('[data-testid="outline-chunk-verses-2-1"]').count()) === 0,
+      'Expected clicking [data-testid="outline-chunk-2-1"] a second time to collapse its inline verses'
+    );
+    await subPassageRow21.click();
     await mobilePage.locator('[data-testid="outline-chunk-verses-2-1"]').waitFor({ state: 'visible', timeout: 10000 });
     await mobilePage.waitForTimeout(200);
 
@@ -1147,10 +1182,6 @@ async function runScreenshotSuite(): Promise<void> {
     assertCondition(
       outlineText.includes('passages') && !outlineText.toLowerCase().includes('chunks'),
       `Expected Outline tab header text to use "passages" vocabulary instead of "chunks", got: ${outlineText}`
-    );
-    assertCondition(
-      outlineText.toLowerCase().includes('the lord is my shepherd'),
-      `Expected unlabeled passage (Psalm 23:1–3) on Outline tab to display opening words ("The LORD is my shepherd…"), got: ${outlineText}`
     );
     assertCondition(
       outlineText.includes('No Condemnation') &&
@@ -1169,12 +1200,12 @@ async function runScreenshotSuite(): Promise<void> {
 
     await captureStepScreenshot(mobilePage, 'mobile-07-chunks-outline.png', stepResults, {
       step: '9g',
-      name: 'Mobile Phone (412x915): Passages Outline View (📖 OUTLINE Tab with First-Words Default, Group Multi-Select, Gap & Auto-Seam Connectors, Contiguous 🪡 Sew & Inline Verse Preview)',
+      name: 'Mobile Phone (412x915): Passages Outline View (📖 OUTLINE Tab with Collapsed-by-Default Groups, Expanded Romans 8, First-Words Default, Direct Row Tap Verse Peek & Contiguous 🪡 Sew)',
       assertions: [
-        'Single-line group headers ("Romans 8 · 3 passages") with top-level checkbox ([data-testid="outline-group-select-0"]), ▾ expand/collapse chevron, and Collapse All button',
-        'Unlabeled passages (Psalm 23:1–3, Romans 8:35–36, Romans 8:37–39) display their opening words while labeled passages display their titles',
+        'Groups default to collapsed (▸) with single-line headers; Romans 8 · 3 passages is expanded (▾) while Psalm 23, John 1, and Philippians 4 remain compactly collapsed',
+        'Unlabeled split passages (Romans 8:35–36, Romans 8:37–39) display their opening words while labeled passages display their titles',
+        'Tapping sub-passage row [data-testid="outline-chunk-2-1"] directly expands/collapses its inline verses ([35] Who shall separate us...) without a ▸/▾ arrow in .rm-outline-sub-meta',
         'Honest ⋮ Gap: v. 5–34 not in deck and 🪡 Auto-Seam (v. 36 → v. 37) connectors with contiguous-only 🪡 Sew validation',
-        'Expanded inline verse preview ([35] Who shall separate us...) under 8:35–36',
       ],
     });
 
