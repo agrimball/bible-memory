@@ -322,9 +322,28 @@
             />
             <span>Only remind me when passages are due</span>
           </label>
+
+          @if (testReminderFeedback(); as feedback) {
+            <p
+              class="reminder-test-feedback"
+              data-testid="test-reminder-feedback"
+              role="status"
+              aria-live="polite"
+            >
+              {{ feedback }}
+            </p>
+          }
         </div>
 
         <footer class="reminder-modal-footer">
+          <button
+            type="button"
+            class="btn-reminder-test"
+            data-testid="btn-test-reminder-notification"
+            (click)="sendTestReminderNotification()"
+          >
+            Test notification
+          </button>
           <button
             type="button"
             class="btn-reminder-done"

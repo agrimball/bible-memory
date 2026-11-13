@@ -1,5 +1,6 @@
 import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { SwUpdate } from '@angular/service-worker';
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
@@ -49,6 +50,7 @@ export interface SelahUiSessionV1 {
 export class AppComponent implements OnInit, OnDestroy {
   readonly title = 'bible-memory';
   readonly storageService = inject(StorageService);
+  readonly swUpdate = inject(SwUpdate, { optional: true });
 
   readonly isDarkMode = signal<boolean>(true);
   readonly textScale = signal<number>(1.0);
@@ -66,6 +68,7 @@ export class AppComponent implements OnInit, OnDestroy {
   readonly appendingToPassage = signal<Passage | null>(null);
   readonly showProtoSyncModal = signal<boolean>(false);
   readonly showReminderModal = signal<boolean>(false);
+  readonly testReminderFeedback = signal<string | null>(null);
   readonly isMobileView = signal<boolean>(true);
   readonly reminderSettings = signal<SelahDailyReminderV1>({
     enabled: false,
@@ -178,6 +181,9 @@ export class AppComponent implements OnInit, OnDestroy {
   private readonly boundVisibilityChange = () => {
     if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
       this.restoreUiSessionIfNeeded();
+      if (this.swUpdate?.isEnabled) {
+        this.swUpdate.checkForUpdate().catch(() => {});
+      }
     }
   };
 
@@ -202,6 +208,9 @@ export class AppComponent implements OnInit, OnDestroy {
     this.loadReminderSettings();
     this.restoreUiSession();
     this.registerNativeAndBrowserListeners();
+    if (this.swUpdate?.isEnabled) {
+      this.swUpdate.checkForUpdate().catch(() => {});
+    }
     this.checkDailyReminderSchedule();
     this.reminderIntervalId = setInterval(() => {
       this.checkDailyReminderSchedule();
@@ -491,12 +500,14 @@ export class AppComponent implements OnInit, OnDestroy {
 
   openReminderModalFromDrawer(): void {
     this.closeDrawer();
+    this.testReminderFeedback.set(null);
     this.showReminderModal.set(true);
     this.pushHistoryEntry('reminder-modal');
   }
 
   closeReminderModal(): void {
     this.showReminderModal.set(false);
+    this.testReminderFeedback.set(null);
   }
 
   private loadReminderSettings(): void {
@@ -630,11 +641,14 @@ export class AppComponent implements OnInit, OnDestroy {
 
     const dueCount = this.storageService.dueDeckItems().length;
     if (!settings.onlyWhenDue || dueCount > 0) {
-      this.fireReminderNotification();
+      void this.fireReminderNotification();
     }
   }
 
-  private fireReminderNotification(): void {
+  buildReminderNotificationPayload(): {
+    title: string;
+    options: NotificationOptions & { renotify?: boolean; badge?: string };
+  } {
     const dueItems = this.storageService.dueDeckItems();
     let message = 'Time for your daily Scripture meditation!';
     if (dueItems.length > 0) {
@@ -651,20 +665,81 @@ export class AppComponent implements OnInit, OnDestroy {
       message = `You have ${dueItems.length} ${dueItems.length === 1 ? 'passage' : 'passages'} due today (~${estMin}m).`;
     }
 
+    const baseHref =
+      typeof document !== 'undefined' && document.baseURI
+        ? document.baseURI
+        : 'http://localhost/';
+
+    return {
+      title: 'Selah Memory',
+      options: {
+        body: message,
+        icon: new URL('icon-192.png', baseHref).href,
+        badge: new URL('notification-badge-96.png', baseHref).href,
+        tag: 'selah-daily-reminder',
+        renotify: true,
+        data: {
+          onActionClick: {
+            default: {
+              operation: 'navigateLastFocusedOrOpen',
+              url: './',
+            },
+          },
+        },
+      },
+    };
+  }
+
+  async fireReminderNotification(): Promise<void> {
     if (
-      typeof window !== 'undefined' &&
-      'Notification' in window &&
-      Notification.permission === 'granted'
+      typeof window === 'undefined' ||
+      !('Notification' in window) ||
+      Notification.permission !== 'granted'
     ) {
+      return;
+    }
+
+    const { title, options } = this.buildReminderNotificationPayload();
+
+    try {
+      const reg = await navigator.serviceWorker?.getRegistration();
+      if (reg?.showNotification) {
+        await reg.showNotification(title, options);
+        return;
+      }
+    } catch {
+      // Fall back to window Notification constructor below
+    }
+
+    try {
+      new Notification(title, options);
+    } catch {
+      // Ignore notification errors in headless/restricted environments
+    }
+  }
+
+  async sendTestReminderNotification(): Promise<void> {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      this.testReminderFeedback.set('Notifications are blocked in browser settings');
+      return;
+    }
+
+    let permission = Notification.permission;
+    if (permission === 'default') {
       try {
-        new Notification('Selah Memory', {
-          body: message,
-          icon: 'favicon-32x32.png',
-        });
+        permission = await Notification.requestPermission();
       } catch {
-        // Ignore notification errors in headless/restricted environments
+        permission = Notification.permission;
       }
     }
+
+    if (permission !== 'granted') {
+      this.testReminderFeedback.set('Notifications are blocked in browser settings');
+      return;
+    }
+
+    await this.fireReminderNotification();
+    this.testReminderFeedback.set('✓ Test notification sent');
   }
 
   async onDrawerOpenFile(): Promise<void> {

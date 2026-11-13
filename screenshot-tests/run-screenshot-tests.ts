@@ -48,6 +48,31 @@ interface ProtoBundlePayload {
   reviewLogs?: unknown[];
 }
 
+interface WebManifestIconEntry {
+  src?: string;
+  sizes?: string;
+  type?: string;
+  purpose?: string;
+}
+
+interface WebManifestPayload {
+  name?: string;
+  short_name?: string;
+  icons?: WebManifestIconEntry[];
+}
+
+interface CapturedNotificationCall {
+  via: 'sw' | 'window';
+  title: string;
+  options: {
+    body?: string;
+    icon?: string;
+    badge?: string;
+    tag?: string;
+    renotify?: boolean;
+  };
+}
+
 const MIME_TYPES: Readonly<Record<string, string>> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
@@ -876,7 +901,7 @@ async function runScreenshotSuite(): Promise<void> {
       deviceScaleFactor: 2.625,
       isMobile: true,
       hasTouch: true,
-      permissions: ['microphone'],
+      permissions: ['microphone', 'notifications'],
     });
     await addSeedScriptToContext(mobileContext);
 
@@ -887,6 +912,55 @@ async function runScreenshotSuite(): Promise<void> {
 
     await mobilePage.goto(APP_URL, { waitUntil: 'networkidle' });
     await mobilePage.locator('[data-testid="dashboard-tabs"]').waitFor({ state: 'visible', timeout: 15000 });
+
+    // Verify PWA notification badge, app icon, and manifest.webmanifest assets via HTTP fetch
+    const normalizedBaseUrl = APP_URL.endsWith('/') ? APP_URL : `${APP_URL}/`;
+    for (const pngAsset of ['notification-badge-96.png', 'notification-badge-192.png', 'icon-192.png']) {
+      const assetRes = await fetch(new URL(pngAsset, normalizedBaseUrl).href);
+      assertCondition(
+        assetRes.status === 200,
+        `Expected ${pngAsset} to return HTTP 200, got ${assetRes.status}`
+      );
+      const contentType = assetRes.headers.get('content-type') || '';
+      assertCondition(
+        contentType.includes('image/png'),
+        `Expected ${pngAsset} content-type to include image/png, got "${contentType}"`
+      );
+      const pngBytes = new Uint8Array(await assetRes.arrayBuffer());
+      assertCondition(
+        pngBytes.length > 8 &&
+          pngBytes[0] === 0x89 &&
+          pngBytes[1] === 0x50 &&
+          pngBytes[2] === 0x4e &&
+          pngBytes[3] === 0x47,
+        `Expected ${pngAsset} to contain valid PNG signature bytes`
+      );
+    }
+
+    const manifestRes = await fetch(new URL('manifest.webmanifest', normalizedBaseUrl).href);
+    assertCondition(
+      manifestRes.status === 200,
+      `Expected manifest.webmanifest to return HTTP 200, got ${manifestRes.status}`
+    );
+    const manifestJson = (await manifestRes.json()) as WebManifestPayload;
+    const manifestIcons = Array.isArray(manifestJson.icons) ? manifestJson.icons : [];
+    assertCondition(
+      manifestIcons.some((icon) => icon.purpose === 'any'),
+      'Expected manifest.webmanifest to include a separate "purpose": "any" icon entry'
+    );
+    assertCondition(
+      manifestIcons.some((icon) => icon.purpose === 'maskable'),
+      'Expected manifest.webmanifest to include a separate "purpose": "maskable" icon entry'
+    );
+    assertCondition(
+      manifestIcons.some(
+        (icon) => icon.purpose === 'monochrome' && icon.src === 'notification-badge-96.png'
+      ) &&
+        manifestIcons.some(
+          (icon) => icon.purpose === 'monochrome' && icon.src === 'notification-badge-192.png'
+        ),
+      'Expected manifest.webmanifest to include separate "purpose": "monochrome" badge icon entries (96x96 & 192x192)'
+    );
 
     // Add Romans 8:35-39 ("More Than Conquerors") via Add Passage Modal and move it to DUE with 2 verses stitched
     await mobilePage.locator('[data-testid="btn-open-add-passage"]').click();
@@ -919,6 +993,137 @@ async function runScreenshotSuite(): Promise<void> {
     await mobilePage.locator('[data-testid="drawer-open-reminder-modal"]').click();
     await mobilePage.locator('[data-testid="daily-reminder-modal"]').waitFor({ state: 'visible', timeout: 10000 });
     await mobilePage.locator('[data-testid="toggle-daily-reminder"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="btn-test-reminder-notification"]').waitFor({ state: 'visible', timeout: 10000 });
+
+    // Install in-page spy capturing ServiceWorkerRegistration.prototype.showNotification & window.Notification
+    await mobilePage.evaluate(() => {
+      type SpyCall = {
+        via: 'sw' | 'window';
+        title: string;
+        options: {
+          body?: string;
+          icon?: string;
+          badge?: string;
+          tag?: string;
+          renotify?: boolean;
+        };
+      };
+      const calls: SpyCall[] = [];
+      (window as unknown as { __capturedNotifications?: SpyCall[] }).__capturedNotifications = calls;
+
+      if (
+        typeof ServiceWorkerRegistration !== 'undefined' &&
+        ServiceWorkerRegistration.prototype &&
+        typeof ServiceWorkerRegistration.prototype.showNotification === 'function'
+      ) {
+        ServiceWorkerRegistration.prototype.showNotification = new Proxy(
+          ServiceWorkerRegistration.prototype.showNotification,
+          {
+            apply(_target, _thisArg, args: [string, NotificationOptions?]): Promise<void> {
+              calls.push({
+                via: 'sw',
+                title: args[0],
+                options: (args[1] ?? {}) as SpyCall['options'],
+              });
+              return Promise.resolve();
+            },
+          }
+        );
+      }
+
+      const notificationHelpers = {
+        requestPermission(): Promise<NotificationPermission> {
+          return Promise.resolve('granted');
+        },
+      };
+
+      if (typeof window.Notification === 'function') {
+        window.Notification = new Proxy(window.Notification, {
+          construct(_target, args: [string, NotificationOptions?]): object {
+            calls.push({
+              via: 'window',
+              title: args[0],
+              options: (args[1] ?? {}) as SpyCall['options'],
+            });
+            return {};
+          },
+          get(target, prop, receiver): unknown {
+            if (prop === 'permission') {
+              return 'granted';
+            }
+            if (prop === 'requestPermission') {
+              return notificationHelpers.requestPermission;
+            }
+            return Reflect.get(target, prop, receiver);
+          },
+        });
+      }
+    });
+
+    await mobilePage.locator('[data-testid="btn-test-reminder-notification"]').click();
+    await mobilePage.locator('[data-testid="test-reminder-feedback"]').waitFor({ state: 'visible', timeout: 10000 });
+    const reminderFeedbackText = await mobilePage.locator('[data-testid="test-reminder-feedback"]').innerText();
+    assertCondition(
+      reminderFeedbackText.includes('Test notification sent'),
+      `Expected [data-testid="test-reminder-feedback"] to confirm sent notification, got: "${reminderFeedbackText}"`
+    );
+
+    const reminderModalArtifactPath =
+      '/home/ashton/.gemini/antigravity-cli/brain/6336f3ca-83fd-49a4-b43b-8910d2e52396/mobile-daily-reminder-modal.png';
+    try {
+      await fs.access(path.dirname(reminderModalArtifactPath));
+      await mobilePage.screenshot({ path: reminderModalArtifactPath, fullPage: false });
+    } catch {
+      await mobilePage.screenshot({
+        path: path.join(OUTPUT_DIR, 'mobile-daily-reminder-modal.png'),
+        fullPage: false,
+      });
+    }
+
+    const capturedNotifications = await mobilePage.evaluate(() => {
+      return (
+        (
+          window as unknown as {
+            __capturedNotifications?: Array<{
+              via: 'sw' | 'window';
+              title: string;
+              options: {
+                body?: string;
+                icon?: string;
+                badge?: string;
+                tag?: string;
+                renotify?: boolean;
+              };
+            }>;
+          }
+        ).__capturedNotifications ?? []
+      );
+    });
+    assertCondition(
+      capturedNotifications.length >= 1,
+      `Expected at least 1 captured notification call after clicking Test notification, got ${capturedNotifications.length}`
+    );
+    const lastNotification = capturedNotifications[capturedNotifications.length - 1] as CapturedNotificationCall;
+    assertCondition(
+      lastNotification.title === 'Selah Memory',
+      `Expected notification title === "Selah Memory", got "${lastNotification.title}"`
+    );
+    assertCondition(
+      typeof lastNotification.options.icon === 'string' &&
+        lastNotification.options.icon.endsWith('/icon-192.png') &&
+        !lastNotification.options.icon.includes('favicon-32x32.png'),
+      `Expected notification options.icon to end with "/icon-192.png" (not favicon-32x32.png), got "${lastNotification.options.icon}"`
+    );
+    assertCondition(
+      typeof lastNotification.options.badge === 'string' &&
+        lastNotification.options.badge.endsWith('/notification-badge-96.png'),
+      `Expected notification options.badge to end with "/notification-badge-96.png", got "${lastNotification.options.badge}"`
+    );
+    assertCondition(
+      lastNotification.options.tag === 'selah-daily-reminder',
+      `Expected notification options.tag === "selah-daily-reminder", got "${lastNotification.options.tag}"`
+    );
+
     await mobilePage.locator('.reminder-modal-close').click();
     await mobilePage.locator('[data-testid="daily-reminder-modal"]').waitFor({ state: 'hidden', timeout: 10000 });
 
