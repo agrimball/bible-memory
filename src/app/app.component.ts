@@ -6,7 +6,7 @@ import { App } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { StorageService, DeckItem } from './core/services/storage.service';
 import { CardState, Passage, ReviewRating, isMultiChapterPassage } from './core/proto/bible_memory.pb';
-import { DeckDashboardComponent } from './features/deck/deck-dashboard.component';
+import { DeckDashboardComponent, DashboardTab } from './features/deck/deck-dashboard.component';
 import { StudyCardComponent } from './features/study/study-card.component';
 import { FirstLetterStudyPageComponent } from './features/study/first-letter-study-page.component';
 import { AddPassageModalComponent } from './features/add-passage/add-passage-modal.component';
@@ -28,9 +28,11 @@ export interface SelahUiSessionV1 {
   viewMode: 'deck' | 'study';
   activeCardId: string | null;
   studyPageOpen: boolean;
-  activeDeckTab: 'queue' | 'due' | 'active';
+  activeDeckTab: DashboardTab;
   studyQueueIds?: string[];
   currentQueueIndex?: number;
+  isDueReviewSession?: boolean;
+  skippedInSessionIds?: string[];
 }
 
 @Component({
@@ -56,12 +58,22 @@ export class AppComponent implements OnInit, OnDestroy {
   readonly textScale = signal<number>(1.0);
   readonly isDrawerOpen = signal<boolean>(false);
   readonly activeView = signal<'dashboard' | 'study' | 'first-letter-page'>('dashboard');
-  readonly dashboardTab = signal<'queue' | 'due' | 'active'>('queue');
+  readonly dashboardTab = signal<DashboardTab>('queue');
   readonly studyQueueIds = signal<string[]>([]);
   readonly currentQueueIndex = signal<number>(0);
+  readonly isDueReviewSession = signal<boolean>(false);
+  readonly skippedInSessionIds = signal<string[]>([]);
+  readonly outlineHighlightPassageIds = signal<string[]>([]);
   readonly stitchedCountByPassageId = signal<Record<string, number>>({});
   readonly currentStudyScope = signal<'new-verse' | 'stitched' | 'full'>('new-verse');
   readonly repairHealedBanner = signal<string | null>(null);
+
+  readonly canResumeReviewFromOutline = computed<boolean>(
+    () =>
+      this.studyQueueIds().length > 0 &&
+      this.currentQueueIndex() < this.studyQueueIds().length &&
+      this.outlineHighlightPassageIds().length > 0
+  );
 
   readonly showAddPassageModal = signal<boolean>(false);
   readonly editingPassage = signal<Passage | null>(null);
@@ -85,7 +97,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.activeView() === 'dashboard' ? 'deck' : 'study'
   );
   readonly studyPageOpen = computed<boolean>(() => this.activeView() === 'first-letter-page');
-  readonly activeDeckTab = computed<'queue' | 'due' | 'active'>(() => this.dashboardTab());
+  readonly activeDeckTab = computed<DashboardTab>(() => this.dashboardTab());
 
   readonly currentStudyItem = computed<DeckItem | null>(() => {
     const queue = this.studyQueueIds();
@@ -334,6 +346,8 @@ export class AppComponent implements OnInit, OnDestroy {
         activeDeckTab: this.dashboardTab(),
         studyQueueIds: this.studyQueueIds(),
         currentQueueIndex: this.currentQueueIndex(),
+        isDueReviewSession: this.isDueReviewSession(),
+        skippedInSessionIds: this.skippedInSessionIds(),
       };
       localStorage.setItem(UI_SESSION_STORAGE_KEY, JSON.stringify(session));
     } catch {
@@ -354,9 +368,17 @@ export class AppComponent implements OnInit, OnDestroy {
       if (
         parsed.activeDeckTab === 'queue' ||
         parsed.activeDeckTab === 'due' ||
-        parsed.activeDeckTab === 'active'
+        parsed.activeDeckTab === 'active' ||
+        parsed.activeDeckTab === 'outline'
       ) {
         this.dashboardTab.set(parsed.activeDeckTab);
+      }
+
+      if (typeof parsed.isDueReviewSession === 'boolean') {
+        this.isDueReviewSession.set(parsed.isDueReviewSession);
+      }
+      if (Array.isArray(parsed.skippedInSessionIds)) {
+        this.skippedInSessionIds.set(parsed.skippedInSessionIds);
       }
 
       if (parsed.viewMode === 'study' && parsed.activeCardId) {
@@ -756,14 +778,20 @@ export class AppComponent implements OnInit, OnDestroy {
     }
   }
 
-  onDeckTabChange(tab: 'queue' | 'due' | 'active'): void {
+  onDeckTabChange(tab: DashboardTab): void {
+    if (tab !== 'outline') {
+      this.outlineHighlightPassageIds.set([]);
+    }
     this.dashboardTab.set(tab);
     this.saveUiSession();
   }
 
-  openDashboardTab(tab: 'queue' | 'due' | 'active'): void {
+  openDashboardTab(tab: DashboardTab): void {
     this.isDrawerOpen.set(false);
     this.repairHealedBanner.set(null);
+    if (tab !== 'outline') {
+      this.outlineHighlightPassageIds.set([]);
+    }
     this.dashboardTab.set(tab);
     this.activeView.set('dashboard');
     this.saveUiSession();
@@ -778,6 +806,9 @@ export class AppComponent implements OnInit, OnDestroy {
     if (queue.length === 0) {
       return;
     }
+    this.isDueReviewSession.set(dueIds.length > 0);
+    this.skippedInSessionIds.set([]);
+    this.outlineHighlightPassageIds.set([]);
     this.studyQueueIds.set(queue);
     this.currentQueueIndex.set(0);
     this.activeView.set('study');
@@ -787,6 +818,9 @@ export class AppComponent implements OnInit, OnDestroy {
 
   practiceSingleItem(item: DeckItem): void {
     this.repairHealedBanner.set(null);
+    this.isDueReviewSession.set(false);
+    this.skippedInSessionIds.set([]);
+    this.outlineHighlightPassageIds.set([]);
     this.studyQueueIds.set([item.card.id]);
     this.currentQueueIndex.set(0);
     this.activeView.set('study');
@@ -796,11 +830,66 @@ export class AppComponent implements OnInit, OnDestroy {
 
   onStartMemorizeFlow(item: DeckItem): void {
     this.repairHealedBanner.set(null);
+    this.isDueReviewSession.set(false);
+    this.skippedInSessionIds.set([]);
+    this.outlineHighlightPassageIds.set([]);
     this.studyQueueIds.set([item.card.id]);
     this.currentQueueIndex.set(0);
     this.activeView.set('study');
     this.pushHistoryEntry('study');
     this.saveUiSession();
+  }
+
+  onOpenRepairCard(repairItem: DeckItem): void {
+    this.repairHealedBanner.set(null);
+    const currentQueue = [...this.studyQueueIds()];
+    const idx = this.currentQueueIndex();
+    if (currentQueue.length === 0 || idx < 0 || idx >= currentQueue.length) {
+      this.studyQueueIds.set([repairItem.card.id]);
+      this.currentQueueIndex.set(0);
+    } else {
+      const before = currentQueue.slice(0, idx);
+      const after = currentQueue.slice(idx).filter((id) => id !== repairItem.card.id);
+      this.studyQueueIds.set([...before, repairItem.card.id, ...after]);
+    }
+    this.activeView.set('study');
+    this.pushHistoryEntry('study');
+    this.saveUiSession();
+  }
+
+  openOutlineForStitchedCard(item: DeckItem): void {
+    const ids =
+      item.card.stitchedPassageIds && item.card.stitchedPassageIds.length > 0
+        ? [...item.card.stitchedPassageIds]
+        : [item.passage.id];
+    this.outlineHighlightPassageIds.set(ids);
+    this.dashboardTab.set('outline');
+    this.activeView.set('dashboard');
+    this.saveUiSession();
+  }
+
+  resumeStudyFromOutline(): void {
+    const idx = this.currentQueueIndex();
+    const pruned = this.pruneMissingQueueIds(this.studyQueueIds(), idx);
+    this.studyQueueIds.set(pruned);
+    this.outlineHighlightPassageIds.set([]);
+    if (idx >= 0 && idx < pruned.length) {
+      this.activeView.set('study');
+    } else {
+      this.isDueReviewSession.set(false);
+      this.dashboardTab.set('due');
+      this.activeView.set('dashboard');
+    }
+    this.saveUiSession();
+  }
+
+  private pruneMissingQueueIds(queue: string[], fromIndex: number): string[] {
+    const validIds = new Set(this.storageService.deckItems().map((d) => d.card.id));
+    const safeStart = Math.max(0, fromIndex);
+    return [
+      ...queue.slice(0, safeStart),
+      ...queue.slice(safeStart).filter((id) => validIds.has(id)),
+    ];
   }
 
   onStitchedVerseCountChange(count: number): void {
@@ -856,7 +945,8 @@ export class AppComponent implements OnInit, OnDestroy {
 
   onCardRated(event: { cardId: string; rating: ReviewRating }): void {
     const result = this.storageService.recordReview(event.cardId, event.rating);
-    if (result && (result as DeckItem & { healed?: boolean }).healed) {
+    const wasHealed = Boolean(result && (result as DeckItem & { healed?: boolean }).healed);
+    if (result && wasHealed) {
       const multiChap = isMultiChapterPassage(result.passage.verses);
       const verseLabel =
         multiChap && result.card.repairChapterNumber
@@ -866,28 +956,64 @@ export class AppComponent implements OnInit, OnDestroy {
         `✓ Memory Repair Complete! ${result.passage.reference} (${verseLabel}) has been healed and retired.`
       );
     }
-    const nextIndex = this.currentQueueIndex() + 1;
-    if (nextIndex < this.studyQueueIds().length) {
+
+    const curIdx = this.currentQueueIndex();
+    const nextQueue = this.pruneMissingQueueIds(this.studyQueueIds(), curIdx + 1);
+    if (this.isDueReviewSession()) {
+      const skipped = new Set(this.skippedInSessionIds());
+      const inQueue = new Set(nextQueue);
+      for (const dueItem of this.storageService.dueDeckItems()) {
+        if (!inQueue.has(dueItem.card.id) && !skipped.has(dueItem.card.id)) {
+          nextQueue.push(dueItem.card.id);
+          inQueue.add(dueItem.card.id);
+        }
+      }
+      if (
+        event.rating === ReviewRating.REVIEW_RATING_AGAIN &&
+        !wasHealed &&
+        !nextQueue.slice(curIdx + 1).includes(event.cardId) &&
+        this.storageService.deckItems().some((d) => d.card.id === event.cardId)
+      ) {
+        nextQueue.push(event.cardId);
+      }
+    }
+
+    this.studyQueueIds.set(nextQueue);
+    const nextIndex = curIdx + 1;
+    if (nextIndex < nextQueue.length) {
       this.currentQueueIndex.set(nextIndex);
       this.activeView.set('study');
     } else {
+      this.isDueReviewSession.set(false);
       this.activeView.set('dashboard');
     }
     this.saveUiSession();
   }
 
   onSkipCard(): void {
-    const nextIndex = this.currentQueueIndex() + 1;
-    if (nextIndex < this.studyQueueIds().length) {
+    const curIdx = this.currentQueueIndex();
+    const currentId = this.studyQueueIds()[curIdx] ?? this.currentStudyItem()?.card.id;
+    if (currentId) {
+      this.skippedInSessionIds.update((prev) =>
+        prev.includes(currentId) ? prev : [...prev, currentId]
+      );
+    }
+    const nextQueue = this.pruneMissingQueueIds(this.studyQueueIds(), curIdx + 1);
+    this.studyQueueIds.set(nextQueue);
+    const nextIndex = curIdx + 1;
+    if (nextIndex < nextQueue.length) {
       this.currentQueueIndex.set(nextIndex);
       this.activeView.set('study');
     } else {
+      this.isDueReviewSession.set(false);
       this.activeView.set('dashboard');
     }
     this.saveUiSession();
   }
 
   returnToDashboard(): void {
+    this.isDueReviewSession.set(false);
+    this.outlineHighlightPassageIds.set([]);
     this.activeView.set('dashboard');
     this.saveUiSession();
   }

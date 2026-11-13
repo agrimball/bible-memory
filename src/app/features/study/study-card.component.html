@@ -30,19 +30,45 @@
 
     <div class="appbar-actions">
       <button
+        *ngIf="isStitchedPassageCard(); else standardScopeControls"
         type="button"
-        id="btn-scope-sheet-toggle"
-        class="appbar-scope-pill-btn"
-        [class.active]="showScopeSheet()"
-        data-testid="btn-scope-sheet-toggle"
-        (click)="toggleScopeSheet($event)"
-        title="Scope, chunking &amp; passage options"
+        id="btn-edit-card-seams"
+        class="appbar-scope-pill-btn seams-pill-btn"
+        data-testid="btn-edit-card-seams"
+        (click)="onOpenSeamsInOutline($event)"
+        title="View and unlink auto-seams in Outline"
       >
-        <span data-testid="stitching-range-label">
-          {{ topbarScopeLabel() || (totalVerses() + 'v') }}
-        </span>
-        <span class="scope-caret">▾</span>
+        ✂️ Seams
       </button>
+
+      <ng-template #standardScopeControls>
+        <button
+          type="button"
+          id="btn-scope-sheet-toggle"
+          class="appbar-scope-pill-btn"
+          [class.active]="showScopeSheet()"
+          data-testid="btn-scope-sheet-toggle"
+          (click)="toggleScopeSheet($event)"
+          title="Scope, chunking &amp; passage options"
+        >
+          <span data-testid="stitching-range-label">
+            {{ topbarScopeLabel() || (totalVerses() + 'v') }}
+          </span>
+          <span class="scope-caret">▾</span>
+        </button>
+
+        <button
+          type="button"
+          id="btn-edit-card-passage"
+          class="appbar-icon-btn"
+          data-testid="btn-edit-card-passage"
+          (click)="onEditPassage($event)"
+          title="Edit passage"
+          aria-label="Edit passage"
+        >
+          ✎
+        </button>
+      </ng-template>
 
       <button
         *ngIf="voiceService.hasRecording()"
@@ -55,30 +81,6 @@
         aria-label="Replay recorded voice"
       >
         ▶
-      </button>
-
-      <button
-        type="button"
-        id="btn-edit-card-passage"
-        class="appbar-icon-btn"
-        data-testid="btn-edit-card-passage"
-        (click)="onEditPassage($event)"
-        title="Edit passage"
-        aria-label="Edit passage"
-      >
-        ✎
-      </button>
-
-      <button
-        *ngIf="isFlipped()"
-        type="button"
-        class="appbar-icon-btn"
-        data-testid="btn-flip-to-front"
-        (click)="flipToFront($event)"
-        title="Flip to Front"
-        aria-label="Flip to Front"
-      >
-        ↩
       </button>
     </div>
   </header>
@@ -183,6 +185,17 @@
         (click)="toggleCarveChunkSheet($event)"
       >
         ✂️ Split Passage
+      </button>
+
+      <button
+        *ngIf="totalVerses() > 1 && !isRepairCard() && !isStitchedPassageCard()"
+        type="button"
+        id="btn-scope-set-known-verses"
+        class="scope-action-btn know-all"
+        data-testid="btn-scope-set-known-verses"
+        (click)="openPartialKnownModal($event)"
+      >
+        ✓ Set Known Verses…
       </button>
 
       <button
@@ -751,7 +764,7 @@
     </button>
 
     <div class="bottom-counter" data-testid="study-queue-progress">
-      <span>{{ queueTotal }} | <strong>{{ queuePosition }}</strong></span>
+      <span><strong>{{ queuePosition }}</strong> / {{ queueTotal }}</span>
       <span *ngIf="queuedRepairs().length > 0" class="queued-repair-chip">
         🩹 {{ queuedRepairs().length }} mend
       </span>
@@ -764,7 +777,7 @@
         (click)="onSkipCard($event)"
         title="Skip this long card for now without penalty"
       >
-        ⏭ Skip ({{ recitationTime().label }})
+        ⏭ Skip
       </button>
     </div>
 
@@ -868,74 +881,60 @@
       {{ isRepairCard() ? 'Repair Streak' : stitchedVerseRangeLabel() }}
     </div>
 
-    <!-- Symmetric Thumb-Zone 🎓 Study & ◫ Flip to Front Bar on Back (mirrors Front bottom bar!) -->
-    <div class="back-thumb-nav-bar" data-testid="back-thumb-nav-bar">
-      <button
-        type="button"
-        id="btn-back-study-mode"
-        class="circle-bottom-btn back-study-btn"
-        data-testid="btn-back-study-mode"
-        (click)="navigateToStudyPage($event)"
-        title="Open First-Letter Study Page"
-        aria-label="Open First-Letter Study Page"
+    <!-- Primary Back Actions Stacked ABOVE Symmetric Thumb Nav Bar (keeps ◫ pinned!) -->
+    @if (currentCardState() === CardState.CARD_STATE_NEW && !isRepairCard()) {
+      <div
+        class="new-card-action-bar"
+        [class.single-col]="totalVerses() <= 1"
+        data-testid="new-card-action-bar"
       >
-        🎓
-      </button>
+        <button
+          type="button"
+          id="btn-move-to-review"
+          class="btn-new-card-action primary-move-review"
+          data-testid="btn-move-to-review"
+          (click)="moveToReviewDeck($event)"
+        >
+          📥 {{ activeStitchedCount() < totalVerses() ? 'Start ' + stitchedVerseRangeLabel() : (totalVerses() > 1 ? 'Start v. ' + firstVerseNumber() : 'Move to Review') }}
+        </button>
 
-      <span class="back-thumb-hint" data-testid="back-thumb-hint">
-        <ng-container *ngIf="currentCardState() === CardState.CARD_STATE_NEW; else dueBackHint">
-          Tap text or ◫ to flip &amp; test recall
-        </ng-container>
-        <ng-template #dueBackHint>
-          <ng-container *ngIf="!isRepairCard()">
-            Tap verse to 🩹 mend
-          </ng-container>
-        </ng-template>
-      </span>
+        @if (totalVerses() > 1) {
+          <button
+            type="button"
+            id="btn-open-partial-known"
+            class="btn-new-card-action secondary-know-all"
+            data-testid="btn-open-partial-known"
+            (click)="openPartialKnownModal($event)"
+          >
+            ✓ Know Part / All…
+          </button>
+        }
+      </div>
+    } @else if (isStep1NewVerseFlow()) {
+      <div class="step1-stitch-bar" data-testid="step1-stitch-bar">
+        <button
+          type="button"
+          id="btn-step1-retry-verse"
+          class="btn-step1-action retry-verse"
+          data-testid="btn-step1-retry-verse"
+          (click)="retryNewVerseStep1($event)"
+        >
+          <span class="step1-caption">STEP 1 · DRILL</span>
+          <span class="step1-label">↻ Retry {{ targetVerseLabel() }}</span>
+        </button>
 
-      <button
-        type="button"
-        id="btn-flip-back-to-front"
-        class="circle-bottom-btn flip-circle-btn"
-        data-testid="btn-flip-back-to-front"
-        (click)="flipToFront($event)"
-        title="Flip to Front"
-        aria-label="Flip to Front"
-      >
-        ◫
-      </button>
-    </div>
-
-    <!-- NEW Card Action Bar (Remember Me style: Move to Review Deck / Know Entire Passage) -->
-    <div
-      *ngIf="currentCardState() === CardState.CARD_STATE_NEW && !isRepairCard(); else ankiGradingBarTpl"
-      class="new-card-action-bar"
-      data-testid="new-card-action-bar"
-    >
-      <button
-        type="button"
-        id="btn-move-to-review"
-        class="btn-new-card-action primary-move-review"
-        data-testid="btn-move-to-review"
-        (click)="moveToReviewDeck($event)"
-      >
-        📥 Move to Review Deck ({{ activeStitchedCount() < totalVerses() ? stitchedVerseRangeLabel() : (totalVerses() > 1 ? 'Start v. ' + firstVerseNumber() : '1v') }})
-      </button>
-
-      <button
-        *ngIf="totalVerses() > 1"
-        type="button"
-        id="btn-know-entire-passage-bottom"
-        class="btn-new-card-action secondary-know-all"
-        data-testid="btn-know-entire-passage"
-        (click)="markEntirePassageKnown($event)"
-      >
-        ✓ I Know Entire Passage ({{ totalVerses() }}v)
-      </button>
-    </div>
-
-    <!-- AnkiDroid-Style Full-Width 4-Button Grading Bar at the Bottom Edge -->
-    <ng-template #ankiGradingBarTpl>
+        <button
+          type="button"
+          id="btn-step1-advance-stitch"
+          class="btn-step1-action advance-stitch"
+          data-testid="btn-step1-advance-stitch"
+          (click)="advanceFromStep1ToStitch($event)"
+        >
+          <span class="step1-caption">NEXT · STEP 2</span>
+          <span class="step1-label">🪡 Stitch {{ stitchedVerseRangeLabel() }} →</span>
+        </button>
+      </div>
+    } @else {
       <div class="anki-grading-bar" data-testid="anki-grading-bar">
         <button
           type="button"
@@ -973,9 +972,7 @@
           <span class="grade-interval" data-testid="interval-good">
             {{ isRepairCard() ? '+1 Heal' : intervalPreviews()[ReviewRating.REVIEW_RATING_GOOD] }}
           </span>
-          <span class="grade-label" data-testid="btn-rate-good">
-            {{ !isRepairCard() && item.passage.verses.length > 1 && stitchPhase() === 'new-verse-only' && activeStitchedCount() > 1 ? 'GOOD → STITCH' : 'GOOD' }}
-          </span>
+          <span class="grade-label" data-testid="btn-rate-good">GOOD</span>
         </button>
 
         <button
@@ -991,8 +988,137 @@
           <span class="grade-label" data-testid="btn-rate-easy">EASY</span>
         </button>
       </div>
-    </ng-template>
+    }
+
+    <!-- Pinned Bottom Row: Symmetric 🎓 Study & ◫ Flip to Front Bar (Identical Y to Front!) -->
+    <div class="back-thumb-nav-bar" data-testid="back-thumb-nav-bar">
+      <button
+        type="button"
+        id="btn-back-study-mode"
+        class="circle-bottom-btn back-study-btn"
+        data-testid="btn-back-study-mode"
+        (click)="navigateToStudyPage($event)"
+        title="Open First-Letter Study Page"
+        aria-label="Open First-Letter Study Page"
+      >
+        🎓
+      </button>
+
+      <span class="back-thumb-hint" data-testid="back-thumb-hint">
+        <ng-container *ngIf="currentCardState() === CardState.CARD_STATE_NEW; else dueBackHint">
+          Tap text or ◫ to flip &amp; test recall
+        </ng-container>
+        <ng-template #dueBackHint>
+          <ng-container *ngIf="isStep1NewVerseFlow(); else defaultDueHint">
+            Step 1: Drill {{ targetVerseLabel() }}, then stitch
+          </ng-container>
+          <ng-template #defaultDueHint>
+            <ng-container *ngIf="!isRepairCard()">
+              Tap verse to 🩹 mend
+            </ng-container>
+          </ng-template>
+        </ng-template>
+      </span>
+
+      <button
+        type="button"
+        id="btn-flip-back-to-front"
+        class="circle-bottom-btn flip-circle-btn"
+        data-testid="btn-flip-back-to-front"
+        (click)="flipToFront($event)"
+        title="Flip to Front"
+        aria-label="Flip to Front"
+      >
+        ◫
+      </button>
+    </div>
   </footer>
+
+  <!-- Partially-Known Passage Picker Modal (`✓ Known so far?`) -->
+  <div
+    *ngIf="showPartialKnownModal()"
+    class="partial-known-backdrop"
+    data-testid="partial-known-backdrop"
+    (click)="closePartialKnownModal($event)"
+  >
+    <section
+      class="partial-known-modal"
+      data-testid="partial-known-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Indicate known verses"
+      (click)="$event.stopPropagation()"
+    >
+      <header class="partial-known-header">
+        <h3 class="partial-known-title">✓ Known so far?</h3>
+        <div class="partial-known-header-actions">
+          <button
+            type="button"
+            class="partial-known-all-chip"
+            data-testid="btn-partial-known-select-all"
+            (click)="selectAllPartialKnown($event)"
+          >
+            ✓ All {{ totalVerses() }}v
+          </button>
+          <button
+            type="button"
+            class="partial-known-close"
+            data-testid="btn-close-partial-known-modal"
+            (click)="closePartialKnownModal($event)"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+      </header>
+
+      <p class="partial-known-subtitle">
+        Tap the last verse you already know by heart:
+      </p>
+
+      <div class="partial-known-verse-list" data-testid="partial-known-verse-list">
+        <button
+          *ngFor="let verse of activeVerses(); let idx = index"
+          type="button"
+          class="partial-known-verse-row"
+          [class.known-selected]="idx < partialKnownCount()"
+          [class.last-known]="idx + 1 === partialKnownCount()"
+          [attr.data-testid]="'partial-known-verse-' + idx"
+          (click)="selectPartialKnownUpToIndex(idx, $event)"
+        >
+          <span class="pk-check-icon">{{ idx < partialKnownCount() ? '✓' : '○' }}</span>
+          <span class="pk-verse-badge">{{ getVerseInlineNumber(verse) }}</span>
+          <span class="pk-verse-preview">{{ verse.text }}</span>
+        </button>
+      </div>
+
+      <footer class="partial-known-footer">
+        <button
+          type="button"
+          class="pk-btn-cancel"
+          data-testid="btn-cancel-partial-known"
+          (click)="closePartialKnownModal($event)"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="pk-btn-save"
+          data-testid="btn-save-partial-known"
+          [disabled]="partialKnownCount() < 1"
+          (click)="savePartialKnownSelection($event)"
+        >
+          @if (partialKnownCount() >= totalVerses()) {
+            ✓ Save All Known ({{ totalVerses() }}v)
+          } @else if (partialKnownCount() > 0) {
+            ✓ Save Known: {{ partialKnownRangeLabel() }}
+          } @else {
+            Select Last Known Verse
+          }
+        </button>
+      </footer>
+    </section>
+  </div>
 </div>
 
 <ng-template #emptyState>

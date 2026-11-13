@@ -195,6 +195,8 @@
     @if (activeView() === 'dashboard') {
       <app-deck-dashboard
         [activeTab]="dashboardTab()"
+        [highlightedPassageIds]="outlineHighlightPassageIds()"
+        [canResumeStudySession]="canResumeReviewFromOutline()"
         (activeTabChange)="onDeckTabChange($event)"
         (startDueSession)="startDueSession()"
         (practiceSingleItem)="practiceSingleItem($event)"
@@ -203,6 +205,7 @@
         (openProtoSync)="openSyncModal()"
         (editItem)="openEditPassageModal($event)"
         (appendPassage)="openAppendPassageModal($event)"
+        (resumeStudySession)="resumeStudyFromOutline()"
       />
     } @else if (activeView() === 'first-letter-page') {
       <app-first-letter-study-page
@@ -228,7 +231,8 @@
           (chunkCarved)="onChunkCarved($event)"
           (backToDeck)="returnToDashboard()"
           (openStudyPage)="openFirstLetterStudyPage($event)"
-          (openRepairCard)="practiceSingleItem($event)"
+          (openRepairCard)="onOpenRepairCard($event)"
+          (openOutlineForSeams)="openOutlineForStitchedCard($event)"
         />
       } @else {
         <div class="empty-study-state" data-testid="empty-study-state">

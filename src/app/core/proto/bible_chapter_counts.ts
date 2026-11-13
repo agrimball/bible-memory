@@ -209,20 +209,31 @@ export interface ParsedPassageBounds {
   endVerse: number;
 }
 
+export const SINGLE_CHAPTER_BOOKS = new Set([
+  'obadiah',
+  'philemon',
+  '2 john',
+  '3 john',
+  'jude',
+]);
+
 export function parsePassageBounds(passage: Passage): ParsedPassageBounds | undefined {
   if (!passage || !passage.verses || passage.verses.length === 0) {
     return undefined;
   }
-  const match = (passage.reference ?? '')
-    .trim()
-    .match(/^((?:[1-3]\s+)?[A-Za-z]+(?:\s+of\s+[A-Za-z]+|\s+[A-Za-z]+)?)\s+(\d+)/i);
+  const ref = (passage.reference ?? '').trim();
+  const match = ref.match(
+    /^((?:[1-3]\s+)?[A-Za-z]+(?:\s+of\s+[A-Za-z]+|\s+[A-Za-z]+)?)\s+(\d+)/i
+  );
   if (!match) {
     return undefined;
   }
 
   const bookDisplay = match[1].trim();
   const bookKey = normalizeBookKey(bookDisplay);
-  const refChapter = parseInt(match[2], 10) || 1;
+  const firstNumber = parseInt(match[2], 10) || 1;
+  const isSingleChapterNoColon = SINGLE_CHAPTER_BOOKS.has(bookKey) && !ref.includes(':');
+  const refChapter = isSingleChapterNoColon ? 1 : firstNumber;
 
   const firstVerse = passage.verses[0];
   const lastVerse = passage.verses[passage.verses.length - 1];

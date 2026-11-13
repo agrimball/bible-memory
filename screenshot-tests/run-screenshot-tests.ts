@@ -1142,8 +1142,15 @@ async function runScreenshotSuite(): Promise<void> {
       'Expected custom label "More Than Conquerors" on mobile Home screen'
     );
     assertCondition(
-      mobileDueText.includes('v. 35–36') && mobileDueText.includes('v. 6'),
-      `Expected actual verse numbers ("v. 35–36" and "v. 6") on DUE rows, got: ${mobileDueText}`
+      mobileDueText.includes('v. 35–36') && mobileDueText.includes('v. 6') && !mobileDueText.includes('ESV'),
+      `Expected actual verse numbers ("v. 35–36", "v. 6") and no "ESV" label on DUE rows, got: ${mobileDueText}`
+    );
+    const dueLeftBadgeText = (
+      await mobilePage.locator('[data-testid="due-page-section"] .rm-left-square').first().innerText()
+    ).trim();
+    assertCondition(
+      /^(due|<\d+d|\d+[dwmy]|\d+\/\d+)$/i.test(dueLeftBadgeText),
+      `Expected days-until-review or fraction badge on DUE left square (no streak), got "${dueLeftBadgeText}"`
     );
 
     await captureStepScreenshot(mobilePage, 'mobile-01-home.png', stepResults, {
@@ -1447,6 +1454,322 @@ async function runScreenshotSuite(): Promise<void> {
       ],
     });
 
+    // =========================================================================
+    // 9h. mobile-08-known-tab-ordering.png: KNOWN & NEW Tab Ordering + Left Badges
+    // =========================================================================
+    console.log('Step 9h: Scheduling Philippians 4:6-7 (Hard -> MEMORIZING 1d) & John 1:1-5 (Good -> MEMORIZED), then verifying KNOWN & NEW...');
+    await mobilePage.locator('[data-testid="tab-due"]').click();
+    await mobilePage.locator('[data-testid="due-page-section"] .rm-row', { hasText: 'Philippians 4:6-7' }).first().click();
+    await mobilePage.locator('[data-testid="btn-flip-card"]').click();
+    await mobilePage.locator('[data-testid="btn-grade-hard"]').click();
+    await mobilePage.locator('[data-testid="tab-due"]').click();
+    await mobilePage.locator('[data-testid="due-page-section"] .rm-row', { hasText: 'John 1:1-5' }).first().click();
+    await mobilePage.locator('[data-testid="btn-flip-card"]').click();
+    await mobilePage.locator('[data-testid="btn-grade-good"]').click();
+    await mobilePage.locator('[data-testid="tab-active"]').click();
+    await mobilePage.locator('[data-testid="active-page-section"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="known-section-memorizing"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="known-section-memorized"]').waitFor({ state: 'visible', timeout: 10000 });
+
+    const memorizingHdrBox = await mobilePage.locator('[data-testid="known-section-memorizing"]').boundingBox();
+    const memorizedHdrBox = await mobilePage.locator('[data-testid="known-section-memorized"]').boundingBox();
+    assertCondition(
+      Boolean(memorizingHdrBox && memorizedHdrBox && memorizingHdrBox.y < memorizedHdrBox.y),
+      'Expected MEMORIZING section header above MEMORIZED section header in KNOWN tab'
+    );
+    const knownText = await mobilePage.locator('[data-testid="active-page-section"]').innerText();
+    assertCondition(
+      !knownText.includes('ESV'),
+      `Expected KNOWN cards to show verse count instead of "ESV", got: ${knownText}`
+    );
+
+    await captureStepScreenshot(mobilePage, 'mobile-08-known-tab-ordering.png', stepResults, {
+      step: '9h',
+      name: 'Mobile Phone (412x915): KNOWN Tab (MEMORIZING Pinned at Top, Days-Until-Review Squares & Verse Counts)',
+      assertions: [
+        'MEMORIZING cards appear pinned above MEMORIZED cards with slim section dividers',
+        'Left squares display days-until-review (due/<1d/1d...) instead of streak numbers; right tags show verse count instead of ESV',
+      ],
+    });
+
+    // Verify NEW tab has canonical order (Psalm 23 before Romans 8) and no reorder arrows
+    await mobilePage.locator('[data-testid="tab-queue"]').click();
+    await mobilePage.locator('[data-testid="queue-page-section"]').waitFor({ state: 'visible', timeout: 10000 });
+    const reorderBtnCount = await mobilePage.locator('[data-testid^="btn-move-up-"], [data-testid^="btn-move-down-"]').count();
+    assertCondition(
+      reorderBtnCount === 0,
+      `Expected zero up/down reorder arrows in NEW tab, found ${reorderBtnCount}`
+    );
+    const newRowRefs = await mobilePage.locator('[data-testid="queue-page-section"] .rm-ref').allInnerTexts();
+    const psalmIdx = newRowRefs.findIndex((t) => t.includes('Psalm 23'));
+    const romansIdx = newRowRefs.findIndex((t) => t.includes('Romans 8'));
+    assertCondition(
+      psalmIdx >= 0 && romansIdx >= 0 && psalmIdx < romansIdx,
+      `Expected NEW tab canonical order Psalm 23 before Romans 8, got: ${JSON.stringify(newRowRefs)}`
+    );
+
+    // =========================================================================
+    // 9i. mobile-09-partial-known-picker.png: Partially-Known Passage Picker
+    // =========================================================================
+    console.log('Step 9i: Opening Romans 8:1-4 (NEW) -> Partially-Known Passage Picker (v. 1-3)...');
+    await mobilePage.locator('[data-testid="queue-page-section"] .rm-row', { hasText: 'Romans 8:1-4' }).first().click();
+    await mobilePage.locator('[data-testid="card-front-view"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="btn-flip-card"]').click();
+    await mobilePage.locator('[data-testid="card-back-view"]').waitFor({ state: 'visible', timeout: 10000 });
+
+    const partialOpenBtn = mobilePage.locator('[data-testid="btn-open-partial-known"]');
+    const moveReviewBtn = mobilePage.locator('[data-testid="btn-move-to-review"]');
+    await partialOpenBtn.waitFor({ state: 'visible', timeout: 10000 });
+    await moveReviewBtn.waitFor({ state: 'visible', timeout: 10000 });
+    const partialBox = await partialOpenBtn.boundingBox();
+    const moveBox = await moveReviewBtn.boundingBox();
+    assertCondition(
+      Boolean(partialBox && moveBox && Math.abs(partialBox.y - moveBox.y) < 12),
+      'Expected NEW Back 2-button bar (Know Part / All + Move to Review Deck) on one non-wrapping row'
+    );
+
+    await partialOpenBtn.click();
+    await mobilePage.locator('[data-testid="partial-known-modal"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="partial-known-verse-2"]').click();
+    await mobilePage.waitForTimeout(150);
+
+    await captureStepScreenshot(mobilePage, 'mobile-09-partial-known-picker.png', stepResults, {
+      step: '9i',
+      name: 'Mobile Phone (412x915): Partially-Known Passage Picker Modal (Romans 8:1-3 Selected)',
+      assertions: [
+        'Non-wrapping NEW Back action bar sits cleanly above pinned bottom-right flip button',
+        '[data-testid="partial-known-modal"] lets user tap verse 3 to highlight verses 1–3 as already known',
+      ],
+    });
+
+    await mobilePage.locator('[data-testid="btn-save-partial-known"]').click();
+    await mobilePage.locator('[data-testid="partial-known-modal"]').waitFor({ state: 'hidden', timeout: 10000 });
+    const scopeAfterPartial = (await mobilePage.locator('[data-testid="btn-scope-sheet-toggle"]').innerText()).trim();
+    assertCondition(
+      scopeAfterPartial.includes('3 of 4v'),
+      `Expected partially-known Romans 8:1-4 to jump straight to 3 of 4v stitch scope, got "${scopeAfterPartial}"`
+    );
+
+    // =========================================================================
+    // 9j. mobile-10-stitch-step1-pinned-flip.png: Final-Verse Stitch Strip, 2-Btn Step 1, Pinned Flip
+    // =========================================================================
+    console.log('Step 9j: Advancing to Final Verse (4 of 4v) -> Final-Verse Stitch Strip, Step 1 2-Btn Bar & Pinned Flip...');
+    await mobilePage.locator('[data-testid="btn-flip-card"]').click();
+    await mobilePage.locator('[data-testid="card-back-view"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="btn-inline-add-verse"]').click();
+    await mobilePage.waitForTimeout(200);
+    await mobilePage.locator('[data-testid="card-front-view"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="verse-stitching-bar"]').waitFor({ state: 'visible', timeout: 10000 });
+
+    const frontFlipBox = await mobilePage.locator('[data-testid="btn-flip-card"]').boundingBox();
+    await mobilePage.locator('[data-testid="btn-flip-card"]').click();
+    await mobilePage.locator('[data-testid="card-back-view"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="step1-stitch-bar"]').waitFor({ state: 'visible', timeout: 10000 });
+
+    assertCondition(
+      (await mobilePage.locator('[data-testid="btn-flip-to-front"]').count()) === 0,
+      'Expected topbar ↩ button removed on Card Back so flip lives solely at bottom-right'
+    );
+    assertCondition(
+      (await mobilePage.locator('[data-testid="anki-grading-bar"]').count()) === 0,
+      'Expected 4-button Anki bar hidden during Step 1 New Verse flow in favor of 2-button Step 1 bar'
+    );
+    const backFlipBox = await mobilePage.locator('[data-testid="btn-flip-back-to-front"]').boundingBox();
+    assertCondition(
+      Boolean(
+        frontFlipBox &&
+          backFlipBox &&
+          Math.abs(frontFlipBox.x - backFlipBox.x) <= 1.5 &&
+          Math.abs(frontFlipBox.y - backFlipBox.y) <= 1.5
+      ),
+      `Expected bottom-right ◫ flip button pinned at identical (x, y) on Front ${JSON.stringify(frontFlipBox)} and Back ${JSON.stringify(backFlipBox)}`
+    );
+
+    await captureStepScreenshot(mobilePage, 'mobile-10-stitch-step1-pinned-flip.png', stepResults, {
+      step: '9j',
+      name: 'Mobile Phone (412x915): Step 1 (Final Verse 4 of 4v) Dedicated 2-Button Bar & Pinned Bottom-Right Flip',
+      assertions: [
+        '1 · New | 2 · Stitch | All bar appears on the final verse (4 of 4v) just like earlier verses',
+        '[data-testid="step1-stitch-bar"] displays ↻ Retry and 🪡 Stitch 1–4 → instead of 4 Anki grading buttons',
+        'Bottom-right ◫ flip button maintains identical (x, y) coordinates across Front and Back',
+      ],
+    });
+
+    // Advance from Step 1 -> Step 2 Stitch Block (Front) then flip to verify 4-button Anki bar returns
+    await mobilePage.locator('[data-testid="btn-step1-advance-stitch"]').click();
+    await mobilePage.locator('[data-testid="card-front-view"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="btn-flip-card"]').click();
+    await mobilePage.locator('[data-testid="anki-grading-bar"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="btn-back-to-deck"]').click();
+
+    // =========================================================================
+    // 9k & 9l. Stitched Seams Button, Cross-Chapter Psalms Unlinked, Unlink Persist, Live Counter & Skip
+    // =========================================================================
+    console.log('Step 9k: Setting up Stitched Romans 8 & Psalm 117/118 cross-chapter boundary, testing Seams & DUE Queue...');
+    // Add Psalm 117:1-2 (complete 2-verse chapter) and Psalm 118:1-2 and mark both known
+    await mobilePage.locator('[data-testid="btn-open-add-passage"]').click();
+    await mobilePage.locator('#input-reference').fill('Psalm 117:1-2');
+    await mobilePage.locator('#textarea-passage').fill(
+      '[1] Praise the LORD, all nations! Extol him, all peoples! [2] For great is his steadfast love toward us, and the faithfulness of the LORD endures forever. Praise the LORD!'
+    );
+    await mobilePage.locator('[data-testid="btn-save-passage"]').click();
+    await mobilePage.locator('[data-testid="btn-open-add-passage"]').click();
+    await mobilePage.locator('#input-reference').fill('Psalm 118:1-2');
+    await mobilePage.locator('#textarea-passage').fill(
+      '[1] Oh give thanks to the LORD, for he is good; for his steadfast love endures forever! [2] Let Israel say, His steadfast love endures forever.'
+    );
+    await mobilePage.locator('[data-testid="btn-save-passage"]').click();
+    await mobilePage.locator('[data-testid="tab-queue"]').click();
+
+    // Mark Psalm 117:1-2 fully known via Partial-Known modal
+    await mobilePage.locator('[data-testid="queue-page-section"] .rm-row', { hasText: 'Psalm 117:1-2' }).first().click();
+    await mobilePage.locator('[data-testid="btn-flip-card"]').click();
+    await mobilePage.locator('[data-testid="btn-open-partial-known"]').click();
+    await mobilePage.locator('[data-testid="partial-known-verse-1"]').click();
+    await mobilePage.locator('[data-testid="btn-save-partial-known"]').click();
+    await mobilePage.locator('[data-testid="btn-back-to-deck"]').click();
+
+    // Mark Psalm 118:1-2 fully known via Partial-Known modal
+    await mobilePage.locator('[data-testid="tab-queue"]').click();
+    await mobilePage.locator('[data-testid="queue-page-section"] .rm-row', { hasText: 'Psalm 118:1-2' }).first().click();
+    await mobilePage.locator('[data-testid="btn-flip-card"]').click();
+    await mobilePage.locator('[data-testid="btn-open-partial-known"]').click();
+    await mobilePage.locator('[data-testid="partial-known-verse-1"]').click();
+    await mobilePage.locator('[data-testid="btn-save-partial-known"]').click();
+    await mobilePage.locator('[data-testid="btn-back-to-deck"]').click();
+
+    // Mark Romans 8:37-39 fully known via Scope Sheet -> Set Known Verses so Romans 8:35-39 becomes Stitched DUE card
+    await mobilePage.locator('[data-testid="tab-due"]').click();
+    await mobilePage.locator('[data-testid="due-page-section"] .rm-row', { hasText: 'Romans 8:37-39' }).first().click();
+    await mobilePage.locator('[data-testid="btn-scope-sheet-toggle"]').click();
+    await mobilePage.locator('[data-testid="btn-scope-set-known-verses"]').click();
+    await mobilePage.locator('[data-testid="partial-known-verse-2"]').click();
+    await mobilePage.locator('[data-testid="btn-save-partial-known"]').click();
+    await mobilePage.locator('[data-testid="btn-back-to-deck"]').click();
+
+    // Start DUE review session and verify live counter + Again increment + Stitched Seams + Skip
+    await mobilePage.locator('[data-testid="tab-due"]').click();
+    await mobilePage.locator('[data-testid="btn-study-due"]').click();
+    await mobilePage.locator('[data-testid="card-front-view"]').waitFor({ state: 'visible', timeout: 10000 });
+
+    const counterLoc = mobilePage.locator('[data-testid="study-queue-progress"]');
+    const initialCounterText = (await counterLoc.innerText()).trim();
+    const initialCounterMatch = /^1 \/ (\d+)$/.exec(initialCounterText);
+    assertCondition(
+      Boolean(initialCounterMatch && Number(initialCounterMatch[1]) >= 2),
+      `Expected study queue counter in "1 / N" (N >= 2) format, got "${initialCounterText}"`
+    );
+    const counterBox = await counterLoc.boundingBox();
+    assertCondition(
+      Boolean(counterBox && counterBox.height <= 30),
+      `Expected counter "${initialCounterText}" on one line (height <= 30px), got ${counterBox?.height}`
+    );
+    const totalBeforeAgain = Number(initialCounterMatch![1]);
+
+    // Grade first DUE card Again -> total queue count must increment live in this session
+    await mobilePage.locator('[data-testid="btn-flip-card"]').click();
+    await mobilePage.locator('[data-testid="btn-grade-again"]').click();
+    await mobilePage.locator('[data-testid="card-front-view"]').waitFor({ state: 'visible', timeout: 10000 });
+    const afterAgainCounterText = (await counterLoc.innerText()).trim();
+    const afterAgainMatch = /^\d+ \/ (\d+)$/.exec(afterAgainCounterText);
+    assertCondition(
+      Boolean(afterAgainMatch && Number(afterAgainMatch[1]) === totalBeforeAgain + 1),
+      `Expected grading Again to increment live session counter total from ${totalBeforeAgain} to ${totalBeforeAgain + 1}, got "${afterAgainCounterText}"`
+    );
+
+    // Walk forward in DUE session until stitched card Romans 8:35-39 is active (using ⏭ Skip when shown, else Good)
+    for (let hop = 0; hop < 10; hop++) {
+      if ((await mobilePage.locator('[data-testid="btn-edit-card-seams"]').count()) > 0) {
+        break;
+      }
+      if ((await mobilePage.locator('[data-testid="btn-skip-long-card"]').count()) > 0) {
+        await mobilePage.locator('[data-testid="btn-skip-long-card"]').click();
+      } else {
+        await mobilePage.locator('[data-testid="btn-flip-card"]').click();
+        await mobilePage.locator('[data-testid="btn-grade-good"]').click();
+      }
+      await mobilePage.waitForTimeout(120);
+      if ((await mobilePage.locator('[data-testid="card-front-view"]').count()) === 0) {
+        break;
+      }
+    }
+    await mobilePage.locator('[data-testid="btn-edit-card-seams"]').waitFor({ state: 'visible', timeout: 10000 });
+
+    await captureStepScreenshot(mobilePage, 'mobile-11-stitched-card-seams-btn.png', stepResults, {
+      step: '9k',
+      name: 'Mobile Phone (412x915): Auto-Stitched Card with Clean [✂️ Seams] Topbar Action & Live Counter',
+      assertions: [
+        'Stitched passage card displays single [✂️ Seams] button in topbar in place of verse-count scope picker',
+        'Bottom counter displays non-wrapping "pos / total" format and updates live during DUE session',
+      ],
+    });
+
+    // Tap [✂️ Seams] -> Outline View with highlighted Romans 8 + Resume banner + Unlink toggle + Cross-chapter Psalms unlinked
+    await mobilePage.locator('[data-testid="btn-edit-card-seams"]').click();
+    await mobilePage.locator('[data-testid="outline-page-section"]').waitFor({ state: 'visible', timeout: 10000 });
+    await mobilePage.locator('[data-testid="btn-resume-review-from-outline"]').waitFor({ state: 'visible', timeout: 10000 });
+
+    // Toggle Romans 8 Auto-Seam to Unlinked
+    const romSeamBtn = mobilePage.locator('.rm-outline-group-card', { hasText: 'Romans 8' }).locator('.rm-outline-seam-pill').first();
+    await romSeamBtn.waitFor({ state: 'visible', timeout: 10000 });
+    await romSeamBtn.click();
+    await mobilePage.waitForTimeout(150);
+
+    // Expand Psalms group to verify cross-chapter Psalm 117 -> 118 defaults to Unlinked
+    const psalmGroupToggle = mobilePage.locator('.rm-outline-group-toggle', { hasText: 'Psalm 117' }).first();
+    if ((await psalmGroupToggle.getAttribute('aria-expanded')) !== 'true') {
+      await psalmGroupToggle.click();
+      await mobilePage.waitForTimeout(150);
+    }
+
+    const outlineAfterUnlinkText = await mobilePage.locator('[data-testid="outline-page-section"]').innerText();
+    assertCondition(
+      outlineAfterUnlinkText.includes('Unlinked (v. 36 ✂ v. 37') &&
+        outlineAfterUnlinkText.includes('Unlinked (117:2 ✂ 118:1'),
+      `Expected both unlinked Romans v.36-37 and default-unlinked Psalm 117:2->118:1 in Outline, got: ${outlineAfterUnlinkText}`
+    );
+
+    const psalmGroupHeader = mobilePage.locator('.rm-outline-group-card', { hasText: 'Psalm 117' }).first().locator('.rm-outline-group-header');
+    const psalmCountBox = await psalmGroupHeader.locator('.rm-outline-chunk-count').boundingBox();
+    const psalmActionsBox = await psalmGroupHeader.locator('.rm-outline-header-actions').boundingBox();
+    assertCondition(
+      Boolean(psalmCountBox && psalmActionsBox && psalmCountBox.x + psalmCountBox.width <= psalmActionsBox.x + 1),
+      `Expected Psalm 117 group title/count not to collide with header actions: count=${JSON.stringify(psalmCountBox)}, actions=${JSON.stringify(psalmActionsBox)}`
+    );
+
+    await captureStepScreenshot(mobilePage, 'mobile-12-outline-seam-unlink.png', stepResults, {
+      step: '9l',
+      name: 'Mobile Phone (412x915): Outline Auto-Seam Unlink, Cross-Chapter Psalms Unlinked Default & Resume Session',
+      assertions: [
+        '[✂️ Seams] opens OUTLINE with Romans 8 highlighted and ↩ Resume Review Session pinned at top',
+        'Tapping Auto-Seam unlinks v. 36 ✂ v. 37; cross-chapter Psalm 117:2 ✂ 118:1 defaults to Unlinked',
+      ],
+    });
+
+    // Verify ↩ Resume Review Session returns to study view, test ⏭ Skip advances rather than exiting, & unlink persists on reload
+    await mobilePage.locator('[data-testid="btn-resume-review-from-outline"]').click();
+    await mobilePage.locator('[data-testid="card-front-view"]').waitFor({ state: 'visible', timeout: 10000 });
+    if ((await mobilePage.locator('[data-testid="btn-skip-long-card"]').count()) > 0) {
+      await mobilePage.locator('[data-testid="btn-skip-long-card"]').click();
+      await mobilePage.locator('[data-testid="card-front-view"]').waitFor({ state: 'visible', timeout: 10000 });
+    }
+    await mobilePage.reload({ waitUntil: 'networkidle' });
+    if ((await mobilePage.locator('[data-testid="btn-back-to-deck"]').count()) > 0) {
+      await mobilePage.locator('[data-testid="btn-back-to-deck"]').click();
+    }
+    await mobilePage.locator('[data-testid="tab-outline"]').click();
+    await mobilePage.locator('[data-testid="outline-page-section"]').waitFor({ state: 'visible', timeout: 10000 });
+    const romGroupToggleAfterReload = mobilePage.locator('.rm-outline-group-toggle', { hasText: 'Romans 8' }).first();
+    if ((await romGroupToggleAfterReload.getAttribute('aria-expanded')) !== 'true') {
+      await romGroupToggleAfterReload.click();
+      await mobilePage.waitForTimeout(150);
+    }
+    const outlineReloadText = await mobilePage.locator('[data-testid="outline-page-section"]').innerText();
+    assertCondition(
+      outlineReloadText.includes('Unlinked (v. 36 ✂ v. 37'),
+      `Expected unlinked Romans seam to persist across page reload, got: ${outlineReloadText}`
+    );
+
     await mobileContext.close();
 
     const report = {
@@ -1461,7 +1784,7 @@ async function runScreenshotSuite(): Promise<void> {
     };
 
     await fs.writeFile(REPORT_PATH, JSON.stringify(report, null, 2), 'utf8');
-    console.log(`\nAll ${stepResults.length} screenshot tests (Desktop + 7 Mobile 412x915) PASSED! Report written to ${REPORT_PATH}`);
+    console.log(`\nAll ${stepResults.length} screenshot tests (Desktop + 12 Mobile 412x915) PASSED! Report written to ${REPORT_PATH}`);
   } finally {
     await browser.close();
     if (staticServerInfo?.server) {

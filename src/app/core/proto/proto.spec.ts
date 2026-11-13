@@ -8,6 +8,7 @@ import {
   ReviewRating,
   UserDataBundle,
   Verse,
+  parsePassageBounds,
 } from './bible_memory.pb';
 
 function assertEqual<T>(actual: T, expected: T, message: string): void {
@@ -82,6 +83,8 @@ function runProtoTests(): void {
         reviewedAt: '2026-11-09T19:00:00.000Z',
       },
     ],
+    suppressedSeamKeys: ['proverbs:3:5->3:6', 'psalm:23:6->24:1'],
+    enabledSeamKeys: ['psalm:23:6->24:1'],
   };
 
   // Binary protobuf wire encode & decode from protoc-generated UserDataBundle
@@ -94,6 +97,8 @@ function runProtoTests(): void {
   assertEqual(decodedFromWire.flashcards[0].repairChapterNumber, 9, 'Wire decoded repairChapterNumber');
   assertEqual(decodedFromWire.flashcards[0].repairEndVerseNumber, 2, 'Wire decoded repairEndVerseNumber');
   assertEqual(decodedFromWire.flashcards[0].repairEndChapterNumber, 9, 'Wire decoded repairEndChapterNumber');
+  assertEqual(decodedFromWire.suppressedSeamKeys?.length, 2, 'Wire decoded suppressedSeamKeys length');
+  assertEqual(decodedFromWire.enabledSeamKeys?.[0], 'psalm:23:6->24:1', 'Wire decoded enabledSeamKeys');
 
   // ProtoJsonCodec serializeBundle & deserializeBundle round-trip
   const jsonStr = ProtoJsonCodec.serializeBundle(sampleBundle, true);
@@ -106,6 +111,35 @@ function runProtoTests(): void {
   assertEqual(restored.flashcards[0].repairEndVerseNumber, 2, 'ProtoJsonCodec repairEndVerseNumber');
   assertEqual(restored.flashcards[0].repairEndChapterNumber, 9, 'ProtoJsonCodec repairEndChapterNumber');
   assertEqual(restored.reviewLogs[0].rating, ReviewRating.REVIEW_RATING_GOOD, 'ProtoJsonCodec rating');
+  assertEqual(restored.suppressedSeamKeys?.length, 2, 'ProtoJsonCodec suppressedSeamKeys length');
+  assertEqual(restored.enabledSeamKeys?.[0], 'psalm:23:6->24:1', 'ProtoJsonCodec enabledSeamKeys');
+
+  const snakeCaseRestored = ProtoJsonCodec.deserializeBundle(
+    JSON.stringify({
+      schema_version: 1,
+      exported_at: '2026-11-09T20:00:00.000Z',
+      passages: [],
+      flashcards: [],
+      review_logs: [],
+      suppressed_seam_keys: ['romans:8:36->8:37', 'romans:8:36->8:37'],
+      enabled_seam_keys: ['psalm:1:6->2:1'],
+    })
+  );
+  assertEqual(snakeCaseRestored.suppressedSeamKeys?.length, 1, 'Snake case suppressed_seam_keys deduped');
+  assertEqual(snakeCaseRestored.enabledSeamKeys?.[0], 'psalm:1:6->2:1', 'Snake case enabled_seam_keys');
+
+  const judeBounds = parsePassageBounds({
+    id: 'psg_jude',
+    reference: 'Jude 24-25',
+    verses: [
+      { verseNumber: 24, text: 'Now to him who is able to keep you from stumbling' },
+      { verseNumber: 25, text: 'to the only God, our Savior, through Jesus Christ our Lord' },
+    ],
+    createdAt: '',
+    updatedAt: '',
+  });
+  assertEqual(judeBounds?.startChapter, 1, 'Single-chapter book without colon defaults chapter to 1');
+  assertEqual(judeBounds?.startVerse, 24, 'Single-chapter book startVerse preserved');
 
   // 2. Test cross-chapter helpers
   const singleChapVerses: Verse[] = [

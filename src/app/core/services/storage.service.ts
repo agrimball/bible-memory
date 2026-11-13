@@ -9,6 +9,7 @@ import {
   ProtoJsonCodec,
   ReviewLog,
   ReviewRating,
+  SINGLE_CHAPTER_BOOKS,
   UserDataBundle,
   Verse,
 } from '../proto/bible_memory.pb';
@@ -82,6 +83,8 @@ export class StorageService {
   readonly passages = signal<Passage[]>([]);
   readonly flashcards = signal<Flashcard[]>([]);
   readonly reviewLogs = signal<ReviewLog[]>([]);
+  readonly suppressedSeamKeys = signal<string[]>([]);
+  readonly enabledSeamKeys = signal<string[]>([]);
 
   // Active Memory Data File signals
   readonly activeFileName = signal<string | null>(null);
@@ -1933,6 +1936,72 @@ export class StorageService {
   }
 
   /**
+   * Moves a passage directly into active Review/Stitching with `knownVerseCount` verses
+   * already marked known (`1 <= k < total` sets `learningStep = k` & `CARD_STATE_LEARNING`;
+   * `k >= total` delegates to `markEntirePassageKnown`; `k <= 0` resets to `CARD_STATE_NEW`).
+   */
+  setKnownVerseCount(cardOrPassageId: string, knownVerseCount: number): DeckItem | undefined {
+    const cards = this.flashcards();
+    const targetCard =
+      cards.find((c) => c.id === cardOrPassageId && !c.isRepairCard) ??
+      cards.find((c) => c.passageId === cardOrPassageId && !c.isRepairCard);
+    if (!targetCard) {
+      return undefined;
+    }
+
+    const passage = this.passages().find((p) => p.id === targetCard.passageId);
+    if (!passage) {
+      return undefined;
+    }
+
+    const total = Math.max(1, passage.verses.length);
+    const k = Math.max(0, Math.min(Math.floor(knownVerseCount), total));
+
+    if (k <= 0) {
+      this.moveCardsToNew([targetCard.id]);
+      const updated = this.flashcards().find((c) => c.id === targetCard.id) ?? targetCard;
+      return {
+        passage,
+        card: updated,
+        isDue: false,
+      };
+    }
+
+    if (k >= total) {
+      return this.markEntirePassageKnown(targetCard.id);
+    }
+
+    const now = new Date();
+    const isoNow = now.toISOString();
+    const nextState =
+      targetCard.state === CardState.CARD_STATE_NEW
+        ? CardState.CARD_STATE_LEARNING
+        : targetCard.state;
+    const nextDueAt =
+      targetCard.state === CardState.CARD_STATE_NEW ? isoNow : targetCard.dueAt;
+
+    const updatedCard: Flashcard = {
+      ...targetCard,
+      state: nextState,
+      learningStep: k,
+      dueAt: nextDueAt,
+      updatedAt: isoNow,
+    };
+
+    this.flashcards.update((prev) =>
+      prev.map((c) => (c.id === targetCard.id ? updatedCard : c))
+    );
+    this.syncContiguousStitchedCards();
+    this.persistToStorage();
+
+    return {
+      passage,
+      card: updatedCard,
+      isDue: this.srs.isDue(updatedCard, now),
+    };
+  }
+
+  /**
    * Deletes a specific flashcard (such as dismissing a temporary repair card).
    */
   deleteCard(cardId: string): void {
@@ -2095,6 +2164,148 @@ export class StorageService {
   }
 
   /**
+   * Builds a canonical persisted seam boundary key between two contiguous passages.
+   * Normalizes e.g. `Psalms` -> `psalm` so boundaries match consistently across cards and Outline.
+   */
+  buildSeamKey(
+    bookDisplayOrKey: string,
+    leftEndChapter: number,
+    leftEndVerse: number,
+    rightStartChapter: number,
+    rightStartVerse: number
+  ): string {
+    const bookKey = normalizeBookKey(bookDisplayOrKey);
+    return `${bookKey}:${leftEndChapter}:${leftEndVerse}->${rightStartChapter}:${rightStartVerse}`;
+  }
+
+  isCrossChapterPsalmBoundary(
+    bookDisplayOrKey: string,
+    leftEndChapter: number,
+    rightStartChapter: number
+  ): boolean {
+    return normalizeBookKey(bookDisplayOrKey) === 'psalm' && leftEndChapter !== rightStartChapter;
+  }
+
+  isSeamKeyLinked(seamKey: string, isCrossChapterPsalm = false): boolean {
+    if (isCrossChapterPsalm) {
+      return this.enabledSeamKeys().includes(seamKey);
+    }
+    return !this.suppressedSeamKeys().includes(seamKey);
+  }
+
+  isSeamBoundaryLinked(
+    bookDisplayOrKey: string,
+    leftEndChapter: number,
+    leftEndVerse: number,
+    rightStartChapter: number,
+    rightStartVerse: number
+  ): boolean {
+    const key = this.buildSeamKey(
+      bookDisplayOrKey,
+      leftEndChapter,
+      leftEndVerse,
+      rightStartChapter,
+      rightStartVerse
+    );
+    const isCrossChapPsalm = this.isCrossChapterPsalmBoundary(
+      bookDisplayOrKey,
+      leftEndChapter,
+      rightStartChapter
+    );
+    return this.isSeamKeyLinked(key, isCrossChapPsalm);
+  }
+
+  /**
+   * Toggles linking for a single contiguous boundary and immediately updates stitched cards + persistence.
+   * Returns the new linked state (`true` = auto-stitched, `false` = unlinked).
+   */
+  toggleSeamBoundary(
+    bookDisplayOrKey: string,
+    leftEndChapter: number,
+    leftEndVerse: number,
+    rightStartChapter: number,
+    rightStartVerse: number
+  ): boolean {
+    const nextLinked = !this.isSeamBoundaryLinked(
+      bookDisplayOrKey,
+      leftEndChapter,
+      leftEndVerse,
+      rightStartChapter,
+      rightStartVerse
+    );
+    this.setSeamBoundariesLinked(
+      [
+        {
+          bookDisplay: bookDisplayOrKey,
+          leftEndChapter,
+          leftEndVerse,
+          rightStartChapter,
+          rightStartVerse,
+        },
+      ],
+      nextLinked
+    );
+    return nextLinked;
+  }
+
+  /**
+   * Links or unlinks a batch of contiguous seam boundaries in one atomic storage update.
+   */
+  setSeamBoundariesLinked(
+    boundaries: Array<{
+      bookDisplay: string;
+      leftEndChapter: number;
+      leftEndVerse: number;
+      rightStartChapter: number;
+      rightStartVerse: number;
+    }>,
+    linked: boolean
+  ): void {
+    if (!boundaries || boundaries.length === 0) {
+      return;
+    }
+
+    const suppressed = new Set(this.suppressedSeamKeys());
+    const enabled = new Set(this.enabledSeamKeys());
+
+    for (const b of boundaries) {
+      const key = this.buildSeamKey(
+        b.bookDisplay,
+        b.leftEndChapter,
+        b.leftEndVerse,
+        b.rightStartChapter,
+        b.rightStartVerse
+      );
+      const isCrossChapPsalm = this.isCrossChapterPsalmBoundary(
+        b.bookDisplay,
+        b.leftEndChapter,
+        b.rightStartChapter
+      );
+
+      if (isCrossChapPsalm) {
+        suppressed.delete(key);
+        if (linked) {
+          enabled.add(key);
+        } else {
+          enabled.delete(key);
+        }
+      } else {
+        enabled.delete(key);
+        if (linked) {
+          suppressed.delete(key);
+        } else {
+          suppressed.add(key);
+        }
+      }
+    }
+
+    this.suppressedSeamKeys.set(Array.from(suppressed));
+    this.enabledSeamKeys.set(Array.from(enabled));
+    this.syncContiguousStitchedCards();
+    this.persistToStorage();
+  }
+
+  /**
    * Automatically synchronizes Seam Review Cards (2-verse handoff between adjacent chunks A and B)
    * and Full Contiguous Stitched Passage Cards across any run of >=2 contiguous memorized passages
    * in the same biblical book.
@@ -2163,7 +2374,10 @@ export class StorageService {
 
       const bookDisplay = bookMatch[1].trim();
       const bookKey = normalizeBookKey(bookDisplay);
-      const refChapter = parseInt(bookMatch[2], 10) || 1;
+      const firstNumber = parseInt(bookMatch[2], 10) || 1;
+      const isSingleChapterNoColon =
+        SINGLE_CHAPTER_BOOKS.has(bookKey) && !passage.reference.includes(':');
+      const refChapter = isSingleChapterNoColon ? 1 : firstNumber;
 
       const firstVerse = passage.verses[0];
       const lastVerse = passage.verses[passage.verses.length - 1];
@@ -2228,7 +2442,18 @@ export class StorageService {
           span.startVerse === 1 &&
           isEndOfChapter(prev.bookDisplay, prev.endChapter, prev.endVerse);
 
-        if (isSameChapAdjacent || isNextChapStart) {
+        const isContiguous = isSameChapAdjacent || isNextChapStart;
+        const isLinked =
+          isContiguous &&
+          this.isSeamBoundaryLinked(
+            prev.bookKey,
+            prev.endChapter,
+            prev.endVerse,
+            span.startChapter,
+            span.startVerse
+          );
+
+        if (isLinked) {
           currentRun.push(span);
         } else {
           if (currentRun.length >= 2) {
@@ -2390,6 +2615,8 @@ export class StorageService {
       passages: this.passages(),
       flashcards: this.flashcards(),
       reviewLogs: this.reviewLogs(),
+      suppressedSeamKeys: this.suppressedSeamKeys(),
+      enabledSeamKeys: this.enabledSeamKeys(),
     };
     return ProtoJsonCodec.serializeBundle(bundle, pretty);
   }
@@ -2407,6 +2634,8 @@ export class StorageService {
       this.passages.set(passages);
       this.flashcards.set(flashcards);
       this.reviewLogs.set(bundle.reviewLogs);
+      this.suppressedSeamKeys.set(bundle.suppressedSeamKeys ?? []);
+      this.enabledSeamKeys.set(bundle.enabledSeamKeys ?? []);
       this.syncContiguousStitchedCards();
       this.persistToStorage();
       return;
@@ -2442,10 +2671,18 @@ export class StorageService {
       mergedPassages,
       Array.from(cardMap.values())
     );
+    const mergedSuppressed = Array.from(
+      new Set([...this.suppressedSeamKeys(), ...(bundle.suppressedSeamKeys ?? [])])
+    );
+    const mergedEnabled = Array.from(
+      new Set([...this.enabledSeamKeys(), ...(bundle.enabledSeamKeys ?? [])])
+    );
 
     this.passages.set(mergedPassages);
     this.flashcards.set(mergedCards);
     this.reviewLogs.set(Array.from(logMap.values()));
+    this.suppressedSeamKeys.set(mergedSuppressed);
+    this.enabledSeamKeys.set(mergedEnabled);
     this.syncContiguousStitchedCards();
     this.persistToStorage();
   }
@@ -2457,6 +2694,8 @@ export class StorageService {
     this.passages.set([]);
     this.flashcards.set([]);
     this.reviewLogs.set([]);
+    this.suppressedSeamKeys.set([]);
+    this.enabledSeamKeys.set([]);
     this.persistToStorage();
   }
 
@@ -2472,6 +2711,8 @@ export class StorageService {
       this.passages.set([]);
       this.flashcards.set([]);
       this.reviewLogs.set([]);
+      this.suppressedSeamKeys.set([]);
+      this.enabledSeamKeys.set([]);
       this.hasUnsavedFileChanges.set(false);
       return;
     }
@@ -2489,6 +2730,8 @@ export class StorageService {
         this.passages.set([]);
         this.flashcards.set([]);
         this.reviewLogs.set([]);
+        this.suppressedSeamKeys.set([]);
+        this.enabledSeamKeys.set([]);
         return;
       }
 
@@ -2497,6 +2740,8 @@ export class StorageService {
         this.passages.set([]);
         this.flashcards.set([]);
         this.reviewLogs.set([]);
+        this.suppressedSeamKeys.set(bundle.suppressedSeamKeys ?? []);
+        this.enabledSeamKeys.set(bundle.enabledSeamKeys ?? []);
         return;
       }
 
@@ -2511,6 +2756,8 @@ export class StorageService {
       }
 
       const flashcards = this.ensureFlashcardsForPassages(bundle.passages, bundle.flashcards);
+      this.suppressedSeamKeys.set(bundle.suppressedSeamKeys ?? []);
+      this.enabledSeamKeys.set(bundle.enabledSeamKeys ?? []);
       this.passages.set(bundle.passages);
       this.flashcards.set(flashcards);
       this.reviewLogs.set(bundle.reviewLogs ?? []);
@@ -2519,6 +2766,8 @@ export class StorageService {
       this.passages.set([]);
       this.flashcards.set([]);
       this.reviewLogs.set([]);
+      this.suppressedSeamKeys.set([]);
+      this.enabledSeamKeys.set([]);
     }
   }
 

@@ -29,6 +29,8 @@ export interface UserDataBundle {
   passages: Passage[];
   flashcards: Flashcard[];
   reviewLogs: ReviewLog[];
+  suppressedSeamKeys?: string[];
+  enabledSeamKeys?: string[];
 }
 
 export const UserDataBundle = {
@@ -36,6 +38,8 @@ export const UserDataBundle = {
   encode(message: UserDataBundle, writer?: Parameters<typeof GeneratedUserDataBundle.encode>[1]) {
     const normalized: GeneratedUserDataBundle = {
       ...message,
+      suppressedSeamKeys: message.suppressedSeamKeys ?? [],
+      enabledSeamKeys: message.enabledSeamKeys ?? [],
       flashcards: (message.flashcards ?? []).map((c) => ({
         ...c,
         stitchedPassageIds: c.stitchedPassageIds ?? [],
@@ -70,6 +74,7 @@ export {
   isEndOfChapter,
   normalizeBookKey,
   parsePassageBounds,
+  SINGLE_CHAPTER_BOOKS,
 } from './bible_chapter_counts';
 export type { ParsedPassageBounds } from './bible_chapter_counts';
 
@@ -256,6 +261,10 @@ export interface UserDataBundleProtoJson {
   flashcards?: FlashcardProtoJson[];
   reviewLogs?: ReviewLogProtoJson[];
   review_logs?: ReviewLogProtoJson[];
+  suppressedSeamKeys?: string[];
+  suppressed_seam_keys?: string[];
+  enabledSeamKeys?: string[];
+  enabled_seam_keys?: string[];
 }
 
 export function cardStateToProtoJson(state: CardState): string {
@@ -484,16 +493,31 @@ export const ProtoJsonCodec = {
   },
 
   bundleToJson(b: UserDataBundle): UserDataBundleProtoJson {
-    return {
+    const out: UserDataBundleProtoJson = {
       schemaVersion: b.schemaVersion,
       exportedAt: b.exportedAt,
       passages: (b.passages ?? []).map((p) => ProtoJsonCodec.passageToJson(p)),
       flashcards: (b.flashcards ?? []).map((c) => ProtoJsonCodec.flashcardToJson(c)),
       reviewLogs: (b.reviewLogs ?? []).map((r) => ProtoJsonCodec.reviewLogToJson(r)),
     };
+    const suppressed = Array.from(
+      new Set((b.suppressedSeamKeys ?? []).map((k) => String(k)).filter(Boolean))
+    );
+    if (suppressed.length > 0) {
+      out.suppressedSeamKeys = suppressed;
+    }
+    const enabled = Array.from(
+      new Set((b.enabledSeamKeys ?? []).map((k) => String(k)).filter(Boolean))
+    );
+    if (enabled.length > 0) {
+      out.enabledSeamKeys = enabled;
+    }
+    return out;
   },
 
   bundleFromJson(json: UserDataBundleProtoJson): UserDataBundle {
+    const rawSuppressed = json.suppressedSeamKeys ?? json.suppressed_seam_keys;
+    const rawEnabled = json.enabledSeamKeys ?? json.enabled_seam_keys;
     return {
       schemaVersion: Number(json.schemaVersion ?? json.schema_version ?? 1),
       exportedAt: String(json.exportedAt ?? json.exported_at ?? new Date().toISOString()),
@@ -507,6 +531,12 @@ export const ProtoJsonCodec = {
         ? ((json.reviewLogs ?? json.review_logs) as ReviewLogProtoJson[]).map((r) =>
             ProtoJsonCodec.reviewLogFromJson(r)
           )
+        : [],
+      suppressedSeamKeys: Array.isArray(rawSuppressed)
+        ? Array.from(new Set(rawSuppressed.map((k) => String(k)).filter(Boolean)))
+        : [],
+      enabledSeamKeys: Array.isArray(rawEnabled)
+        ? Array.from(new Set(rawEnabled.map((k) => String(k)).filter(Boolean)))
         : [],
     };
   },

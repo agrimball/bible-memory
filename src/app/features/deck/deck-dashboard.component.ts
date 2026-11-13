@@ -20,6 +20,8 @@ import {
   formatVerseBadge,
   formatVerseRange,
   isMultiChapterPassage,
+  normalizeBookKey,
+  SINGLE_CHAPTER_BOOKS,
 } from '../../core/proto/bible_memory.pb';
 import { SrsService } from '../../core/services/srs.service';
 import { DeckItem, StorageService } from '../../core/services/storage.service';
@@ -427,35 +429,10 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
                       </div>
                     </div>
 
-                    <!-- Right Tag + Recitation Time + Queue Reorder -->
+                    <!-- Right Tag + Recitation Time -->
                     <div class="rm-row-right">
-                      @if (newTabItems().length > 1 && selectedCardIds().size === 0) {
-                        <div class="rm-reorder-group" (click)="$event.stopPropagation()">
-                          <button
-                            type="button"
-                            class="rm-icon-action"
-                            [disabled]="i === 0"
-                            (click)="moveQueueItem(i, -1, $event)"
-                            title="Move up"
-                            [attr.data-testid]="'btn-move-up-' + i"
-                          >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            class="rm-icon-action"
-                            [disabled]="i === newTabItems().length - 1"
-                            (click)="moveQueueItem(i, 1, $event)"
-                            title="Move down"
-                            [attr.data-testid]="'btn-move-down-' + i"
-                          >
-                            ↓
-                          </button>
-                        </div>
-                      }
-
                       <div class="rm-meta-col">
-                        <span class="rm-top-tag">ESV · ⏱ {{ getRecitationLabel(item) }}</span>
+                        <span class="rm-top-tag">{{ getRightTopTag(item) }} · ⏱ {{ getRecitationLabel(item) }}</span>
                         <span class="rm-sub-due">new</span>
                       </div>
                     </div>
@@ -560,7 +537,12 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
                       @if (isCardSelected(item.card.id)) {
                         <span class="square-check" aria-hidden="true">✓</span>
                       } @else {
-                        <span class="square-level">{{ getCardLevelNumber(item) }}</span>
+                        <span
+                          class="square-level"
+                          [class.is-due-word]="getDaysUntilReviewBadge(item) === 'due'"
+                        >
+                          {{ getDaysUntilReviewBadge(item) }}
+                        </span>
                       }
                     </div>
                   }
@@ -614,6 +596,16 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
           >
             <div class="rm-flat-list" data-testid="active-deck-list">
               @for (item of knownTabItems(); track item.card.id; let i = $index) {
+                @if (memorizingKnownCount() > 0 && i === 0) {
+                  <div class="rm-known-section-header memorizing" data-testid="known-section-memorizing">
+                    MEMORIZING · {{ memorizingKnownCount() }}
+                  </div>
+                }
+                @if (memorizingKnownCount() > 0 && memorizedKnownCount() > 0 && i === memorizingKnownCount()) {
+                  <div class="rm-known-section-header memorized" data-testid="known-section-memorized">
+                    MEMORIZED · {{ memorizedKnownCount() }}
+                  </div>
+                }
                 <article
                   class="rm-row"
                   [class.rm-row-selected]="isCardSelected(item.card.id)"
@@ -692,7 +684,12 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
                       @if (isCardSelected(item.card.id)) {
                         <span class="square-check" aria-hidden="true">✓</span>
                       } @else {
-                        <span class="square-level">{{ getCardLevelNumber(item) }}</span>
+                        <span
+                          class="square-level"
+                          [class.is-due-word]="getDaysUntilReviewBadge(item) === 'due'"
+                        >
+                          {{ getDaysUntilReviewBadge(item) }}
+                        </span>
                       }
                     </div>
                   }
@@ -744,6 +741,19 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
             class="rm-list-section rm-outline-section"
             data-testid="outline-page-section"
           >
+            @if (canResumeStudySession) {
+              <div class="rm-outline-resume-bar">
+                <button
+                  type="button"
+                  class="rm-outline-resume-btn"
+                  (click)="onResumeStudySessionClick($event)"
+                  data-testid="btn-resume-review-from-outline"
+                >
+                  ↩ Resume Review Session
+                </button>
+              </div>
+            }
+
             @if (outlineGroups().length > 0) {
               @if (outlineGroups().length > 1) {
                 <div class="rm-outline-utility-bar">
@@ -780,6 +790,8 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
                     class="rm-outline-group-card"
                     [class.collapsed]="isGroupCollapsed(group.groupKey)"
                     [class.group-selected]="isOutlineGroupAllSelected(group)"
+                    [class.group-highlighted]="isOutlineGroupHighlighted(group)"
+                    [attr.data-highlighted]="isOutlineGroupHighlighted(group) ? 'true' : null"
                     [attr.data-testid]="'outline-group-' + gIdx"
                   >
                     <!-- Compact 42px Single-Line Group Header -->
@@ -867,11 +879,38 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
                     <!-- Chunks in Canonical Order with Connected Spine & Seam/Gap Connectors -->
                     @if (!isGroupCollapsed(group.groupKey)) {
                       <div class="rm-outline-chunk-list">
+                        @if (getGroupContiguousBoundaries(group).length >= 2) {
+                          <div class="rm-outline-bulk-seam-bar">
+                            <span class="rm-outline-bulk-seam-label">
+                              Auto-stitch ({{ getGroupLinkedSeamCount(group) }}/{{ getGroupContiguousBoundaries(group).length }} linked)
+                            </span>
+                            @if (hasAnyLinkedSeamInGroup(group)) {
+                              <button
+                                type="button"
+                                class="rm-outline-bulk-seam-btn unlink"
+                                (click)="onBulkToggleGroupSeams(group, false, $event)"
+                                [attr.data-testid]="'btn-bulk-unlink-seams-' + gIdx"
+                              >
+                                ✂️ Unlink all {{ getGroupContiguousBoundaries(group).length }} seams
+                              </button>
+                            } @else {
+                              <button
+                                type="button"
+                                class="rm-outline-bulk-seam-btn link"
+                                (click)="onBulkToggleGroupSeams(group, true, $event)"
+                                [attr.data-testid]="'btn-bulk-link-seams-' + gIdx"
+                              >
+                                🪡 Link all {{ getGroupContiguousBoundaries(group).length }} seams
+                              </button>
+                            }
+                          </div>
+                        }
                         @for (chunk of group.chunks; track chunk.item.card.id; let cIdx = $index) {
                           <div class="rm-outline-chunk-block">
                             <article
                               class="rm-outline-chunk-row"
                               [class.rm-row-selected]="isCardSelected(chunk.item.card.id)"
+                              [class.chunk-highlighted]="isChunkHighlighted(chunk)"
                               [class.verses-expanded]="isChunkVersesExpanded(chunk.item.passage.id)"
                               [attr.aria-expanded]="isChunkVersesExpanded(chunk.item.passage.id)"
                               (click)="toggleChunkVerses(chunk.item.passage.id, $event)"
@@ -1006,24 +1045,37 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
 
                             <!-- Inter-Chunk Seam vs. Gap Connectors on the Visual Spine -->
                             @if (cIdx < group.chunks.length - 1) {
-                              @if (isChunkPairContiguous(chunk, group.chunks[cIdx + 1])) {
-                                <div
-                                  class="rm-outline-seam-connector"
-                                  [attr.data-testid]="'outline-seam-connector-' + gIdx + '-' + cIdx"
-                                >
-                                  <span class="rm-outline-seam-pill">
-                                    🪡 Auto-Seam (v. {{ chunk.endVerse }} → v. {{ group.chunks[cIdx + 1].startVerse }})
-                                  </span>
-                                </div>
-                              } @else if (hasChunkPairGap(chunk, group.chunks[cIdx + 1])) {
-                                <div
-                                  class="rm-outline-gap-connector"
-                                  [attr.data-testid]="'outline-gap-connector-' + gIdx + '-' + cIdx"
-                                >
-                                  <span class="rm-outline-gap-pill">
-                                    {{ formatChunkPairGapLabel(chunk, group.chunks[cIdx + 1]) }}
-                                  </span>
-                                </div>
+                              @if (getChunkBoundaryInfo(chunk, group.chunks[cIdx + 1]); as boundary) {
+                                @if (boundary.isContiguous) {
+                                  <div
+                                    class="rm-outline-seam-connector"
+                                    [attr.data-testid]="'outline-seam-connector-' + gIdx + '-' + cIdx"
+                                  >
+                                    <button
+                                      type="button"
+                                      class="rm-outline-seam-pill"
+                                      [class.unlinked]="!boundary.isLinked"
+                                      [attr.aria-pressed]="boundary.isLinked"
+                                      (click)="onToggleChunkSeam(chunk, group.chunks[cIdx + 1], $event)"
+                                      [attr.data-testid]="'btn-toggle-seam-' + gIdx + '-' + cIdx"
+                                    >
+                                      @if (boundary.isLinked) {
+                                        🪡 Auto-Seam ({{ boundary.transitionLabel }})
+                                      } @else {
+                                        ┄ Unlinked ({{ boundary.unlinkedTransitionLabel }} · tap to seam)
+                                      }
+                                    </button>
+                                  </div>
+                                } @else if (hasChunkPairGap(chunk, group.chunks[cIdx + 1])) {
+                                  <div
+                                    class="rm-outline-gap-connector"
+                                    [attr.data-testid]="'outline-gap-connector-' + gIdx + '-' + cIdx"
+                                  >
+                                    <span class="rm-outline-gap-pill">
+                                      {{ formatChunkPairGapLabel(chunk, group.chunks[cIdx + 1]) }}
+                                    </span>
+                                  </div>
+                                }
                               }
                             }
                           </div>
@@ -1502,12 +1554,48 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
       }
 
       .square-level {
-        position: absolute;
-        top: 4px;
-        left: 6px;
-        font-size: 0.78rem;
-        font-weight: 700;
+        position: static;
+        font-size: 12.5px;
+        font-weight: 800;
         line-height: 1;
+        letter-spacing: -0.02em;
+        text-align: center;
+      }
+
+      .square-level.is-due-word {
+        font-size: 11px;
+        letter-spacing: -0.01em;
+      }
+
+      .rm-known-section-header {
+        display: flex;
+        align-items: center;
+        height: 26px;
+        padding: 0 1rem;
+        font-size: 0.68rem;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--rm-text-muted);
+        background: rgba(15, 23, 42, 0.45);
+        border-bottom: 1px solid var(--rm-divider);
+      }
+
+      .rm-known-section-header.memorizing {
+        color: #fbbf24;
+        background: rgba(245, 158, 11, 0.08);
+      }
+
+      :host-context(.light-theme) .rm-known-section-header,
+      :host-context(html:not(.dark-theme)) .rm-known-section-header {
+        background: #f1f5f9;
+        color: #64748b;
+      }
+
+      :host-context(.light-theme) .rm-known-section-header.memorizing,
+      :host-context(html:not(.dark-theme)) .rm-known-section-header.memorizing {
+        background: #fffbeb;
+        color: #b45309;
       }
 
       .square-icon {
@@ -1778,17 +1866,111 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
       }
 
       .rm-outline-group-toggle {
-        display: inline-flex;
+        display: flex;
         align-items: center;
         gap: 0.28rem;
         min-width: 0;
-        flex: 1 0 auto;
+        flex: 1 1 0;
+        overflow: hidden;
         padding: 0.15rem 0;
         background: transparent;
         border: none;
         color: inherit;
         text-align: left;
         cursor: pointer;
+      }
+
+      .rm-outline-resume-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.55rem;
+      }
+
+      .rm-outline-resume-btn {
+        width: 100%;
+        height: 36px;
+        padding: 0 0.75rem;
+        border-radius: 0.55rem;
+        border: 1px solid rgba(56, 189, 248, 0.45);
+        background: rgba(56, 189, 248, 0.14);
+        color: #7dd3fc;
+        font-size: 0.8rem;
+        font-weight: 700;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.35rem;
+      }
+
+      :host-context(.light-theme) .rm-outline-resume-btn,
+      :host-context(html:not(.dark-theme)) .rm-outline-resume-btn {
+        background: #e0f2fe;
+        border-color: #7dd3fc;
+        color: #0369a1;
+      }
+
+      .rm-outline-group-card.group-highlighted {
+        border-color: #f59e0b;
+        box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.45);
+      }
+
+      .rm-outline-chunk-row.chunk-highlighted {
+        background: rgba(245, 158, 11, 0.12);
+      }
+
+      .rm-outline-bulk-seam-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        padding: 0.42rem 0.65rem;
+        background: rgba(15, 23, 42, 0.35);
+        border-bottom: 1px solid var(--rm-divider);
+      }
+
+      :host-context(.light-theme) .rm-outline-bulk-seam-bar,
+      :host-context(html:not(.dark-theme)) .rm-outline-bulk-seam-bar {
+        background: #f8fafc;
+      }
+
+      .rm-outline-bulk-seam-label {
+        font-size: 0.7rem;
+        font-weight: 600;
+        color: var(--rm-text-muted);
+      }
+
+      .rm-outline-bulk-seam-btn {
+        padding: 0.22rem 0.52rem;
+        border-radius: 999px;
+        font-size: 0.7rem;
+        font-weight: 700;
+        cursor: pointer;
+        border: 1px solid rgba(245, 158, 11, 0.45);
+        background: rgba(245, 158, 11, 0.14);
+        color: #fbbf24;
+        white-space: nowrap;
+      }
+
+      .rm-outline-bulk-seam-btn.link {
+        border-color: rgba(45, 212, 191, 0.45);
+        background: rgba(20, 184, 166, 0.14);
+        color: #5eead4;
+      }
+
+      :host-context(.light-theme) .rm-outline-bulk-seam-btn,
+      :host-context(html:not(.dark-theme)) .rm-outline-bulk-seam-btn {
+        background: #fef3c7;
+        border-color: #f59e0b;
+        color: #b45309;
+      }
+
+      :host-context(.light-theme) .rm-outline-bulk-seam-btn.link,
+      :host-context(html:not(.dark-theme)) .rm-outline-bulk-seam-btn.link {
+        background: #ccfbf1;
+        border-color: #14b8a6;
+        color: #0f766e;
       }
 
       .rm-outline-chevron {
@@ -1802,8 +1984,11 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
         font-size: 0.85rem;
         font-weight: 800;
         color: var(--rm-text-primary);
+        min-width: 0;
+        flex: 0 1 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
         white-space: nowrap;
-        flex-shrink: 0;
       }
 
       .rm-outline-chunk-count {
@@ -2110,12 +2295,26 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
         display: inline-flex;
         align-items: center;
         gap: 0.25rem;
-        padding: 0.1rem 0.48rem;
+        padding: 0.16rem 0.56rem;
         border-radius: 999px;
         background: rgba(20, 184, 166, 0.13);
         border: 1px solid rgba(45, 212, 191, 0.35);
         color: #5eead4;
+        font-size: 0.68rem;
         font-weight: 600;
+        cursor: pointer;
+        transition: all 0.12s ease;
+      }
+
+      .rm-outline-seam-pill:hover {
+        filter: brightness(1.1);
+      }
+
+      .rm-outline-seam-pill.unlinked {
+        background: rgba(148, 163, 184, 0.1);
+        border-style: dashed;
+        border-color: rgba(148, 163, 184, 0.45);
+        color: var(--rm-text-muted);
       }
 
       :host-context(.light-theme) .rm-outline-seam-pill,
@@ -2123,6 +2322,13 @@ const FALLBACK_CHAPTER_VERSE_COUNTS: Record<string, number> = {
         background: #ccfbf1;
         border-color: #5eead4;
         color: #0f766e;
+      }
+
+      :host-context(.light-theme) .rm-outline-seam-pill.unlinked,
+      :host-context(html:not(.dark-theme)) .rm-outline-seam-pill.unlinked {
+        background: #f1f5f9;
+        border-color: #94a3b8;
+        color: #475569;
       }
 
       .rm-outline-gap-pill {
@@ -2268,7 +2474,10 @@ export class DeckDashboardComponent implements OnChanges {
   private readonly srsService = inject(SrsService);
 
   @Input() activeTab: DashboardTab = 'queue';
-  @Output() activeTabChange = new EventEmitter<'queue' | 'due' | 'active'>();
+  @Input() highlightedPassageIds: string[] = [];
+  @Input() canResumeStudySession = false;
+  @Output() activeTabChange = new EventEmitter<DashboardTab>();
+  @Output() resumeStudySession = new EventEmitter<void>();
 
   @Output() startDueSession = new EventEmitter<void>();
   @Output() studySingleItem = new EventEmitter<DeckItem>();
@@ -2299,6 +2508,39 @@ export class DeckDashboardComponent implements OnChanges {
         this.clearSelection();
         this.cancelInlineLabelEdit();
       }
+    }
+    if (
+      (changes['highlightedPassageIds'] || changes['activeTab']) &&
+      this.activeTab === 'outline' &&
+      this.highlightedPassageIds &&
+      this.highlightedPassageIds.length > 0
+    ) {
+      this.expandHighlightedOutlineGroups();
+    }
+  }
+
+  private expandHighlightedOutlineGroups(): void {
+    const idSet = new Set(this.highlightedPassageIds ?? []);
+    if (idSet.size === 0) {
+      return;
+    }
+    const matchingKeys = this.outlineGroups()
+      .filter((g) => g.chunks.some((c) => idSet.has(c.item.passage.id)))
+      .map((g) => g.groupKey);
+    if (matchingKeys.length > 0) {
+      this.expandedOutlineGroups.update((prev) => {
+        const next = new Set(prev);
+        for (const k of matchingKeys) {
+          next.add(k);
+        }
+        return next;
+      });
+    }
+    if (typeof requestAnimationFrame !== 'undefined' && typeof document !== 'undefined') {
+      requestAnimationFrame(() => {
+        const el = document.querySelector('[data-highlighted="true"]');
+        el?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+      });
     }
   }
 
@@ -2421,7 +2663,7 @@ export class DeckDashboardComponent implements OnChanges {
       const currentCluster = rawClusters[rawClusters.length - 1];
       const prev = currentCluster[currentCluster.length - 1];
       const sameBook =
-        entry.bookDisplay.toLowerCase() === prev.bookDisplay.toLowerCase();
+        normalizeBookKey(entry.bookDisplay) === normalizeBookKey(prev.bookDisplay);
       const sameChapOrContiguous =
         sameBook &&
         (entry.startChapter === prev.endChapter ||
@@ -2490,7 +2732,7 @@ export class DeckDashboardComponent implements OnChanges {
   });
 
   /**
-   * NEW tab: Unstarted passages (state === CARD_STATE_NEW && repetitions === 0 and not a repair card).
+   * NEW tab: Unstarted passages sorted strictly in canonical biblical order (Genesis -> Revelation, chapter, verse).
    */
   readonly newTabItems = computed<DeckItem[]>(() => {
     return this.storageService
@@ -2501,7 +2743,9 @@ export class DeckDashboardComponent implements OnChanges {
           (item.card.repetitions ?? 0) === 0 &&
           !item.card.isRepairCard &&
           !item.card.isStitchedPassageCard
-      );
+      )
+      .slice()
+      .sort((a, b) => this.compareCanonicalItems(a, b));
   });
 
   /**
@@ -2511,19 +2755,71 @@ export class DeckDashboardComponent implements OnChanges {
     return this.storageService.dueDeckItems();
   });
 
+  isMemorizingCard(item: DeckItem): boolean {
+    return (
+      this.isPartiallyMemorized(item) ||
+      Boolean(item.card.isRepairCard) ||
+      item.card.state === CardState.CARD_STATE_LEARNING ||
+      item.card.state === CardState.CARD_STATE_RELEARNING
+    );
+  }
+
   /**
-   * KNOWN tab: All started/memorized cards scheduled for a future review date (!isDue).
+   * KNOWN tab: All started/memorized cards scheduled for a future review date (!isDue),
+   * with "MEMORIZING" (in-progress / partial / learning) cards pinned at the top above fully MEMORIZED cards.
    */
   readonly knownTabItems = computed<DeckItem[]>(() => {
     return this.storageService
       .activeDeckItems()
       .filter((item) => !item.isDue)
+      .slice()
       .sort((a, b) => {
+        const aMem = this.isMemorizingCard(a);
+        const bMem = this.isMemorizingCard(b);
+        if (aMem !== bMem) {
+          return aMem ? -1 : 1;
+        }
         const dueA = new Date(a.card.dueAt).getTime() || 0;
         const dueB = new Date(b.card.dueAt).getTime() || 0;
-        return dueA - dueB;
+        if (dueA !== dueB) {
+          return dueA - dueB;
+        }
+        return this.compareCanonicalItems(a, b);
       });
   });
+
+  readonly memorizingKnownCount = computed<number>(() => {
+    return this.knownTabItems().filter((item) => this.isMemorizingCard(item)).length;
+  });
+
+  readonly memorizedKnownCount = computed<number>(() => {
+    return this.knownTabItems().length - this.memorizingKnownCount();
+  });
+
+  private compareCanonicalItems(a: DeckItem, b: DeckItem): number {
+    const ca = this.parsePassageCoordinates(a.passage);
+    const cb = this.parsePassageCoordinates(b.passage);
+    if (ca.bookOrder !== cb.bookOrder) {
+      return ca.bookOrder - cb.bookOrder;
+    }
+    const bookCmp = ca.bookDisplay.localeCompare(cb.bookDisplay);
+    if (bookCmp !== 0) {
+      return bookCmp;
+    }
+    if (ca.startChapter !== cb.startChapter) {
+      return ca.startChapter - cb.startChapter;
+    }
+    if (ca.startVerse !== cb.startVerse) {
+      return ca.startVerse - cb.startVerse;
+    }
+    if (ca.endChapter !== cb.endChapter) {
+      return ca.endChapter - cb.endChapter;
+    }
+    if (ca.endVerse !== cb.endVerse) {
+      return ca.endVerse - cb.endVerse;
+    }
+    return a.passage.reference.localeCompare(b.passage.reference);
+  }
 
   readonly currentTabItems = computed<DeckItem[]>(() => {
     const tab = this.activeTabState();
@@ -2556,9 +2852,27 @@ export class DeckDashboardComponent implements OnChanges {
     this.activeTabState.set(tab);
     this.clearSelection();
     this.cancelInlineLabelEdit();
-    if (tab === 'queue' || tab === 'due' || tab === 'active') {
-      this.activeTabChange.emit(tab);
+    this.activeTabChange.emit(tab);
+  }
+
+  onResumeStudySessionClick(event?: Event): void {
+    event?.stopPropagation();
+    this.resumeStudySession.emit();
+  }
+
+  isOutlineGroupHighlighted(group: OutlinePassageGroup): boolean {
+    if (!this.highlightedPassageIds || this.highlightedPassageIds.length === 0) {
+      return false;
     }
+    const set = new Set(this.highlightedPassageIds);
+    return group.chunks.some((c) => set.has(c.item.passage.id));
+  }
+
+  isChunkHighlighted(chunk: OutlineChunkEntry): boolean {
+    if (!this.highlightedPassageIds || this.highlightedPassageIds.length === 0) {
+      return false;
+    }
+    return this.highlightedPassageIds.includes(chunk.item.passage.id);
   }
 
   isGroupCollapsed(groupKey: string): boolean {
@@ -2663,7 +2977,7 @@ export class DeckDashboardComponent implements OnChanges {
   });
 
   isChunkPairContiguous(prev: OutlineChunkEntry, next: OutlineChunkEntry): boolean {
-    if (prev.bookDisplay.toLowerCase() !== next.bookDisplay.toLowerCase()) {
+    if (normalizeBookKey(prev.bookDisplay) !== normalizeBookKey(next.bookDisplay)) {
       return false;
     }
     if (prev.endChapter === next.startChapter) {
@@ -2676,8 +2990,129 @@ export class DeckDashboardComponent implements OnChanges {
     return false;
   }
 
+  getChunkBoundaryInfo(
+    curr: OutlineChunkEntry,
+    next: OutlineChunkEntry
+  ): {
+    isContiguous: boolean;
+    seamKey: string;
+    isLinked: boolean;
+    transitionLabel: string;
+    unlinkedTransitionLabel: string;
+  } {
+    const isContiguous = this.isChunkPairContiguous(curr, next);
+    const seamKey = this.storageService.buildSeamKey(
+      curr.bookDisplay,
+      curr.endChapter,
+      curr.endVerse,
+      next.startChapter,
+      next.startVerse
+    );
+    const isLinked =
+      isContiguous &&
+      this.storageService.isSeamBoundaryLinked(
+        curr.bookDisplay,
+        curr.endChapter,
+        curr.endVerse,
+        next.startChapter,
+        next.startVerse
+      );
+    const sameChapter = curr.endChapter === next.startChapter;
+    const transitionLabel = sameChapter
+      ? `v. ${curr.endVerse} → v. ${next.startVerse}`
+      : `${curr.endChapter}:${curr.endVerse} → ${next.startChapter}:${next.startVerse}`;
+    const unlinkedTransitionLabel = sameChapter
+      ? `v. ${curr.endVerse} ✂ v. ${next.startVerse}`
+      : `${curr.endChapter}:${curr.endVerse} ✂ ${next.startChapter}:${next.startVerse}`;
+    return {
+      isContiguous,
+      seamKey,
+      isLinked,
+      transitionLabel,
+      unlinkedTransitionLabel,
+    };
+  }
+
+  onToggleChunkSeam(
+    curr: OutlineChunkEntry,
+    next: OutlineChunkEntry,
+    event?: Event
+  ): void {
+    event?.stopPropagation();
+    this.storageService.toggleSeamBoundary(
+      curr.bookDisplay,
+      curr.endChapter,
+      curr.endVerse,
+      next.startChapter,
+      next.startVerse
+    );
+  }
+
+  getGroupContiguousBoundaries(
+    group: OutlinePassageGroup
+  ): Array<{
+    bookDisplay: string;
+    leftEndChapter: number;
+    leftEndVerse: number;
+    rightStartChapter: number;
+    rightStartVerse: number;
+    isLinked: boolean;
+  }> {
+    const boundaries: Array<{
+      bookDisplay: string;
+      leftEndChapter: number;
+      leftEndVerse: number;
+      rightStartChapter: number;
+      rightStartVerse: number;
+      isLinked: boolean;
+    }> = [];
+    for (let i = 0; i < group.chunks.length - 1; i++) {
+      const curr = group.chunks[i];
+      const next = group.chunks[i + 1];
+      if (!this.isChunkPairContiguous(curr, next)) {
+        continue;
+      }
+      boundaries.push({
+        bookDisplay: curr.bookDisplay,
+        leftEndChapter: curr.endChapter,
+        leftEndVerse: curr.endVerse,
+        rightStartChapter: next.startChapter,
+        rightStartVerse: next.startVerse,
+        isLinked: this.storageService.isSeamBoundaryLinked(
+          curr.bookDisplay,
+          curr.endChapter,
+          curr.endVerse,
+          next.startChapter,
+          next.startVerse
+        ),
+      });
+    }
+    return boundaries;
+  }
+
+  getGroupLinkedSeamCount(group: OutlinePassageGroup): number {
+    return this.getGroupContiguousBoundaries(group).filter((b) => b.isLinked).length;
+  }
+
+  hasAnyLinkedSeamInGroup(group: OutlinePassageGroup): boolean {
+    return this.getGroupContiguousBoundaries(group).some((b) => b.isLinked);
+  }
+
+  onBulkToggleGroupSeams(
+    group: OutlinePassageGroup,
+    linkAll: boolean,
+    event?: Event
+  ): void {
+    event?.stopPropagation();
+    const boundaries = this.getGroupContiguousBoundaries(group);
+    if (boundaries.length === 0) {
+      return;
+    }
+    this.storageService.setSeamBoundariesLinked(boundaries, linkAll);
+  }
+
   hasChunkPairGap(prev: OutlineChunkEntry, next: OutlineChunkEntry): boolean {
-    if (prev.bookDisplay.toLowerCase() !== next.bookDisplay.toLowerCase()) {
+    if (normalizeBookKey(prev.bookDisplay) !== normalizeBookKey(next.bookDisplay)) {
       return false;
     }
     if (this.isChunkPairContiguous(prev, next)) {
@@ -2799,9 +3234,9 @@ export class DeckDashboardComponent implements OnChanges {
       coords: this.parsePassageCoordinates(item.passage),
     }));
 
-    const firstBookKey = withCoords[0].coords.bookDisplay.toLowerCase();
+    const firstBookKey = normalizeBookKey(withCoords[0].coords.bookDisplay);
     for (const entry of withCoords) {
-      if (entry.coords.bookDisplay.toLowerCase() !== firstBookKey) {
+      if (normalizeBookKey(entry.coords.bookDisplay) !== firstBookKey) {
         return {
           canCombine: false,
           reason: `Cannot combine passages from different books (${withCoords[0].coords.bookDisplay} and ${entry.coords.bookDisplay})`,
@@ -3189,11 +3624,11 @@ export class DeckDashboardComponent implements OnChanges {
     if (allVerses.length === 0) {
       return [];
     }
-    const step =
-      item.card.state === CardState.CARD_STATE_REVIEW
-        ? allVerses.length
-        : Math.max(1, Math.min(item.card.learningStep || 1, allVerses.length));
-    return allVerses.slice(0, step);
+    if (this.isPartiallyMemorized(item)) {
+      const step = Math.max(1, Math.min(item.card.learningStep || 1, allVerses.length));
+      return allVerses.slice(0, step);
+    }
+    return allVerses;
   }
 
   getRecitationLabel(item: DeckItem): string {
@@ -3205,6 +3640,29 @@ export class DeckDashboardComponent implements OnChanges {
       return pbWithHelper.estimateRecitationTime(verses).label;
     }
     return estimateRecitationTime(verses).label;
+  }
+
+  getDaysUntilReviewBadge(item: DeckItem): string {
+    const dueMs = new Date(item.card.dueAt).getTime();
+    const nowMs = Date.now();
+    if (item.isDue || Number.isNaN(dueMs) || dueMs <= nowMs) {
+      return 'due';
+    }
+    const diffHours = (dueMs - nowMs) / (1000 * 60 * 60);
+    if (diffHours < 24) {
+      return '<1d';
+    }
+    const diffDays = Math.ceil((dueMs - nowMs) / (1000 * 60 * 60 * 24));
+    if (diffDays <= 13) {
+      return `${diffDays}d`;
+    }
+    if (diffDays < 60) {
+      return `${Math.round(diffDays / 7)}w`;
+    }
+    if (diffDays < 365) {
+      return `${Math.round(diffDays / 30)}m`;
+    }
+    return `${Math.max(1, Math.round(diffDays / 365))}y`;
   }
 
   getCardLevelNumber(item: DeckItem): number {
@@ -3222,14 +3680,20 @@ export class DeckDashboardComponent implements OnChanges {
   }
 
   getLevelSquareClass(item: DeckItem): string {
-    const lvl = this.getCardLevelNumber(item);
-    if (lvl <= 1) {
+    if (item.isDue) {
       return 'badge-level-1';
     }
-    if (lvl === 2) {
+    const dueMs = new Date(item.card.dueAt).getTime();
+    const diffDays = Number.isNaN(dueMs)
+      ? Math.max(0, item.card.intervalDays || 0)
+      : Math.max(0, Math.ceil((dueMs - Date.now()) / (1000 * 60 * 60 * 24)));
+    if (diffDays < 3) {
+      return 'badge-level-1';
+    }
+    if (diffDays <= 6) {
       return 'badge-level-2';
     }
-    if (lvl === 3) {
+    if (diffDays <= 20) {
       return 'badge-level-3';
     }
     return 'badge-level-high';
@@ -3280,7 +3744,7 @@ export class DeckDashboardComponent implements OnChanges {
       }
       return `v. 1–${step}`;
     }
-    return 'ESV';
+    return `${item.passage.verses.length}v`;
   }
 
   getRelativeDueLabel(item: DeckItem): string {
@@ -3384,10 +3848,16 @@ export class DeckDashboardComponent implements OnChanges {
       /^((?:[1-3]\s+)?[A-Za-z]+(?:\s+of\s+[A-Za-z]+|\s+[A-Za-z]+)?)\s+(\d+)(?::(\d+))?/i
     );
     const bookDisplay = match ? match[1].trim() : 'Passage';
-    const bookKey = bookDisplay.toLowerCase().replace(/\s+/g, ' ');
+    const bookKey = normalizeBookKey(bookDisplay);
     const bookOrder = BIBLE_BOOK_ORDER[bookKey] ?? 999;
-    const refChapter = match ? parseInt(match[2], 10) || 1 : 1;
-    const refVerse = match && match[3] ? parseInt(match[3], 10) || 1 : 1;
+    const firstNumber = match ? parseInt(match[2], 10) || 1 : 1;
+    const isSingleChapterNoColon = SINGLE_CHAPTER_BOOKS.has(bookKey) && !ref.includes(':');
+    const refChapter = isSingleChapterNoColon ? 1 : firstNumber;
+    const refVerse = isSingleChapterNoColon
+      ? firstNumber
+      : match && match[3]
+        ? parseInt(match[3], 10) || 1
+        : 1;
 
     const verses = passage.verses ?? [];
     const first = verses[0];

@@ -89,4 +89,6 @@ message UserDataBundle {
   repeated Passage passages = 3;
   repeated Flashcard flashcards = 4;
   repeated ReviewLog review_logs = 5;
+  repeated string suppressed_seam_keys = 6;
+  repeated string enabled_seam_keys = 7;
 }

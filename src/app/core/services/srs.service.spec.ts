@@ -359,7 +359,105 @@ function runSrsServiceTests(): void {
   assertEqual(undone?.passage.verses.length, 5, 'undoLastSplit restores all 5 verses');
   assertEqual(storage.lastSplitUndoState(), null, 'undoLastSplit clears lastSplitUndoState');
 
-  console.log('✓ srs.service.spec.ts: All SM-2 scheduling, interval, deck management, incremental chunking, contiguity, multi-split undo, and contiguous stitched/seam card assertions passed.');
+  // 12. Test setKnownVerseCount (partial & full) + single-chapter Psalm & auto-seam unlink/link
+  storage.clearAllData();
+  const partialTarget = storage.addPassage(
+    'Romans 8:35-39',
+    [
+      { chapterNumber: 8, verseNumber: 35, text: 'Who shall separate us from the love of Christ?' },
+      { chapterNumber: 8, verseNumber: 36, text: 'As it is written, For your sake we are being killed all the day long;' },
+      { chapterNumber: 8, verseNumber: 37, text: 'No, in all these things we are more than conquerors through him who loved us.' },
+      { chapterNumber: 8, verseNumber: 38, text: 'For I am sure that neither death nor life, nor angels nor rulers,' },
+      { chapterNumber: 8, verseNumber: 39, text: 'nor height nor depth, nor anything else in all creation, will be able to separate us.' },
+    ],
+    'More Than Conquerors'
+  );
+  const partialKnown = storage.setKnownVerseCount(partialTarget.card.id, 3);
+  assertTrue(Boolean(partialKnown), 'setKnownVerseCount(3) succeeds');
+  assertEqual(partialKnown?.card.state, CardState.CARD_STATE_LEARNING, 'Partial known places card in LEARNING');
+  assertEqual(partialKnown?.card.learningStep, 3, 'Partial known sets learningStep=3');
+
+  const fullKnown = storage.setKnownVerseCount(partialTarget.card.id, 5);
+  assertEqual(fullKnown?.card.state, CardState.CARD_STATE_REVIEW, 'Full known places card in REVIEW');
+  assertEqual(fullKnown?.card.learningStep, 5, 'Full known sets learningStep=5');
+  assertTrue((fullKnown?.card.repetitions ?? 0) >= 1, 'Full known increments repetitions >= 1');
+
+  // Seam suppression & cross-chapter Psalms default unlinked
+  storage.clearAllData();
+  const romPartA = storage.addPassage('Romans 8:35-36', [
+    { chapterNumber: 8, verseNumber: 35, text: 'Who shall separate us?' },
+    { chapterNumber: 8, verseNumber: 36, text: 'For your sake we are killed.' },
+  ]);
+  const romPartB = storage.addPassage('Romans 8:37-39', [
+    { chapterNumber: 8, verseNumber: 37, text: 'More than conquerors.' },
+    { chapterNumber: 8, verseNumber: 38, text: 'For I am sure.' },
+    { chapterNumber: 8, verseNumber: 39, text: 'Nor height nor depth.' },
+  ]);
+  storage.markEntirePassageKnown(romPartA.card.id);
+  storage.markEntirePassageKnown(romPartB.card.id);
+  assertEqual(
+    storage.isSeamBoundaryLinked('Romans', 8, 36, 8, 37),
+    true,
+    'Same-chapter Romans seam defaults to linked'
+  );
+  assertEqual(
+    storage.deckItems().some((d) => Boolean(d.card.isStitchedPassageCard) && d.passage.reference.includes('Romans 8:35-39')),
+    true,
+    'Auto-stitched card is generated when linked'
+  );
+  storage.toggleSeamBoundary('Romans', 8, 36, 8, 37);
+  assertEqual(
+    storage.isSeamBoundaryLinked('Romans', 8, 36, 8, 37),
+    false,
+    'toggleSeamBoundary unlinks Romans seam'
+  );
+  assertEqual(
+    storage.deckItems().some((d) => Boolean(d.card.isStitchedPassageCard)),
+    false,
+    'Unlinked stitched card is removed'
+  );
+
+  // Cross-chapter Psalms default unlinked, opt-in via toggleSeamBoundary
+  const ps23End = storage.addPassage('Psalm 23:5-6', [
+    { chapterNumber: 23, verseNumber: 5, text: 'You prepare a table before me.' },
+    { chapterNumber: 23, verseNumber: 6, text: 'Surely goodness and mercy shall follow me.' },
+  ]);
+  const ps24Start = storage.addPassage('Psalm 24:1-2', [
+    { chapterNumber: 24, verseNumber: 1, text: 'The earth is the Lords.' },
+    { chapterNumber: 24, verseNumber: 2, text: 'For he has founded it upon the seas.' },
+  ]);
+  storage.markEntirePassageKnown(ps23End.card.id);
+  storage.markEntirePassageKnown(ps24Start.card.id);
+  assertEqual(
+    storage.isSeamBoundaryLinked('Psalms', 23, 6, 24, 1),
+    false,
+    'Cross-chapter Psalms boundary defaults to unlinked'
+  );
+  assertEqual(
+    storage.deckItems().some((d) => Boolean(d.card.isStitchedPassageCard)),
+    false,
+    'No stitched card created by default between Psalm 23 and Psalm 24'
+  );
+  storage.toggleSeamBoundary('Psalms', 23, 6, 24, 1);
+  assertEqual(
+    storage.isSeamBoundaryLinked('Psalms', 23, 6, 24, 1),
+    true,
+    'Opting in links Psalm 23->24 seam'
+  );
+  assertEqual(
+    storage.deckItems().some((d) => Boolean(d.card.isStitchedPassageCard) && d.passage.reference.includes('Psalm 23:5-24:2')),
+    true,
+    'Linked cross-chapter Psalm stitched card is created'
+  );
+
+  // ProtoJSON round-trip preserves suppressed & enabled seam keys
+  const protoJson = storage.exportProtoJson();
+  storage.clearAllData();
+  storage.importProtoJson(protoJson);
+  assertEqual(storage.suppressedSeamKeys().length, 1, 'ProtoJSON preserves suppressedSeamKeys');
+  assertEqual(storage.enabledSeamKeys().length, 1, 'ProtoJSON preserves enabledSeamKeys');
+
+  console.log('✓ srs.service.spec.ts: All SM-2 scheduling, interval, deck management, incremental chunking, contiguity, multi-split undo, setKnownVerseCount, and seam unlink/link assertions passed.');
 }
 
 runSrsServiceTests();
